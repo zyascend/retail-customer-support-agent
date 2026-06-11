@@ -1,0 +1,899 @@
+from __future__ import annotations
+
+import re
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Iterable, Optional
+
+from app.agent.confirmation import ConfirmationResolver
+from app.config import AppConfig
+from app.agent.graph import PHASE1_NODES, build_linear_graph
+from app.agent.models import (
+    ConversationState,
+    Message,
+    PendingAction,
+    PolicyDecision,
+)
+from app.agent.prompts import (
+    ACTION_PLANNER_SYSTEM,
+    INTENT_SLOT_SYSTEM,
+    POLICY_SYSTEM,
+    RESPONSE_SYSTEM,
+    prompt_metadata,
+    user_json_prompt,
+)
+from app.agent.providers import DisabledLLMProvider, LLMProvider, build_default_provider
+from app.tools.gateway import ToolGateway
+from app.tools.registry import ToolRegistry
+from app.tools.retail_adapter import RetailAdapter, get_order_from_db
+from app.ops.tracing import TraceWriter, final_state_summary
+
+
+EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
+ORDER_RE = re.compile(r"#W\d+")
+ITEM_RE = re.compile(r"\b\d{8,}\b")
+PAYMENT_RE = re.compile(r"\b(?:gift_card|credit_card|paypal)_\d+\b")
+SUPPORTED_INTENTS = {
+    "lookup",
+    "cancel_order",
+    "modify_order_address",
+    "return_items",
+    "exchange_items",
+    "transfer",
+    "unknown",
+}
+SUPPORTED_PENDING_ACTIONS = {
+    "cancel_pending_order",
+    "modify_pending_order_address",
+    "return_delivered_order_items",
+    "exchange_delivered_order_items",
+}
+
+
+@dataclass
+class AgentRunResult:
+    run_id: str
+    state: ConversationState
+    trace_artifact_path: Path
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "termination_reason": self.state.termination_reason,
+            "final_state": final_state_summary(self.state),
+            "trace_artifact_path": str(self.trace_artifact_path),
+        }
+
+
+class AgentRuntime:
+    def __init__(
+        self,
+        config: AppConfig,
+        provider: Optional[LLMProvider] = None,
+        require_llm: bool = False,
+    ) -> None:
+        self.config = config
+        self.retail_runtime = RetailAdapter(config).create_runtime()
+        self.registry = ToolRegistry(self.retail_runtime.tools)
+        self.gateway = ToolGateway(registry=self.registry, runtime=self.retail_runtime)
+        self.confirmation_resolver = ConfirmationResolver()
+        if isinstance(provider, DisabledLLMProvider):
+            self.provider = None
+        else:
+            self.provider = provider or build_default_provider(
+                api_key=config.deepseek_api_key,
+                base_url=config.deepseek_base_url,
+                model=config.default_agent_model,
+                timeout=config.agent_llm_timeout_seconds,
+                max_retries=config.agent_llm_max_retries,
+                require_llm=require_llm,
+            )
+        self.graph = build_linear_graph(self._graph_node)
+
+    def run_script(
+        self,
+        *,
+        messages: Iterable[Dict[str, str]],
+        session_id: Optional[str] = None,
+        task_id: Optional[str] = None,
+        max_turns: int = 20,
+    ) -> AgentRunResult:
+        run_id = session_id or f"agent-{uuid.uuid4().hex[:12]}"
+        state = ConversationState(session_id=run_id, task_id=task_id)
+        initial_db_hash = self.retail_runtime.db_hash()
+        for index, message in enumerate(messages):
+            if index >= max_turns:
+                state.termination_reason = "max_turns"
+                break
+            if message.get("role") != "user":
+                continue
+            self.handle_user_message(state, message.get("content", ""))
+        if not state.termination_reason:
+            state.termination_reason = "script_completed"
+        trace_path = TraceWriter(self.config.run_artifact_dir).write(
+            run_id=run_id,
+            state=state,
+            metadata={
+                "runtime_source": self.retail_runtime.source,
+                "model": self.config.default_agent_model,
+                "llm_enabled": self.provider is not None,
+                "llm_timeout_seconds": self.config.agent_llm_timeout_seconds,
+                "llm_max_retries": self.config.agent_llm_max_retries,
+                "initial_db_hash": initial_db_hash,
+                "final_db_hash": self.retail_runtime.db_hash(),
+                "tau2_bench_root": str(self.config.tau2_bench_root),
+                "tau3_retail_root": str(self.config.tau3_retail_root),
+                "retail_db_path": str(self.config.retail_db_path),
+                "prompts": prompt_metadata(),
+            },
+        )
+        return AgentRunResult(
+            run_id=run_id,
+            state=state,
+            trace_artifact_path=trace_path,
+        )
+
+    def handle_user_message(self, state: ConversationState, content: str) -> str:
+        state.messages.append(Message(role="user", content=content))
+        if self.graph is not None:
+            self.graph.invoke({"state": state, "content": content})
+            if state.messages and state.messages[-1].role == "assistant":
+                return state.messages[-1].content
+            return ""
+        for node in PHASE1_NODES:
+            getattr(self, f"_{node}")(state, content)
+        return self._last_assistant_message(state)
+
+    def _graph_node(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        node = payload["current_node"]
+        getattr(self, f"_{node}")(payload["state"], payload["content"])
+        return payload
+
+    def _receive_message(self, state: ConversationState, content: str) -> None:
+        state.add_step("receive_message", content=content)
+
+    def _conversation_gate(self, state: ConversationState, content: str) -> None:
+        if state.pending_action:
+            resolution = self.confirmation_resolver.resolve(content)
+            state.confirmation_status = {
+                "confirm": "confirmed",
+                "deny": "denied",
+                "changed": "changed",
+                "unknown": "unknown",
+            }[resolution]
+            state.add_step("conversation_gate", confirmation=resolution)
+            if resolution == "confirm":
+                action = state.pending_action
+                record = self.gateway.execute(
+                    state=state,
+                    tool_name=action.action_name,
+                    arguments=action.arguments,
+                    confirmed=True,
+                )
+                state.pending_action = None
+                if record.status == "success":
+                    self._assistant(
+                        state,
+                        "Done. I have completed the requested update.",
+                    )
+                else:
+                    self._assistant(
+                        state,
+                        f"I could not complete that update: {record.error}.",
+                    )
+            elif resolution == "deny":
+                state.pending_action = None
+                self._assistant(state, "No changes were made.")
+            elif resolution == "changed":
+                state.pending_action = None
+                state.slots = {}
+                self._assistant(
+                    state,
+                    "I discarded the previous request. Please provide updated details.",
+                )
+            else:
+                self._assistant(
+                    state,
+                    "Please confirm yes or no: "
+                    f"{state.pending_action.user_facing_summary}",
+                )
+            return
+        state.add_step(
+            "conversation_gate",
+            authenticated=bool(state.authenticated_user_id),
+        )
+
+    def _identity_resolver(self, state: ConversationState, content: str) -> None:
+        if state.authenticated_user_id or self._has_assistant_response(state):
+            return
+        email_match = EMAIL_RE.search(content)
+        if not email_match:
+            self._assistant(
+                state,
+                "Please provide the email address on your account so I can verify you.",
+            )
+            state.add_step("identity_resolver", status="need_user_info")
+            return
+        email = email_match.group(0)
+        record = self.gateway.execute(
+            state=state,
+            tool_name="find_user_id_by_email",
+            arguments={"email": email},
+        )
+        if record.status != "success":
+            self._assistant(state, "I could not verify that email address.")
+            return
+        user_id = str(record.observation)
+        state.authenticated_user_id = user_id
+        state.auth_method = "email"
+        state.active_user_identity = {"email": email, "user_id": user_id}
+        user_record = self.gateway.execute(
+            state=state,
+            tool_name="get_user_details",
+            arguments={"user_id": user_id},
+        )
+        if user_record.status == "success":
+            state.loaded_context.users[user_id] = user_record.observation
+        state.add_step("identity_resolver", status="authenticated", user_id=user_id)
+
+    def _intent_and_slot_extractor(
+        self, state: ConversationState, content: str
+    ) -> None:
+        if self._has_assistant_response(state):
+            return
+        lowered = content.lower()
+        state.current_intent = self._infer_intent(lowered)
+        llm_payload = self._llm_json(
+            state,
+            "intent_and_slot_extractor",
+            INTENT_SLOT_SYSTEM,
+            {
+                "user_message": content,
+                "known_slots": state.slots,
+                "authenticated_user_id": state.authenticated_user_id,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "intent": {"type": "string"},
+                    "slots": {"type": "object"},
+                },
+            },
+        )
+        if llm_payload:
+            self._apply_llm_intent_slots(state, llm_payload)
+        order_match = ORDER_RE.search(content)
+        if order_match:
+            state.slots["order_id"] = order_match.group(0)
+        payment_match = PAYMENT_RE.search(content)
+        if payment_match:
+            state.slots["payment_method_id"] = payment_match.group(0)
+        item_ids = [
+            item
+            for item in ITEM_RE.findall(content)
+            if not item.startswith("000") and len(item) >= 8
+        ]
+        if item_ids:
+            state.slots["item_ids"] = item_ids
+        if "ordered by mistake" in lowered:
+            state.slots["reason"] = "ordered by mistake"
+        elif "no longer needed" in lowered or "don't need" in lowered:
+            state.slots["reason"] = "no longer needed"
+        address = self._parse_address(content)
+        if address:
+            state.slots["address"] = address
+        new_item_marker = re.search(
+            r"(?:new item|exchange for|instead)\s+(\d{8,})",
+            lowered,
+        )
+        if new_item_marker:
+            new_item_id = new_item_marker.group(1)
+            state.slots["new_item_ids"] = [new_item_id]
+            if "item_ids" in state.slots:
+                state.slots["item_ids"] = [
+                    item_id
+                    for item_id in state.slots["item_ids"]
+                    if item_id != new_item_id
+                ]
+        state.add_step(
+            "intent_and_slot_extractor",
+            intent=state.current_intent,
+            slots=state.slots,
+        )
+
+    def _context_loader(self, state: ConversationState, content: str) -> None:
+        if self._has_assistant_response(state):
+            return
+        order_id = state.slots.get("order_id")
+        if order_id and order_id not in state.loaded_context.orders:
+            record = self.gateway.execute(
+                state=state,
+                tool_name="get_order_details",
+                arguments={"order_id": order_id},
+            )
+            if record.status == "success":
+                order = record.observation
+                state.loaded_context.orders[order_id] = order
+                if order.get("user_id") != state.authenticated_user_id:
+                    self._assistant(
+                        state,
+                        "I cannot access or modify orders for another account.",
+                    )
+            else:
+                self._assistant(state, f"I could not find order {order_id}.")
+        state.add_step(
+            "context_loader",
+            loaded_orders=list(state.loaded_context.orders),
+        )
+
+    def _policy_reasoner(self, state: ConversationState, content: str) -> None:
+        if self._has_assistant_response(state):
+            return
+        write_intents = {
+            "cancel_order",
+            "modify_order_address",
+            "return_items",
+            "exchange_items",
+        }
+        if state.current_intent == "transfer":
+            decision = "transfer"
+        elif state.current_intent in write_intents:
+            decision = "allow"
+        elif state.current_intent == "lookup":
+            decision = "allow"
+        else:
+            decision = "ask_clarification"
+        llm_decision = self._llm_policy_decision(state, content, decision)
+        if (
+            state.current_intent in write_intents
+            and llm_decision.get("decision") == "deny"
+        ):
+            llm_decision["decision"] = "allow"
+            llm_decision["internal_reasoning_summary"] = (
+                "Supported write intent deferred to deterministic write guard."
+            )
+        state.policy_decision = PolicyDecision(
+            decision=llm_decision.get("decision", decision),
+            intent=llm_decision.get("intent", state.current_intent),
+            missing_slots=llm_decision.get("missing_slots", []),
+            user_confirmation_required=llm_decision.get(
+                "user_confirmation_required",
+                state.current_intent in write_intents,
+            ),
+            explanation_for_user=llm_decision.get("explanation_for_user", ""),
+            internal_reasoning_summary=llm_decision.get(
+                "internal_reasoning_summary", ""
+            ),
+        )
+        state.add_step(
+            "policy_reasoner",
+            decision=state.policy_decision.decision,
+            llm_used=bool(llm_decision),
+        )
+
+    def _action_planner(self, state: ConversationState, content: str) -> None:
+        if self._has_assistant_response(state):
+            return
+        if state.policy_decision and state.policy_decision.decision == "deny":
+            self._assistant(
+                state,
+                state.policy_decision.explanation_for_user
+                or "I cannot complete that request under the retail policy.",
+            )
+            return
+        if state.policy_decision and state.policy_decision.decision == "transfer":
+            self._transfer_to_human(state, content)
+            return
+        if self._apply_llm_action_plan(state, content):
+            return
+        intent = state.current_intent
+        if intent == "transfer":
+            self._transfer_to_human(state, content)
+            return
+        if intent == "lookup":
+            self._respond_with_order_lookup(state)
+            return
+        if intent == "cancel_order":
+            self._plan_cancel(state)
+            return
+        if intent == "modify_order_address":
+            self._plan_address_change(state)
+            return
+        if intent == "return_items":
+            self._plan_return(state)
+            return
+        if intent == "exchange_items":
+            self._plan_exchange(state)
+            return
+        self._assistant(
+            state,
+            "Please tell me which order or retail support action you need help with.",
+        )
+
+    def _transfer_to_human(self, state: ConversationState, content: str) -> None:
+        self.gateway.execute(
+            state=state,
+            tool_name="transfer_to_human_agents",
+            arguments={"summary": content[:500]},
+        )
+        self._assistant(
+            state,
+            "YOU ARE BEING TRANSFERRED TO A HUMAN AGENT. PLEASE HOLD ON.",
+            allow_llm=False,
+        )
+
+    def _write_action_guard(self, state: ConversationState, content: str) -> None:
+        state.add_step(
+            "write_action_guard",
+            pending_action=(
+                state.pending_action.model_dump() if state.pending_action else None
+            ),
+        )
+
+    def _tool_executor(self, state: ConversationState, content: str) -> None:
+        state.add_step(
+            "tool_executor",
+            deferred_pending_write=bool(state.pending_action),
+        )
+
+    def _observation_reducer(self, state: ConversationState, content: str) -> None:
+        state.add_step("observation_reducer", tool_result_count=len(state.tool_results))
+
+    def _response_generator(self, state: ConversationState, content: str) -> None:
+        if not self._has_assistant_response(state):
+            self._assistant(state, "I need a bit more information to help with that.")
+        state.add_step("response_generator", last_message=state.messages[-1].content)
+
+    def _run_logger(self, state: ConversationState, content: str) -> None:
+        state.add_step("run_logger", message_count=len(state.messages))
+
+    def _plan_cancel(self, state: ConversationState) -> None:
+        order_id = state.slots.get("order_id")
+        reason = state.slots.get("reason")
+        if not order_id:
+            self._assistant(state, "Which order would you like to cancel?")
+            return
+        if not reason:
+            self._assistant(
+                state,
+                "Please provide a cancellation reason: no longer needed "
+                "or ordered by mistake.",
+            )
+            return
+        self._set_pending(
+            state,
+            "cancel_pending_order",
+            {"order_id": order_id, "reason": reason},
+            f"Cancel order {order_id} because {reason}. Please confirm yes or no.",
+        )
+
+    def _plan_address_change(self, state: ConversationState) -> None:
+        order_id = state.slots.get("order_id")
+        address = state.slots.get("address")
+        if not order_id:
+            self._assistant(
+                state,
+                "Which order should have its shipping address changed?",
+            )
+            return
+        if not address:
+            self._assistant(
+                state,
+                "Please provide the new address as: address to line1, line2, "
+                "city, state, country, zip.",
+            )
+            return
+        args = {"order_id": order_id, **address}
+        self._set_pending(
+            state,
+            "modify_pending_order_address",
+            args,
+            f"Modify the shipping address for order {order_id}. "
+            "Please confirm yes or no.",
+        )
+
+    def _plan_return(self, state: ConversationState) -> None:
+        required = ["order_id", "item_ids", "payment_method_id"]
+        missing = [key for key in required if not state.slots.get(key)]
+        if missing:
+            self._assistant(
+                state,
+                "Please provide return details: order id, item id, "
+                "and refund payment method.",
+            )
+            return
+        self._set_pending(
+            state,
+            "return_delivered_order_items",
+            {
+                "order_id": state.slots["order_id"],
+                "item_ids": state.slots["item_ids"],
+                "payment_method_id": state.slots["payment_method_id"],
+            },
+            f"Request a return for order {state.slots['order_id']}. "
+            "Please confirm yes or no.",
+        )
+
+    def _plan_exchange(self, state: ConversationState) -> None:
+        required = ["order_id", "item_ids", "new_item_ids", "payment_method_id"]
+        missing = [key for key in required if not state.slots.get(key)]
+        if missing:
+            self._assistant(
+                state,
+                "Please provide exchange details: order id, old item id, "
+                "new item id, and payment method.",
+            )
+            return
+        self._set_pending(
+            state,
+            "exchange_delivered_order_items",
+            {
+                "order_id": state.slots["order_id"],
+                "item_ids": state.slots["item_ids"],
+                "new_item_ids": state.slots["new_item_ids"],
+                "payment_method_id": state.slots["payment_method_id"],
+            },
+            f"Request an exchange for order {state.slots['order_id']}. "
+            "Please confirm yes or no.",
+        )
+
+    def _respond_with_order_lookup(self, state: ConversationState) -> None:
+        order_id = state.slots.get("order_id")
+        if not order_id:
+            self._assistant(state, "Which order would you like me to look up?")
+            return
+        order = state.loaded_context.orders.get(order_id) or get_order_from_db(
+            self.retail_runtime.db, order_id
+        )
+        if not order:
+            self._assistant(state, f"I could not find order {order_id}.")
+            return
+        self._assistant(
+            state,
+            f"Order {order_id} is currently {order.get('status')}.",
+        )
+
+    def _set_pending(
+        self,
+        state: ConversationState,
+        action_name: str,
+        arguments: Dict[str, Any],
+        prompt: str,
+    ) -> None:
+        state.pending_action = PendingAction(
+            action_name=action_name,
+            arguments=arguments,
+            user_facing_summary=prompt.replace(" Please confirm yes or no.", ""),
+        )
+        state.confirmation_status = "required"
+        self._assistant(state, prompt)
+
+    def _llm_json(
+        self,
+        state: ConversationState,
+        node_name: str,
+        system_prompt: str,
+        payload: Dict[str, Any],
+        schema: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if self.provider is None:
+            return {}
+        try:
+            result = self.provider.json(
+                [
+                    {"role": "system", "content": system_prompt},
+                    {
+                        "role": "user",
+                        "content": user_json_prompt(node_name, payload),
+                    },
+                ],
+                schema,
+            )
+        except Exception as exc:
+            state.add_step(
+                f"{node_name}_llm",
+                status="error",
+                error=str(exc),
+            )
+            return {}
+        if not isinstance(result, dict):
+            state.add_step(
+                f"{node_name}_llm",
+                status="error",
+                error="provider returned non-object JSON",
+            )
+            return {}
+        state.add_step(f"{node_name}_llm", status="ok", result=result)
+        return result
+
+    def _llm_chat(
+        self, state: ConversationState, node_name: str, draft: str
+    ) -> str:
+        if self.provider is None:
+            return ""
+        try:
+            response = self.provider.chat(
+                [
+                    {"role": "system", "content": RESPONSE_SYSTEM},
+                    {"role": "user", "content": f"Draft response:\n{draft}"},
+                ]
+            )
+        except Exception as exc:
+            state.add_step(
+                f"{node_name}_llm",
+                status="error",
+                error=str(exc),
+            )
+            return ""
+        response = response.strip()
+        if response:
+            state.add_step(f"{node_name}_llm", status="ok")
+        return response
+
+    def _apply_llm_intent_slots(
+        self, state: ConversationState, payload: Dict[str, Any]
+    ) -> None:
+        intent = str(payload.get("intent") or "").strip()
+        if intent in SUPPORTED_INTENTS and (
+            intent != "unknown" or state.current_intent == "unknown"
+        ):
+            state.current_intent = intent
+        slots = payload.get("slots") or {}
+        if not isinstance(slots, dict):
+            return
+        for key in (
+            "order_id",
+            "payment_method_id",
+            "reason",
+        ):
+            value = self._clean_llm_scalar(slots.get(key))
+            if value:
+                state.slots[key] = value
+        for key in ("item_ids", "new_item_ids"):
+            values = self._clean_llm_list(slots.get(key))
+            if values:
+                state.slots[key] = values
+        address = slots.get("address")
+        if isinstance(address, dict):
+            cleaned_address = {
+                key: self._clean_llm_scalar(address.get(key)) or ""
+                for key in ("address1", "address2", "city", "state", "country", "zip")
+            }
+            if cleaned_address["address1"] and cleaned_address["zip"]:
+                state.slots["address"] = cleaned_address
+
+    def _llm_policy_decision(
+        self, state: ConversationState, content: str, fallback_decision: str
+    ) -> Dict[str, Any]:
+        payload = self._llm_json(
+            state,
+            "policy_reasoner",
+            POLICY_SYSTEM,
+            {
+                "user_message": content,
+                "policy_excerpt": self.retail_runtime.policy[:6000],
+                "current_intent": state.current_intent,
+                "slots": state.slots,
+                "loaded_context": state.loaded_context.model_dump(),
+                "authenticated_user_id": state.authenticated_user_id,
+                "fallback_decision": fallback_decision,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "decision": {"type": "string"},
+                    "intent": {"type": "string"},
+                    "missing_slots": {"type": "array"},
+                    "user_confirmation_required": {"type": "boolean"},
+                    "explanation_for_user": {"type": "string"},
+                    "internal_reasoning_summary": {"type": "string"},
+                },
+            },
+        )
+        decision = payload.get("decision")
+        if decision not in {"allow", "ask_clarification", "deny", "transfer"}:
+            return {}
+        if payload.get("intent") not in SUPPORTED_INTENTS:
+            payload["intent"] = state.current_intent
+        missing_slots = payload.get("missing_slots")
+        if not isinstance(missing_slots, list):
+            payload["missing_slots"] = []
+        return payload
+
+    def _apply_llm_action_plan(
+        self, state: ConversationState, content: str
+    ) -> bool:
+        plan = self._llm_json(
+            state,
+            "action_planner",
+            ACTION_PLANNER_SYSTEM,
+            {
+                "user_message": content,
+                "policy_decision": (
+                    state.policy_decision.model_dump()
+                    if state.policy_decision
+                    else None
+                ),
+                "current_intent": state.current_intent,
+                "slots": state.slots,
+                "loaded_context": state.loaded_context.model_dump(),
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "plan_type": {"type": "string"},
+                    "action_name": {"type": "string"},
+                    "arguments": {"type": "object"},
+                    "response": {"type": "string"},
+                },
+            },
+        )
+        if not plan:
+            return False
+        plan_type = plan.get("plan_type") or plan.get("type")
+        response = self._clean_llm_scalar(plan.get("response")) or ""
+        if plan_type == "lookup_order":
+            self._respond_with_order_lookup(state)
+            return True
+        if plan_type == "transfer":
+            self._transfer_to_human(state, content)
+            return True
+        if plan_type in {"ask_clarification", "respond"} and response:
+            self._assistant(state, response)
+            return True
+        if plan_type != "pending_write":
+            return False
+        action_name = self._clean_llm_scalar(plan.get("action_name")) or ""
+        arguments = plan.get("arguments") or {}
+        if action_name not in SUPPORTED_PENDING_ACTIONS:
+            return False
+        if not isinstance(arguments, dict):
+            return False
+        arguments = self._normalize_llm_action_arguments(action_name, arguments)
+        if not self._pending_action_has_required_args(action_name, arguments):
+            return False
+        prompt = response or self._pending_prompt(action_name, arguments)
+        if "confirm" not in prompt.lower():
+            prompt = prompt.rstrip(".") + ". Please confirm yes or no."
+        self._set_pending(state, action_name, arguments, prompt)
+        return True
+
+    def _pending_action_has_required_args(
+        self, action_name: str, arguments: Dict[str, Any]
+    ) -> bool:
+        required = {
+            "cancel_pending_order": ("order_id", "reason"),
+            "modify_pending_order_address": (
+                "order_id",
+                "address1",
+                "city",
+                "state",
+                "country",
+                "zip",
+            ),
+            "return_delivered_order_items": (
+                "order_id",
+                "item_ids",
+                "payment_method_id",
+            ),
+            "exchange_delivered_order_items": (
+                "order_id",
+                "item_ids",
+                "new_item_ids",
+                "payment_method_id",
+            ),
+        }[action_name]
+        return all(arguments.get(key) for key in required)
+
+    def _normalize_llm_action_arguments(
+        self, action_name: str, arguments: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        normalized = dict(arguments)
+        if action_name == "modify_pending_order_address":
+            address = normalized.pop("address", None)
+            if isinstance(address, dict):
+                for key in ("address1", "address2", "city", "state", "country", "zip"):
+                    if key not in normalized and address.get(key) is not None:
+                        normalized[key] = address.get(key)
+        for key in ("item_ids", "new_item_ids"):
+            value = normalized.get(key)
+            if isinstance(value, str):
+                normalized[key] = [value]
+        for key, value in list(normalized.items()):
+            if isinstance(value, str):
+                cleaned = self._clean_llm_scalar(value)
+                if cleaned is None:
+                    normalized.pop(key)
+                else:
+                    normalized[key] = cleaned
+        return normalized
+
+    def _pending_prompt(self, action_name: str, arguments: Dict[str, Any]) -> str:
+        order_id = arguments.get("order_id")
+        if action_name == "cancel_pending_order":
+            return (
+                f"Cancel order {order_id} because {arguments.get('reason')}. "
+                "Please confirm yes or no."
+            )
+        if action_name == "modify_pending_order_address":
+            return (
+                f"Modify the shipping address for order {order_id}. "
+                "Please confirm yes or no."
+            )
+        if action_name == "return_delivered_order_items":
+            return f"Request a return for order {order_id}. Please confirm yes or no."
+        return f"Request an exchange for order {order_id}. Please confirm yes or no."
+
+    def _infer_intent(self, lowered: str) -> str:
+        if "human" in lowered or "agent" in lowered or "representative" in lowered:
+            return "transfer"
+        if "cancel" in lowered:
+            return "cancel_order"
+        if "return" in lowered:
+            return "return_items"
+        if "exchange" in lowered:
+            return "exchange_items"
+        if "address" in lowered and ("change" in lowered or "modify" in lowered):
+            return "modify_order_address"
+        if "order" in lowered or ORDER_RE.search(lowered):
+            return "lookup"
+        return "unknown"
+
+    def _parse_address(self, content: str) -> Optional[Dict[str, str]]:
+        marker = re.search(r"address to\s+(.+)$", content, re.IGNORECASE)
+        if not marker:
+            return None
+        parts = [part.strip() for part in marker.group(1).split(",")]
+        if len(parts) == 5:
+            address1, city, state, country, zip_code = parts
+            address2 = ""
+        elif len(parts) >= 6:
+            address1, address2, city, state, country, zip_code = parts[:6]
+        else:
+            return None
+        return {
+            "address1": address1,
+            "address2": address2,
+            "city": city,
+            "state": state,
+            "country": country,
+            "zip": zip_code,
+        }
+
+    def _assistant(
+        self, state: ConversationState, content: str, allow_llm: bool = True
+    ) -> None:
+        final_content = content
+        if allow_llm:
+            final_content = (
+                self._llm_chat(state, "response_generator", content) or content
+            )
+        state.messages.append(Message(role="assistant", content=final_content))
+
+    def _has_assistant_response(self, state: ConversationState) -> bool:
+        return bool(state.messages and state.messages[-1].role == "assistant")
+
+    def _last_assistant_message(self, state: ConversationState) -> str:
+        for message in reversed(state.messages):
+            if message.role == "assistant":
+                return message.content
+        return ""
+
+    def _clean_llm_scalar(self, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text or text.lower() in {"null", "none", "n/a"}:
+            return None
+        return text
+
+    def _clean_llm_list(self, value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        cleaned = []
+        for item in value:
+            text = self._clean_llm_scalar(item)
+            if text:
+                cleaned.append(text)
+        return cleaned

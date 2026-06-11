@@ -1,0 +1,152 @@
+---
+title: Retail Customer Support Agent - Architecture
+---
+graph TB
+    subgraph CLI["CLI Entry Points"]
+        CHAT["phase1-chat<br/><i>app/cli/chat.py</i><br/>--script | --interactive"]
+        EVAL["phase2-eval<br/><i>app/cli/eval.py</i><br/>--subset curated_mvp"]
+        P0_CHECK["phase0-check<br/><i>app/phase0/cli.py</i>"]
+        P0_REPORT["phase0-report<br/><i>app/phase0/cli.py</i>"]
+        P0_SMOKE["phase0-smoke<br/><i>app/phase0/cli.py</i>"]
+    end
+
+    subgraph AGENT["Agent Core — app/agent/"]
+        RUNTIME["AgentRuntime<br/><i>runtime.py</i><br/>orchestrator"]
+        GRAPH["LangGraph StateGraph<br/><i>graph.py</i>"]
+        MODELS["State Models<br/><i>models.py</i><br/>ConversationState · Message<br/>PendingAction · PolicyDecision<br/>ToolCallRecord · AgentStep<br/>LoadedContext · ToolCall"]
+        PROVIDER["LLM Provider<br/><i>providers.py</i><br/>DeepSeekProvider<br/>DeterministicProvider<br/>DisabledLLMProvider"]
+        PROMPTS["Prompt Manager<br/><i>prompts.py</i><br/>intent_slot · policy<br/>action_planner · response"]
+        CONFIRM["ConfirmationResolver<br/><i>confirmation.py</i><br/>confirm / deny / changed / unknown"]
+        GUARD["WriteActionGuard<br/><i>guard.py</i><br/>auth · confirmation · ownership<br/>read-before-write · policy · resource-lock"]
+    end
+
+    subgraph PIPELINE["LangGraph Pipeline — 12 Nodes"]
+        direction LR
+        N1["receive_message"]
+        N2["conversation_gate"]
+        N3["identity_resolver"]
+        N4["intent_and_slot<br/>_extractor"]
+        N5["context_loader"]
+        N6["policy_reasoner"]
+        N7["action_planner"]
+        N8["write_action_guard"]
+        N9["tool_executor"]
+        N10["observation_reducer"]
+        N11["response_generator"]
+        N12["run_logger"]
+        N1 --> N2 --> N3 --> N4 --> N5 --> N6 --> N7 --> N8 --> N9 --> N10 --> N11 --> N12
+    end
+
+    subgraph TOOLS["Tool Layer — app/tools/"]
+        GATEWAY["ToolGateway<br/><i>gateway.py</i><br/>guard-gated execution"]
+        REGISTRY["ToolRegistry<br/><i>registry.py</i><br/>auto-discovery"]
+        ADAPTER["RetailAdapter<br/><i>retail_adapter.py</i><br/>tau2 / local fallback"]
+        LOCAL_TOOLS["LocalRetailTools<br/>read · write · generic"]
+    end
+
+    subgraph OPS["Ops Layer — app/ops/"]
+        TRACE["TraceWriter<br/><i>tracing.py</i>"]
+        SERIAL["Serialization<br/><i>serialization.py</i><br/>stable_hash · to_plain_data"]
+    end
+
+    subgraph EVAL_LAYER["Eval Layer — app/eval/"]
+        EVAL_RUNNER["CuratedEvalRunner<br/><i>runner.py</i>"]
+        CASES["EvalCase<br/><i>cases.py</i><br/>11 curated MVP cases"]
+        CLASSIFY["classify_failure<br/>failure label taxonomy"]
+    end
+
+    subgraph CONFIG["Configuration — app/config.py"]
+        APP_CFG["AppConfig<br/>.env + defaults<br/>paths · API keys · model"]
+    end
+
+    subgraph PROMPT_FILES["Prompt Files — prompts/"]
+        PF1["intent_slot_v001.md"]
+        PF2["policy_reasoner_v001.md"]
+        PF3["action_planner_v001.md"]
+        PF4["response_generator_v001.md"]
+    end
+
+    subgraph EXTERNAL["External Resources"]
+        TAU2["tau2-bench<br/>RetailDB · RetailTools<br/>retail benchmark runtime"]
+        TAU3["tau3-bench<br/>db.json · policy.md · tasks.json<br/>current retail dataset"]
+        DEEPSEEK["DeepSeek API<br/>OpenAI-compatible<br/>deepseek-v4-flash"]
+    end
+
+    subgraph ARTIFACTS["Artifacts Output"]
+        A1["artifacts/phase1/runs/<br/>trace JSON per run"]
+        A2["artifacts/phase2/eval_runs/<br/>eval summary JSON"]
+        A3["artifacts/phase2/traces/<br/>per-eval trace JSON"]
+    end
+
+    %% CLI → Runtime
+    CHAT -->|run_script / handle_user_message| RUNTIME
+    EVAL -->|run| EVAL_RUNNER
+    EVAL_RUNNER -->|create per case| RUNTIME
+
+    %% Runtime internals
+    RUNTIME -->|build| GRAPH
+    RUNTIME -->|uses| MODELS
+    RUNTIME -->|uses| PROVIDER
+    RUNTIME -->|loads| PROMPTS
+    RUNTIME -->|uses| CONFIRM
+
+    %% Graph → Pipeline
+    GRAPH -->|compile| PIPELINE
+
+    %% Runtime → Tools
+    RUNTIME -->|creates| GATEWAY
+    RUNTIME -->|creates| REGISTRY
+    RUNTIME -->|creates| ADAPTER
+    GATEWAY -->|lookup| REGISTRY
+    GATEWAY -->|creates + guard check| GUARD
+    REGISTRY -->|discover| ADAPTER
+    ADAPTER -->|tau2 path| TAU2
+    ADAPTER -->|local fallback| LOCAL_TOOLS
+
+    %% Runtime → Ops
+    RUNTIME -->|write trace| TRACE
+    TRACE -->|uses| SERIAL
+
+    %% Eval
+    EVAL_RUNNER -->|load| CASES
+    EVAL_RUNNER -->|classify| CLASSIFY
+    EVAL_RUNNER -->|write summary + traces| TRACE
+
+    %% Config
+    APP_CFG -->|injected into| RUNTIME
+    APP_CFG -->|injected into| ADAPTER
+
+    %% Prompts
+    PROMPTS -->|load| PROMPT_FILES
+    PROVIDER -->|API calls| DEEPSEEK
+
+    %% Adapter → External
+    ADAPTER -->|read retail data| TAU3
+
+    %% Artifacts
+    TRACE -->|output| A1
+    TRACE -->|output| A3
+    EVAL_RUNNER -->|output| A2
+
+    %% Styling
+    classDef cliStyle fill:#4A90D9,stroke:#2C5F8A,color:#fff
+    classDef agentStyle fill:#E8744F,stroke:#C45A32,color:#fff
+    classDef pipelineStyle fill:#F5A623,stroke:#D48B0C,color:#fff
+    classDef toolStyle fill:#7ED321,stroke:#5CA018,color:#fff
+    classDef opsStyle fill:#9B59B6,stroke:#7D3C98,color:#fff
+    classDef evalStyle fill:#1ABC9C,stroke:#148F77,color:#fff
+    classDef configStyle fill:#95A5A6,stroke:#7F8C8D,color:#fff
+    classDef externalStyle fill:#E74C3C,stroke:#C0392B,color:#fff
+    classDef artifactStyle fill:#3498DB,stroke:#2471A3,color:#fff
+    classDef promptFileStyle fill:#F39C12,stroke:#D68910,color:#fff
+
+    class CHAT,EVAL,P0_CHECK,P0_REPORT,P0_SMOKE cliStyle
+    class RUNTIME,GRAPH,MODELS,PROVIDER,PROMPTS,CONFIRM,GUARD agentStyle
+    class N1,N2,N3,N4,N5,N6,N7,N8,N9,N10,N11,N12 pipelineStyle
+    class GATEWAY,REGISTRY,ADAPTER,LOCAL_TOOLS toolStyle
+    class TRACE,SERIAL opsStyle
+    class EVAL_RUNNER,CASES,CLASSIFY evalStyle
+    class APP_CFG configStyle
+    class TAU2,TAU3,DEEPSEEK externalStyle
+    class A1,A2,A3 artifactStyle
+    class PF1,PF2,PF3,PF4 promptFileStyle

@@ -1,0 +1,15 @@
+{
+  "session_id": "chat-return-order-example",
+  "messages": [
+    {
+      "role": "user",
+      "content": "My email is ava.moore6020@example.com. I want to return item 6777246137 from order #W4817420 to gift_card_8168843."
+    },
+    {
+      "role": "user",
+      "content": "confirm"
+    }
+  ],
+  "max_turns": 8
+}
+

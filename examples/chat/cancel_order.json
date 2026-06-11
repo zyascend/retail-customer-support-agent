@@ -1,0 +1,15 @@
+{
+  "session_id": "chat-cancel-order-example",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hi, my email is sofia.rossi2645@example.com. Please cancel order #W5918442 because I no longer needed it."
+    },
+    {
+      "role": "user",
+      "content": "yes"
+    }
+  ],
+  "max_turns": 8
+}
+

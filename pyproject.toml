@@ -8,12 +8,19 @@ version = "0.1.0"
 description = "Transaction-oriented retail customer support agent baseline tooling."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "langgraph>=0.2.70",
+    "openai>=1.60.0",
+    "pydantic>=2.10.0",
+    "python-dotenv>=1.0.0",
+]
 
 [project.scripts]
 phase0-check = "app.phase0.cli:check_main"
 phase0-report = "app.phase0.cli:report_main"
 phase0-smoke = "app.phase0.cli:smoke_main"
+phase1-chat = "app.cli.chat:chat_main"
+phase2-eval = "app.cli.eval:eval_main"
 
 [project.optional-dependencies]
 dev = [
