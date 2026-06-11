@@ -17,8 +17,9 @@ build/
 .next/
 coverage/
 
+artifacts/
+
 *.log
 *.sqlite
 *.sqlite3
 *.db
-
