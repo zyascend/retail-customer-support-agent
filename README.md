@@ -155,3 +155,24 @@ uv run phase2-eval --compare \
   artifacts/phase2/eval_runs/<baseline>.json \
   artifacts/phase2/eval_runs/<candidate>.json
 ```
+
+## Phase 3：Trace Viewer + Eval Dashboard
+
+Phase 3 使用 Phase 2 的稳定 report artifact 生成本地静态 dashboard。它包含 eval 指标总览、case 过滤、失败样本列表，以及每个样本的 transcript、agent steps、tool calls、policy checks、write audit 和 final state 只读回放。
+
+```bash
+uv run phase3-dashboard artifacts/phase2/reports/<eval_run_id>.json
+```
+
+默认输出到：
+
+```text
+artifacts/phase3/dashboard/<eval_run_id>/index.html
+artifacts/phase3/dashboard/<eval_run_id>/dashboard-data.json
+```
+
+Dashboard 默认会对 trace 中常见邮箱、电话、地址、支付字段做脱敏。如需生成原始调试版：
+
+```bash
+uv run phase3-dashboard artifacts/phase2/reports/<eval_run_id>.json --no-redact
+```

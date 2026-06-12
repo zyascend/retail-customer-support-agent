@@ -21,6 +21,7 @@ phase0-report = "app.phase0.cli:report_main"
 phase0-smoke = "app.phase0.cli:smoke_main"
 phase1-chat = "app.cli.chat:chat_main"
 phase2-eval = "app.cli.eval:eval_main"
+phase3-dashboard = "app.dashboard.cli:dashboard_main"
 
 [project.optional-dependencies]
 dev = [
