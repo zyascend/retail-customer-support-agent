@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from app.config import resolve_config
+from app.workbench.errors import WorkbenchAPIError
 from app.workbench.session import WorkbenchSessionManager
 
 
@@ -78,6 +79,17 @@ class WorkbenchSessionTests(unittest.TestCase):
 
             self.assertEqual(trace["run_id"], session.session_id)
             self.assertEqual(trace["final_state"]["current_intent"], "transfer")
+
+    def test_get_missing_session_raises_structured_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
+
+            with self.assertRaises(WorkbenchAPIError) as context:
+                manager.get("missing")
+
+            self.assertEqual(context.exception.code, "session_not_found")
+            self.assertEqual(context.exception.status_code, 404)
+            self.assertEqual(context.exception.details, {"session_id": "missing"})
 
 
 if __name__ == "__main__":

@@ -199,7 +199,16 @@ class WorkbenchSessionManager:
         return session
 
     def get(self, session_id: str) -> WorkbenchSession:
-        return self._sessions[session_id]
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise WorkbenchAPIError(
+                code="session_not_found",
+                message="Session was not found.",
+                recoverable=True,
+                details={"session_id": session_id},
+                status_code=404,
+            )
+        return session
 
 
 def _validate_mode(mode: str, config: AppConfig) -> None:
