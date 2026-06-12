@@ -95,7 +95,6 @@ def resolve_config(
             "AGENT_LLM_MAX_RETRIES", DEFAULT_AGENT_LLM_MAX_RETRIES
         ),
     )
-    _validate_config_paths(config)
     return config
 
 
@@ -171,14 +170,3 @@ def _int_env(name: str, default: int) -> int:
     return value
 
 
-def _validate_config_paths(config: AppConfig) -> None:
-    missing: list[str] = []
-    if not config.tau3_retail_root.exists():
-        missing.append(
-            f"TAU3_RETAIL_ROOT ({config.tau3_retail_root}) — "
-            "Set TAU3_RETAIL_ROOT in .env"
-        )
-    if missing:
-        raise FileNotFoundError(
-            "Required data paths not found:\n  " + "\n  ".join(missing)
-        )

@@ -1140,16 +1140,23 @@ class AgentRuntime:
         if re.search(r'\b(return|exchange|cancel|refund)\s+policy\b', lowered):
             return "lookup"
 
-        # Explicit human transfer request
+        # Explicit human transfer request — multiple patterns
+        # Pattern 1: verb + human/agent/representative
         if re.search(
-            r'\b(?:talk|speak|connect|transfer)\s+(?:to|with)?\s*'
-            r'(?:a\s+)?(?:human|agent|representative|person)\b',
+            r'\b(?:talk|speak|connect|transfer|want|need|get|like|'
+            r'speak)\s+(?:to|with|a|an)?\s*'
+            r'(?:human|agent|representative|person)\b',
             lowered,
         ):
             return "transfer"
-        if re.search(r'\b(?:customer\s+service|support\s+agent|real\s+person)\b',
-                     lowered):
+        # Pattern 2: standalone unambiguous transfer signals
+        if re.search(
+            r'\b(?:customer\s+service|support\s+agent|real\s+person'
+            r'|human\s+agent|human\s+representative)\b',
+            lowered,
+        ):
             return "transfer"
+        # Pattern 3: unsupported request types
         if "discount" in lowered:
             return "transfer"
 
@@ -1162,7 +1169,7 @@ class AgentRuntime:
         # Exchange — exclude "exchange rate" and "exchange policy"
         if re.search(r'\bexchange\b', lowered):
             if not re.search(r'\bexchange\s+(?:rate|policy)\b', lowered):
-                if re.search(r'\bitem\b', lowered) or ITEM_RE.search(lowered):
+                if re.search(r'\bitems?\b', lowered) or ITEM_RE.search(lowered):
                     return "exchange_items"
                 return "exchange_items"
 
@@ -1170,7 +1177,7 @@ class AgentRuntime:
         if re.search(r'\breturn\b', lowered):
             if re.search(r'\breturn\s+policy\b', lowered):
                 pass
-            elif re.search(r'\bitem\b', lowered) or ORDER_RE.search(lowered):
+            elif re.search(r'\bitems?\b', lowered) or ORDER_RE.search(lowered):
                 return "return_items"
 
         # Payment modification
@@ -1179,7 +1186,7 @@ class AgentRuntime:
             return "modify_order_payment"
 
         # Item modification (pending order)
-        if re.search(r'\b(item|product)\b', lowered) and re.search(
+        if re.search(r'\b(items?|products?)\b', lowered) and re.search(
             r'\b(change|modify|replace|switch|swap)\b', lowered):
             return "modify_order_items"
 
