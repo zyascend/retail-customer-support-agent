@@ -146,6 +146,28 @@ class AppConfigTests(unittest.TestCase):
         self.assertTrue(str(config.tau3_retail_root).endswith("retail"))
         self.assertTrue(str(config.artifact_dir).endswith("artifacts"))
 
+    def test_loads_env_from_worktree_common_repo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            worktree = Path(tmp) / "repo" / ".worktrees" / "feature"
+            common_git = Path(tmp) / "repo" / ".git"
+            worktree_git = worktree / ".git"
+            worktree.mkdir(parents=True)
+            common_git.mkdir(parents=True)
+            worktree_git.mkdir()
+            (worktree_git / "commondir").write_text(
+                str(common_git), encoding="utf-8"
+            )
+            (Path(tmp) / "repo" / ".env").write_text(
+                "DEEPSEEK_API_KEY=from-main-env\n", encoding="utf-8"
+            )
+
+            with patch.dict(os.environ, {}, clear=True), patch(
+                "app.config.Path.cwd", return_value=worktree
+            ):
+                config = resolve_config()
+
+        self.assertEqual(config.deepseek_api_key, "from-main-env")
+
 
 class RetailAdapterTests(unittest.TestCase):
     def test_adapter_loads_current_retail_runtime(self):

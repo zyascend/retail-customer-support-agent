@@ -60,7 +60,7 @@ def resolve_config(
     tau2_bench_root: Optional[str] = None,
     artifact_dir: Optional[str] = None,
 ) -> AppConfig:
-    _load_dotenv(Path(".env"))
+    _load_dotenv_candidates()
     root = Path(
         tau3_retail_root
         or os.getenv("TAU3_RETAIL_ROOT")
@@ -104,6 +104,39 @@ def _load_dotenv(path: Path) -> None:
         key = key.strip()
         value = value.strip().strip('"').strip("'")
         os.environ.setdefault(key, value)
+
+
+def _load_dotenv_candidates() -> None:
+    seen: set[Path] = set()
+    for path in _dotenv_candidate_paths():
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        _load_dotenv(path)
+
+
+def _dotenv_candidate_paths() -> list[Path]:
+    cwd = Path.cwd()
+    candidates = [cwd / ".env"]
+    candidates.extend(parent / ".env" for parent in cwd.parents)
+    common_repo = _git_common_repo_root(cwd)
+    if common_repo is not None:
+        candidates.append(common_repo / ".env")
+    return candidates
+
+
+def _git_common_repo_root(cwd: Path) -> Optional[Path]:
+    commondir = cwd / ".git" / "commondir"
+    if not commondir.exists():
+        return None
+    raw_common_dir = commondir.read_text(encoding="utf-8").strip()
+    if not raw_common_dir:
+        return None
+    common_dir = Path(raw_common_dir)
+    if not common_dir.is_absolute():
+        common_dir = commondir.parent / common_dir
+    return common_dir.resolve().parent
 
 
 def _float_env(name: str, default: float) -> float:
