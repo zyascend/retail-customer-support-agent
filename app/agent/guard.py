@@ -5,17 +5,23 @@ from typing import Any, Dict, List, Optional
 
 from app.agent.models import ConversationState, ToolCall
 from app.ops.serialization import stable_hash
-from app.tools.retail_adapter import get_order_from_db, get_user_from_db
+from app.tools.retail_adapter import (
+    find_variant_in_db,
+    get_current_payment_method_id,
+    get_order_from_db,
+    get_user_from_db,
+)
 
 WRITE_ACTIONS = {
     "cancel_pending_order",
     "modify_pending_order_address",
     "modify_pending_order_items",
+    "modify_pending_order_payment",
     "modify_user_address",
     "return_delivered_order_items",
     "exchange_delivered_order_items",
 }
-DEFERRED_WRITE_ACTIONS = {"modify_pending_order_payment"}
+DEFERRED_WRITE_ACTIONS: set[str] = set()
 
 
 @dataclass
@@ -156,9 +162,67 @@ class WriteActionGuard:
                 return "non_delivered_order_cannot_be_exchanged"
             if len(args.get("item_ids", [])) != len(args.get("new_item_ids", [])):
                 return "exchange_item_count_mismatch"
+            replacement_reason = self._validate_item_replacements(db, order, args)
+            if replacement_reason:
+                return replacement_reason
+        if action.tool_name == "modify_pending_order_items":
+            if not order or order.get("status") != "pending":
+                return "non_pending_order_cannot_be_modified"
+            replacement_reason = self._validate_item_replacements(db, order, args)
+            if replacement_reason:
+                return replacement_reason
+        if action.tool_name == "modify_pending_order_payment":
+            if not order or "pending" not in order.get("status", ""):
+                return "non_pending_order_cannot_be_modified"
+            payment_reason = self._validate_payment_change(db, order, args)
+            if payment_reason:
+                return payment_reason
         if action.tool_name == "modify_user_address":
             if not get_user_from_db(db, args.get("user_id", "")):
                 return "user_not_found"
+        return None
+
+    def _validate_item_replacements(
+        self, db: Any, order: Dict[str, Any], args: Dict[str, Any]
+    ) -> Optional[str]:
+        item_ids = args.get("item_ids", [])
+        new_item_ids = args.get("new_item_ids", [])
+        if len(item_ids) != len(new_item_ids):
+            return "replacement_item_count_mismatch"
+        order_items = order.get("items", [])
+        for old_item_id, new_item_id in zip(item_ids, new_item_ids):
+            old_item = next(
+                (item for item in order_items if item.get("item_id") == old_item_id),
+                None,
+            )
+            if old_item is None:
+                return "order_item_not_found"
+            new_variant = find_variant_in_db(db, new_item_id)
+            if new_variant is None:
+                return "replacement_item_not_found"
+            if new_variant.get("product_id") != old_item.get("product_id"):
+                return "replacement_item_product_mismatch"
+            if not new_variant.get("available"):
+                return "replacement_item_unavailable"
+        return None
+
+    def _validate_payment_change(
+        self, db: Any, order: Dict[str, Any], args: Dict[str, Any]
+    ) -> Optional[str]:
+        user = get_user_from_db(db, order.get("user_id", ""))
+        if not user:
+            return "user_not_found"
+        payment_method_id = args.get("payment_method_id")
+        payment_method = user.get("payment_methods", {}).get(payment_method_id)
+        if payment_method is None:
+            return "payment_method_not_owned"
+        current_payment_method_id = get_current_payment_method_id(order)
+        if payment_method_id == current_payment_method_id:
+            return "same_payment_method"
+        if payment_method.get("source") == "gift_card":
+            amount = sum(float(item.get("price", 0.0)) for item in order.get("items", []))
+            if float(payment_method.get("balance", 0.0)) < amount:
+                return "gift_card_balance_insufficient"
         return None
 
     def _resource_lock(self, action: ToolCall) -> str:
@@ -177,6 +241,7 @@ class WriteActionGuard:
             "cancel_pending_order": "cancel",
             "modify_pending_order_address": "modify_address",
             "modify_pending_order_items": "modify_items",
+            "modify_pending_order_payment": "modify_payment",
         }.get(action.tool_name, action.tool_name)
         return f"order:{args.get('order_id')}:{category}"
 
@@ -216,6 +281,14 @@ class WriteActionGuard:
             return f"Request return for order {action.arguments.get('order_id')}."
         if action.tool_name == "exchange_delivered_order_items":
             return f"Request exchange for order {action.arguments.get('order_id')}."
+        if action.tool_name == "modify_pending_order_items":
+            return (
+                f"Modify items for order {action.arguments.get('order_id')}."
+            )
+        if action.tool_name == "modify_pending_order_payment":
+            return (
+                f"Modify payment for order {action.arguments.get('order_id')}."
+            )
         if action.tool_name == "modify_user_address":
             return f"Modify default address for user {action.arguments.get('user_id')}."
         return action.tool_name

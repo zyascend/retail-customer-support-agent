@@ -335,6 +335,69 @@ class WriteGuardTests(unittest.TestCase):
         self.assertTrue(second.allowed)
         self.assertNotEqual(first.idempotency_key, second.idempotency_key)
 
+    def test_blocks_item_replacement_across_products(self):
+        state = ConversationState(session_id="test", authenticated_user_id=PENDING_USER)
+        state.loaded_context.orders[PENDING_ORDER] = {"order_id": PENDING_ORDER}
+
+        result = self.guard.check(
+            state=state,
+            db=self.runtime.db,
+            action=ToolCall(
+                tool_name="modify_pending_order_items",
+                arguments={
+                    "order_id": PENDING_ORDER,
+                    "item_ids": ["1586641416"],
+                    "new_item_ids": ["9612497925"],
+                },
+            ),
+            confirmed=True,
+        )
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.block_reason, "replacement_item_product_mismatch")
+
+    def test_blocks_payment_method_not_owned(self):
+        state = ConversationState(session_id="test", authenticated_user_id=PENDING_USER)
+        state.loaded_context.orders[PENDING_ORDER] = {"order_id": PENDING_ORDER}
+
+        result = self.guard.check(
+            state=state,
+            db=self.runtime.db,
+            action=ToolCall(
+                tool_name="modify_pending_order_payment",
+                arguments={
+                    "order_id": PENDING_ORDER,
+                    "payment_method_id": "gift_card_8168843",
+                },
+            ),
+            confirmed=True,
+        )
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.block_reason, "payment_method_not_owned")
+
+    def test_blocks_exchange_across_products(self):
+        state = ConversationState(session_id="test", authenticated_user_id=DELIVERED_USER)
+        state.loaded_context.orders[DELIVERED_ORDER] = {"order_id": DELIVERED_ORDER}
+
+        result = self.guard.check(
+            state=state,
+            db=self.runtime.db,
+            action=ToolCall(
+                tool_name="exchange_delivered_order_items",
+                arguments={
+                    "order_id": DELIVERED_ORDER,
+                    "item_ids": [DELIVERED_ITEM],
+                    "new_item_ids": ["5925362855"],
+                    "payment_method_id": DELIVERED_PAYMENT,
+                },
+            ),
+            confirmed=True,
+        )
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.block_reason, "replacement_item_product_mismatch")
+
 
 class GatewayAndTraceTests(unittest.TestCase):
     def test_gateway_blocks_write_without_confirmation(self):
