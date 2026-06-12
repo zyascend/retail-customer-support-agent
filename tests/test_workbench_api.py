@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from dataclasses import replace
 
 from fastapi.testclient import TestClient
 
@@ -10,7 +11,9 @@ from app.workbench.api import create_app
 class WorkbenchAPITests(unittest.TestCase):
     def test_config_returns_cases_and_llm_availability(self):
         with tempfile.TemporaryDirectory() as tmp:
-            app = create_app(config=resolve_config(artifact_dir=tmp))
+            app = create_app(
+                config=replace(resolve_config(artifact_dir=tmp), deepseek_api_key="")
+            )
             client = TestClient(app)
 
             response = client.get("/api/workbench/config")
