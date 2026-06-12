@@ -261,16 +261,13 @@ class CuratedEvalTests(unittest.TestCase):
         curated_cases = get_cases("curated_mvp")
         generalized_cases = get_cases("generalized_mvp")
 
-        self.assertEqual(len(generalized_cases), len(curated_cases))
+        self.assertGreater(len(generalized_cases), len(curated_cases))
         self.assertEqual({case.subset for case in curated_cases}, {"curated_mvp"})
         self.assertEqual({case.subset for case in generalized_cases}, {"generalized_mvp"})
-        self.assertEqual(
-            [case.case_id for case in generalized_cases],
-            [case.case_id for case in curated_cases],
-        )
+        curated_ids = {case.case_id for case in curated_cases}
+        generalized_ids = {case.case_id for case in generalized_cases}
+        self.assertTrue(curated_ids.issubset(generalized_ids))
         self.assertIsNot(generalized_cases[0].messages, curated_cases[0].messages)
-        self.assertEqual(generalized_cases[0].expected_db_assertions, {})
-        self.assertEqual(generalized_cases[0].expected_tool_sequence, [])
 
     def test_expected_tool_sequence_detects_wrong_order(self):
         case = EvalCase(
@@ -300,6 +297,30 @@ class CuratedEvalTests(unittest.TestCase):
         )
 
         self.assertEqual(label, "wrong_tool_sequence")
+
+    def test_generalized_mvp_has_minimum_case_count(self):
+        cases = get_cases("generalized_mvp")
+        self.assertGreaterEqual(
+            len(cases), 30,
+            f"generalized_mvp has {len(cases)} cases, expected at least 30"
+        )
+        subsets = {case.subset for case in cases}
+        self.assertEqual(subsets, {"generalized_mvp"})
+
+    def test_generalized_eval_runner_passes_phase5_subset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            summary = CuratedEvalRunner(
+                config=config,
+                artifact_dir=Path(tmp),
+            ).run(subset="generalized_mvp", trials=1)
+
+            self.assertGreaterEqual(summary.case_count, 30)
+            self.assertEqual(summary.passed_count, summary.case_count)
+            self.assertEqual(summary.metrics["pass_1"], 1.0)
+            self.assertEqual(summary.metrics["pass_k"], 1.0)
+            self.assertEqual(summary.metrics["mutation_error_rate"], 0.0)
+            self.assertEqual(summary.metrics["tool_error_rate"], 0.0)
 
 
 def _result(

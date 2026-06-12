@@ -283,8 +283,468 @@ def _case_for_subset(case: EvalCase, subset: str) -> EvalCase:
     )
 
 
+PHASE5_NEW_CASES: List[EvalCase] = [
+    EvalCase(
+        case_id="auth_name_zip_lookup_order",
+        category="auth",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My name is Sofia Rossi and my zip is 78784. "
+                    "What is the status of order #W5918442?"
+                ),
+            }
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="lookup",
+        order_id="#W5918442",
+        expected_tool_names=["find_user_id_by_name_zip", "get_order_details"],
+        expected_assistant_contains="pending",
+        subset="generalized_mvp",
+        capability="auth_name_zip",
+        policy_area="authentication",
+    ),
+    EvalCase(
+        case_id="modify_pending_order_items_success",
+        category="modify_items",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is sofia.rossi2645@example.com. Change item "
+                    "1586641416 in order #W5918442 to new item 5925362855."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_order_items",
+        order_id="#W5918442",
+        expected_write_lock="order:#W5918442:modify_items",
+        expected_order_status="pending (item modified)",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["modify_pending_order_items"],
+        subset="generalized_mvp",
+        capability="modify_items",
+        policy_area="inventory",
+    ),
+    EvalCase(
+        case_id="modify_pending_order_payment_success",
+        category="modify_payment",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is sofia.li7352@example.com. Change payment for "
+                    "order #W8855135 to credit_card_8105988."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="sofia_li_9219",
+        expected_intent="modify_order_payment",
+        order_id="#W8855135",
+        expected_write_lock="order:#W8855135:modify_payment",
+        expected_order_status="pending",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["modify_pending_order_payment"],
+        subset="generalized_mvp",
+        capability="modify_payment",
+        policy_area="payment_method",
+    ),
+    EvalCase(
+        case_id="modify_user_default_address_success",
+        category="modify_address",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is sofia.rossi2645@example.com. Change my default "
+                    "address to 12 Oak St, Unit 4, Austin, TX, USA, 78701."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_user_address",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["modify_user_address"],
+        subset="generalized_mvp",
+        capability="modify_user_address",
+        policy_area="user_profile",
+    ),
+    EvalCase(
+        case_id="multi_item_return_success",
+        category="return",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is ava.moore6020@example.com. Return items "
+                    "6777246137 and 4900661478 from order #W4817420 "
+                    "to gift_card_8168843."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="ava_moore_2033",
+        expected_intent="return_items",
+        order_id="#W4817420",
+        expected_write_lock="item:4900661478,6777246137:return",
+        expected_order_status="return requested",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["return_delivered_order_items"],
+        subset="generalized_mvp",
+        capability="multi_item_return",
+        policy_area="return_items",
+    ),
+    EvalCase(
+        case_id="multi_item_exchange_success",
+        category="exchange",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is ava.moore6020@example.com. Exchange item "
+                    "6777246137 from order #W4817420 for new item 4579334072 "
+                    "from order #W4817420 using gift_card_8168843."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="ava_moore_2033",
+        expected_intent="exchange_items",
+        order_id="#W4817420",
+        expected_write_lock="item:6777246137:exchange",
+        expected_order_status="exchange requested",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["exchange_delivered_order_items"],
+        subset="generalized_mvp",
+        capability="exchange_items",
+        policy_area="exchange_items",
+    ),
+    EvalCase(
+        case_id="deny_modify_payment_confirmation",
+        category="confirmation",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is sofia.li7352@example.com. Change payment for "
+                    "order #W8855135 to credit_card_8105988."
+                ),
+            },
+            {"role": "user", "content": "no"},
+        ],
+        expected_user_id="sofia_li_9219",
+        expected_intent="modify_order_payment",
+        order_id="#W8855135",
+        expected_order_status="pending",
+        expected_confirmation_status="denied",
+        expected_no_write=True,
+        expected_assistant_contains="No changes were made",
+        subset="generalized_mvp",
+        capability="modify_payment",
+        policy_area="confirmation",
+    ),
+    EvalCase(
+        case_id="changed_modify_items_confirmation",
+        category="confirmation",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is sofia.rossi2645@example.com. Change item "
+                    "1586641416 in order #W5918442 to new item 5925362855."
+                ),
+            },
+            {"role": "user", "content": "No, use item 7523669277 instead."},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_order_items",
+        order_id="#W5918442",
+        expected_order_status="pending",
+        expected_confirmation_status="changed",
+        expected_no_write=True,
+        subset="generalized_mvp",
+        capability="modify_items",
+        policy_area="confirmation",
+    ),
+    EvalCase(
+        case_id="block_item_product_mismatch",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is sofia.rossi2645@example.com. Change item "
+                    "1586641416 in order #W5918442 to new item 9612497925."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_order_items",
+        order_id="#W5918442",
+        expected_order_status="pending",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="replacement_item_product_mismatch",
+        expected_no_write=True,
+        expected_tool_names=["modify_pending_order_items"],
+        subset="generalized_mvp",
+        capability="modify_items",
+        policy_area="inventory",
+    ),
+    EvalCase(
+        case_id="block_item_unavailable",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is sofia.rossi2645@example.com. Change item "
+                    "6117189161 in order #W5918442 to new item 4859937227."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_order_items",
+        order_id="#W5918442",
+        expected_order_status="pending",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="replacement_item_unavailable",
+        expected_no_write=True,
+        expected_tool_names=["modify_pending_order_items"],
+        subset="generalized_mvp",
+        capability="modify_items",
+        policy_area="inventory",
+    ),
+    EvalCase(
+        case_id="block_payment_not_owned",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is sofia.rossi2645@example.com. Change payment for "
+                    "order #W5918442 to gift_card_8168843."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_order_payment",
+        order_id="#W5918442",
+        expected_order_status="pending",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="payment_method_not_owned",
+        expected_no_write=True,
+        expected_tool_names=["modify_pending_order_payment"],
+        subset="generalized_mvp",
+        capability="modify_payment",
+        policy_area="payment_method",
+    ),
+    EvalCase(
+        case_id="block_payment_insufficient_gift_card",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is raj.sanchez2046@example.com. Change payment for "
+                    "order #W4566809 to gift_card_2259499."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="raj_sanchez_2970",
+        expected_intent="modify_order_payment",
+        order_id="#W4566809",
+        expected_order_status="pending",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="gift_card_balance_insufficient",
+        expected_no_write=True,
+        expected_tool_names=["modify_pending_order_payment"],
+        subset="generalized_mvp",
+        capability="modify_payment",
+        policy_area="payment_method",
+    ),
+    EvalCase(
+        case_id="block_same_payment_method",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is sofia.rossi2645@example.com. Change payment for "
+                    "order #W5918442 to credit_card_5051208."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_order_payment",
+        order_id="#W5918442",
+        expected_order_status="pending",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="same_payment_method",
+        expected_no_write=True,
+        expected_tool_names=["modify_pending_order_payment"],
+        subset="generalized_mvp",
+        capability="modify_payment",
+        policy_area="payment_method",
+    ),
+    EvalCase(
+        case_id="block_modify_items_non_pending_order",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is james.li4495@example.com. Change item "
+                    "6469567736 in order #W2611340 to new item 6777246137."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="james_li_5688",
+        expected_intent="modify_order_items",
+        order_id="#W2611340",
+        expected_order_status="processed",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="non_pending_order_cannot_be_modified",
+        expected_no_write=True,
+        expected_tool_names=["modify_pending_order_items"],
+        subset="generalized_mvp",
+        capability="modify_items",
+        policy_area="order_status",
+    ),
+    EvalCase(
+        case_id="block_modify_payment_processed_order",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is james.li4495@example.com. Change payment for "
+                    "order #W2611340 to credit_card_5051208."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="james_li_5688",
+        expected_intent="modify_order_payment",
+        order_id="#W2611340",
+        expected_order_status="processed",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="non_pending_order_cannot_be_modified",
+        expected_no_write=True,
+        expected_tool_names=["modify_pending_order_payment"],
+        subset="generalized_mvp",
+        capability="modify_payment",
+        policy_area="order_status",
+    ),
+    EvalCase(
+        case_id="block_exchange_product_mismatch",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is ava.moore6020@example.com. Exchange item "
+                    "6777246137 from order #W4817420 for new item 5925362855 "
+                    "using gift_card_8168843."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="ava_moore_2033",
+        expected_intent="exchange_items",
+        order_id="#W4817420",
+        expected_order_status="delivered",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="replacement_item_product_mismatch",
+        expected_no_write=True,
+        expected_tool_names=["exchange_delivered_order_items"],
+        subset="generalized_mvp",
+        capability="exchange_items",
+        policy_area="inventory",
+    ),
+    EvalCase(
+        case_id="block_exchange_unavailable_replacement",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is ava.moore6020@example.com. Exchange item "
+                    "6777246137 from order #W4817420 for new item 1434748144 "
+                    "using gift_card_8168843."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="ava_moore_2033",
+        expected_intent="exchange_items",
+        order_id="#W4817420",
+        expected_order_status="delivered",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="replacement_item_unavailable",
+        expected_no_write=True,
+        expected_tool_names=["exchange_delivered_order_items"],
+        subset="generalized_mvp",
+        capability="exchange_items",
+        policy_area="inventory",
+    ),
+    EvalCase(
+        case_id="transfer_unsupported_discount_request",
+        category="transfer",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is sofia.rossi2645@example.com. I want a 20% "
+                    "goodwill discount on order #W5918442."
+                ),
+            },
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="transfer",
+        expected_tool_names=["transfer_to_human_agents"],
+        expected_assistant_contains="YOU ARE BEING TRANSFERRED TO A HUMAN AGENT. PLEASE HOLD ON.",
+        subset="generalized_mvp",
+        capability="unsupported_request",
+        policy_area="transfer",
+    ),
+    EvalCase(
+        case_id="deny_modify_address_confirmation",
+        category="confirmation",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is sofia.rossi2645@example.com. Change my default "
+                    "address to 12 Oak St, Austin, TX, USA, 78701."
+                ),
+            },
+            {"role": "user", "content": "no"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_user_address",
+        expected_confirmation_status="denied",
+        expected_no_write=True,
+        expected_assistant_contains="No changes were made",
+        subset="generalized_mvp",
+        capability="modify_user_address",
+        policy_area="confirmation",
+    ),
+]
+
 GENERALIZED_MVP_CASES: List[EvalCase] = [
-    _case_for_subset(case, "generalized_mvp") for case in CURATED_MVP_CASES
+    *[_case_for_subset(case, "generalized_mvp") for case in CURATED_MVP_CASES],
+    *PHASE5_NEW_CASES,
 ]
 
 

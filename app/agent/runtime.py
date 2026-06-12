@@ -368,7 +368,7 @@ class AgentRuntime:
         if address:
             state.slots["address"] = address
         new_item_marker = re.search(
-            r"(?:new item|exchange for|instead|to new item)\s+(\d{8,})",
+            r"(?:new items?|exchange for|instead|to new item|for new items?)\s+(\d{8,})",
             lowered,
         )
         if new_item_marker:
@@ -1015,7 +1015,7 @@ class AgentRuntime:
         return f"Request an exchange for order {order_id}. Please confirm yes or no."
 
     def _infer_intent(self, lowered: str) -> str:
-        if "human" in lowered or "agent" in lowered or "representative" in lowered:
+        if "human" in lowered or "agent" in lowered or "representative" in lowered or "discount" in lowered:
             return "transfer"
         if "cancel" in lowered:
             return "cancel_order"
