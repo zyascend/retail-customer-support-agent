@@ -10,6 +10,11 @@ DEMO_CASE_IDS = [
     "block_wrong_user_order_access",
     "transfer_to_human",
     "deny_cancel_confirmation",
+    "auth_name_zip_lookup_order",
+    "modify_pending_order_items_success",
+    "modify_pending_order_payment_success",
+    "block_item_product_mismatch",
+    "block_payment_insufficient_gift_card",
 ]
 
 CASE_TITLES = {
@@ -26,6 +31,24 @@ CASE_TITLES = {
     "block_cancel_processed_order": "阻止取消已处理订单",
     "block_return_pending_order": "阻止退回待处理订单",
     "block_wrong_user_order_access": "阻止访问他人订单",
+    "auth_name_zip_lookup_order": "姓名加邮编认证查询订单",
+    "modify_pending_order_items_success": "修改待处理订单商品",
+    "modify_pending_order_payment_success": "修改待处理订单支付方式",
+    "modify_user_default_address_success": "修改用户默认地址",
+    "multi_item_return_success": "多件商品退货",
+    "block_item_product_mismatch": "阻止跨商品替换",
+    "block_item_unavailable": "阻止替换缺货商品",
+    "block_payment_not_owned": "阻止使用他人支付方式",
+    "block_payment_insufficient_gift_card": "阻止余额不足礼品卡支付",
+    "block_same_payment_method": "阻止重复支付方式",
+    "block_modify_items_non_pending_order": "阻止修改非待处理订单商品",
+    "block_modify_payment_processed_order": "阻止修改已处理订单支付",
+    "block_exchange_product_mismatch": "阻止跨商品换货",
+    "block_exchange_unavailable_replacement": "阻止换货缺货商品",
+    "transfer_unsupported_discount_request": "转接折扣请求至人工",
+    "deny_modify_payment_confirmation": "拒绝支付方式修改确认",
+    "changed_modify_items_confirmation": "变更商品修改确认",
+    "deny_modify_address_confirmation": "拒绝地址修改确认",
 }
 
 
@@ -64,4 +87,9 @@ def _serialize_case(case: EvalCase) -> Dict[str, Any]:
         "expected_no_write": case.expected_no_write,
         "expected_tool_names": list(case.expected_tool_names),
         "expected_assistant_contains": case.expected_assistant_contains,
+        "subset": case.subset,
+        "capability": case.capability,
+        "policy_area": case.policy_area,
+        "expected_db_assertions": dict(case.expected_db_assertions),
+        "expected_tool_sequence": list(case.expected_tool_sequence),
     }

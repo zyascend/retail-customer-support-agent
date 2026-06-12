@@ -9,8 +9,8 @@ class WorkbenchCaseCatalogTests(unittest.TestCase):
         all_ids = {case["case_id"] for case in catalog["all_cases"]}
         demo_ids = [case["case_id"] for case in catalog["demo_cases"]]
 
-        self.assertEqual(demo_ids, DEMO_CASE_IDS)
-        self.assertTrue(set(DEMO_CASE_IDS).issubset(all_ids))
+        self.assertEqual(demo_ids, [cid for cid in DEMO_CASE_IDS if cid in all_ids])
+        self.assertTrue(set(demo_ids).issubset(all_ids))
         self.assertEqual(catalog["subset"], "curated_mvp")
         self.assertGreaterEqual(len(catalog["all_cases"]), 11)
 
@@ -48,6 +48,24 @@ class WorkbenchCaseCatalogTests(unittest.TestCase):
     def test_get_case_by_id_rejects_unknown_case(self):
         with self.assertRaisesRegex(ValueError, "unknown case"):
             get_case_by_id("missing-case")
+
+    def test_generalized_catalog_can_be_serialized(self):
+        catalog = build_case_catalog("generalized_mvp")
+
+        self.assertEqual(catalog["subset"], "generalized_mvp")
+        self.assertGreaterEqual(len(catalog["all_cases"]), 30)
+        case_ids = {case["case_id"] for case in catalog["all_cases"]}
+        self.assertIn("modify_pending_order_items_success", case_ids)
+        self.assertIn("modify_pending_order_payment_success", case_ids)
+        self.assertIn("auth_name_zip_lookup_order", case_ids)
+
+    def test_demo_shortlist_includes_phase5_cases_when_available(self):
+        catalog = build_case_catalog("generalized_mvp")
+        demo_ids = [case["case_id"] for case in catalog["demo_cases"]]
+
+        self.assertIn("auth_name_zip_lookup_order", demo_ids)
+        self.assertIn("modify_pending_order_items_success", demo_ids)
+        self.assertIn("modify_pending_order_payment_success", demo_ids)
 
 
 if __name__ == "__main__":
