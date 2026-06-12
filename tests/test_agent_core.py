@@ -216,6 +216,19 @@ class RetailAdapterTests(unittest.TestCase):
         )
         self.assertEqual(updated["payment_history"][-1]["transaction_type"], "payment")
 
+    def test_tool_registry_generates_llm_catalog(self):
+        runtime = RetailAdapter(resolve_config()).create_runtime()
+        registry = ToolRegistry(runtime.tools)
+        catalog = registry.tool_catalog_for_llm()
+
+        self.assertIn("## Available Tools", catalog)
+        self.assertIn("### cancel_pending_order", catalog)
+        self.assertIn("### get_order_details", catalog)
+        self.assertIn("type: write", catalog)
+        self.assertIn("type: read", catalog)
+        self.assertIn("parameters:", catalog)
+        self.assertIn("constraints:", catalog)
+
 
 class ConfirmationResolverTests(unittest.TestCase):
     def test_resolves_confirmation_intents(self):
@@ -599,7 +612,8 @@ class RuntimeSmokeTests(unittest.TestCase):
             "YOU ARE BEING TRANSFERRED TO A HUMAN AGENT. PLEASE HOLD ON.",
         )
 
-    def test_supported_write_policy_denial_defers_to_guard_path(self):
+    def test_dual_track_policy_deny_is_respected(self):
+        """LLM deny in policy_reasoner should result in actual deny decision."""
         with tempfile.TemporaryDirectory() as tmp:
             runtime = AgentRuntime(
                 resolve_config(artifact_dir=tmp),
@@ -618,12 +632,21 @@ class RuntimeSmokeTests(unittest.TestCase):
                 ],
             )
 
-        self.assertEqual(result.state.policy_decision.decision, "allow")
-        self.assertIsNotNone(result.state.pending_action)
-        self.assertEqual(
-            result.state.pending_action.action_name,
-            "cancel_pending_order",
+        self.assertEqual(result.state.policy_decision.decision, "deny")
+        self.assertIsNone(result.state.pending_action)
+        # Should have recorded the divergence
+        divergence_step = next(
+            (
+                step
+                for step in result.state.steps
+                if step.node == "policy_reasoner_divergence"
+            ),
+            None,
         )
+        self.assertIsNotNone(divergence_step)
+        self.assertEqual(divergence_step.detail["code"], "allow")
+        self.assertEqual(divergence_step.detail["llm"], "deny")
+        self.assertEqual(divergence_step.detail["merged"], "deny")
 
 
 class AgentRuntimePhase5Tests(unittest.TestCase):
@@ -714,6 +737,86 @@ class AgentRuntimePhase5Tests(unittest.TestCase):
 
             self.assertIn("same product", response.lower())
             self.assertNotIn("replacement_item_product_mismatch", response)
+
+
+class DualTrackMergeTests(unittest.TestCase):
+    def setUp(self):
+        self.runtime = AgentRuntime(
+            resolve_config(),
+            provider=DisabledLLMProvider(),
+        )
+
+    def test_both_allow_returns_allow(self):
+        result = self.runtime._merge_policy_decisions(
+            code_decision="allow",
+            llm_decision="allow",
+        )
+        self.assertEqual(result, "allow")
+
+    def test_llm_deny_overrides_code_allow(self):
+        result = self.runtime._merge_policy_decisions(
+            code_decision="allow",
+            llm_decision="deny",
+        )
+        self.assertEqual(result, "deny")
+
+    def test_code_deny_overrides_llm_allow(self):
+        result = self.runtime._merge_policy_decisions(
+            code_decision="deny",
+            llm_decision="allow",
+        )
+        self.assertEqual(result, "deny")
+
+    def test_any_ask_returns_ask(self):
+        self.assertEqual(
+            self.runtime._merge_policy_decisions(
+                code_decision="allow", llm_decision="ask_clarification",
+            ),
+            "ask_clarification",
+        )
+        self.assertEqual(
+            self.runtime._merge_policy_decisions(
+                code_decision="ask_clarification", llm_decision="allow",
+            ),
+            "ask_clarification",
+        )
+
+    def test_transfer_requires_both_agree(self):
+        self.assertEqual(
+            self.runtime._merge_policy_decisions(
+                code_decision="transfer", llm_decision="transfer",
+            ),
+            "transfer",
+        )
+        self.assertEqual(
+            self.runtime._merge_policy_decisions(
+                code_decision="transfer", llm_decision="allow",
+            ),
+            "ask_clarification",
+        )
+        # Code transfer (unsupported request) overrides LLM deny
+        self.assertEqual(
+            self.runtime._merge_policy_decisions(
+                code_decision="transfer", llm_decision="deny",
+            ),
+            "transfer",
+        )
+
+    def test_llm_none_falls_back_to_code(self):
+        result = self.runtime._merge_policy_decisions(
+            code_decision="allow",
+            llm_decision=None,
+        )
+        self.assertEqual(result, "allow")
+
+    def test_code_missing_slots_detects_gaps(self):
+        from app.agent.models import ConversationState
+        state = ConversationState(session_id="test")
+        state.current_intent = "return_items"
+        state.slots = {"order_id": "#W1234567"}
+        missing = self.runtime._code_missing_slots(state)
+        self.assertIn("item_ids", missing)
+        self.assertIn("payment_method_id", missing)
 
 
 if __name__ == "__main__":

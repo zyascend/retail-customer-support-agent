@@ -327,7 +327,15 @@ class AgentRuntime:
         if self._has_assistant_response(state):
             return
         lowered = content.lower()
-        state.current_intent = self._infer_intent(lowered)
+        # Preserve existing intent when message is a bare confirmation/denial
+        bare_response = lowered.strip() in {
+            "yes", "no", "confirm", "ok", "y", "n", "go ahead",
+            "proceed", "sure", "yeah", "yep", "nope", "cancel",
+        }
+        if bare_response and state.current_intent and state.current_intent != "unknown":
+            pass  # keep prior intent rather than resetting to unknown
+        else:
+            state.current_intent = self._infer_intent(lowered)
         llm_payload = self._llm_json(
             state,
             "intent_and_slot_extractor",
@@ -346,54 +354,60 @@ class AgentRuntime:
             },
         )
         if llm_payload:
+            llm_intent = str(llm_payload.get("intent") or "").strip()
+            if llm_intent and llm_intent != state.current_intent:
+                state.add_step(
+                    "intent_and_slot_extractor_divergence",
+                    code_intent=state.current_intent,
+                    llm_intent=llm_intent,
+                    resolved=state.current_intent,
+                )
             self._apply_llm_intent_slots(state, llm_payload)
+        llm_slots = (llm_payload.get("slots") or {}) if llm_payload else {}
+        code_slots: Dict[str, Any] = dict(state.slots)
+
         order_match = ORDER_RE.search(content)
         if order_match:
-            state.slots["order_id"] = order_match.group(0)
+            code_slots["order_id"] = order_match.group(0)
         payment_match = PAYMENT_RE.search(content)
         if payment_match:
-            state.slots["payment_method_id"] = payment_match.group(0)
+            code_slots["payment_method_id"] = payment_match.group(0)
         item_ids = [
             item
             for item in ITEM_RE.findall(content)
             if not item.startswith("000") and len(item) >= 8
         ]
         if item_ids:
-            state.slots["item_ids"] = item_ids
+            code_slots["item_ids"] = item_ids
         if "ordered by mistake" in lowered:
-            state.slots["reason"] = "ordered by mistake"
+            code_slots["reason"] = "ordered by mistake"
         elif "no longer needed" in lowered or "don't need" in lowered:
-            state.slots["reason"] = "no longer needed"
+            code_slots["reason"] = "no longer needed"
         address = self._parse_address(content)
         if address:
-            state.slots["address"] = address
+            code_slots["address"] = address
         item_pairs = self._parse_item_replacement_pairs(lowered)
         if item_pairs:
-            state.slots["item_ids"] = [old for old, _new in item_pairs]
-            state.slots["new_item_ids"] = [new for _old, new in item_pairs]
-            state.add_step(
-                "intent_and_slot_extractor",
-                intent=state.current_intent,
-                slots=state.slots,
-            )
-            return
+            code_slots["item_ids"] = [old for old, _new in item_pairs]
+            code_slots["new_item_ids"] = [new for _old, new in item_pairs]
+
         new_item_marker = re.search(
-            r"(?:new items?|exchange for|instead|to new item|for new items?)\s+(\d{8,})",
+            r"(?:new items?|exchange for|instead|to new item|"
+            r"for new items?)\s+(\d{8,})",
             lowered,
         )
         if new_item_marker:
             new_item_id = new_item_marker.group(1)
-            state.slots["new_item_ids"] = [new_item_id]
-            if "item_ids" in state.slots:
-                state.slots["item_ids"] = [
-                    item_id
-                    for item_id in state.slots["item_ids"]
-                    if item_id != new_item_id
+            code_slots["new_item_ids"] = [new_item_id]
+            if "item_ids" in code_slots:
+                code_slots["item_ids"] = [
+                    iid for iid in code_slots["item_ids"]
+                    if iid != new_item_id
                 ]
-        state.add_step(
-            "intent_and_slot_extractor",
-            intent=state.current_intent,
-            slots=state.slots,
+
+        state.slots = self._merge_slots(
+            code_slots=code_slots,
+            llm_slots=llm_slots,
         )
 
     def _context_loader(self, state: ConversationState, content: str) -> None:
@@ -421,6 +435,47 @@ class AgentRuntime:
             loaded_orders=list(state.loaded_context.orders),
         )
 
+    def _code_missing_slots(self, state: ConversationState) -> list[str]:
+        """Code-side check for missing required slots per intent."""
+        required_map: Dict[str, tuple[str, ...]] = {
+            "cancel_order": ("order_id", "reason"),
+            "modify_order_address": ("order_id", "address"),
+            "modify_order_items": ("order_id", "item_ids", "new_item_ids"),
+            "modify_order_payment": ("order_id", "payment_method_id"),
+            "modify_user_address": ("address",),
+            "return_items": ("order_id", "item_ids", "payment_method_id"),
+            "exchange_items": (
+                "order_id", "item_ids", "new_item_ids", "payment_method_id",
+            ),
+        }
+        required = required_map.get(state.current_intent, ())
+        return [key for key in required if not state.slots.get(key)]
+
+    def _merge_policy_decisions(
+        self,
+        *,
+        code_decision: str,
+        llm_decision: Optional[str],
+    ) -> str:
+        """Conservative dual-track merge.
+        Any deny → deny. Any ask → ask. Transfer needs both to agree.
+        Only allow when both allow.
+        """
+        if llm_decision is None:
+            return code_decision
+        # Code-level transfer (unsupported requests) overrides LLM deny
+        if code_decision == "transfer" and llm_decision == "deny":
+            return "transfer"
+        if "deny" in (code_decision, llm_decision):
+            return "deny"
+        if "ask_clarification" in (code_decision, llm_decision):
+            return "ask_clarification"
+        if code_decision == "transfer" and llm_decision == "transfer":
+            return "transfer"
+        if code_decision == "transfer" or llm_decision == "transfer":
+            return "ask_clarification"
+        return "allow"
+
     def _policy_reasoner(self, state: ConversationState, content: str) -> None:
         if self._has_assistant_response(state):
             return
@@ -433,40 +488,74 @@ class AgentRuntime:
             "return_items",
             "exchange_items",
         }
+
+        # ── Code track ──
         if state.current_intent == "transfer":
-            decision = "transfer"
-        elif state.current_intent in write_intents:
-            decision = "allow"
+            code_decision = "transfer"
         elif state.current_intent == "lookup":
-            decision = "allow"
+            code_decision = "allow"
+        elif state.current_intent in write_intents:
+            if self._code_missing_slots(state):
+                code_decision = "ask_clarification"
+            else:
+                code_decision = "allow"
         else:
-            decision = "ask_clarification"
-        llm_decision = self._llm_policy_decision(state, content, decision)
-        if (
-            state.current_intent in write_intents
-            and llm_decision.get("decision") == "deny"
-        ):
-            llm_decision["decision"] = "allow"
-            llm_decision["internal_reasoning_summary"] = (
-                "Supported write intent deferred to deterministic write guard."
+            code_decision = "ask_clarification"
+
+        # ── LLM track ──
+        llm_payload = self._llm_policy_decision(state, content, code_decision)
+        llm_decision = llm_payload.get("decision") if llm_payload else None
+
+        # ── Conservative merge ──
+        final_decision = self._merge_policy_decisions(
+            code_decision=code_decision,
+            llm_decision=llm_decision,
+        )
+
+        # Log divergence for audit
+        if llm_decision and llm_decision != code_decision:
+            state.add_step(
+                "policy_reasoner_divergence",
+                code=code_decision,
+                llm=llm_decision,
+                merged=final_decision,
             )
+
+        explanation = ""
+        if llm_payload and final_decision == "deny":
+            explanation = self._clean_llm_scalar(
+                llm_payload.get("explanation_for_user")
+            ) or ""
+
         state.policy_decision = PolicyDecision(
-            decision=llm_decision.get("decision", decision),
-            intent=llm_decision.get("intent", state.current_intent),
-            missing_slots=llm_decision.get("missing_slots", []),
-            user_confirmation_required=llm_decision.get(
-                "user_confirmation_required",
-                state.current_intent in write_intents,
+            decision=final_decision,
+            intent=(
+                llm_payload.get("intent", state.current_intent)
+                if llm_payload
+                else state.current_intent
             ),
-            explanation_for_user=llm_decision.get("explanation_for_user", ""),
-            internal_reasoning_summary=llm_decision.get(
-                "internal_reasoning_summary", ""
+            missing_slots=(
+                llm_payload.get("missing_slots")
+                if llm_payload and isinstance(llm_payload.get("missing_slots"), list)
+                else []
+            ),
+            user_confirmation_required=(
+                llm_payload.get("user_confirmation_required", False)
+                if llm_payload
+                else state.current_intent in write_intents
+            ),
+            explanation_for_user=explanation,
+            internal_reasoning_summary=(
+                llm_payload.get("internal_reasoning_summary", "")
+                if llm_payload
+                else ""
             ),
         )
         state.add_step(
             "policy_reasoner",
-            decision=state.policy_decision.decision,
-            llm_used=bool(llm_decision),
+            decision=final_decision,
+            llm_used=bool(llm_payload),
+            code_decision=code_decision,
         )
 
     def _action_planner(self, state: ConversationState, content: str) -> None:
@@ -833,6 +922,38 @@ class AgentRuntime:
             if cleaned_address["address1"] and cleaned_address["zip"]:
                 state.slots["address"] = cleaned_address
 
+    def _merge_slots(
+        self,
+        *,
+        code_slots: Dict[str, Any],
+        llm_slots: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Merge code and LLM slots. Code wins for ID formats; LLM for semantic."""
+        if not llm_slots:
+            return dict(code_slots)
+        merged = dict(code_slots)
+        for key, value in llm_slots.items():
+            if key not in merged or not merged[key]:
+                if value:
+                    merged[key] = value
+                continue
+            if key == "reason":
+                cleaned = self._clean_llm_scalar(value)
+                if cleaned and cleaned.lower() in {
+                    "no longer needed",
+                    "ordered by mistake",
+                }:
+                    merged[key] = cleaned.lower()
+            if key == "address" and isinstance(value, dict):
+                cleaned_address = {
+                    k: self._clean_llm_scalar(value.get(k)) or ""
+                    for k in ("address1", "address2", "city", "state",
+                              "country", "zip")
+                }
+                if cleaned_address.get("address1") and cleaned_address.get("zip"):
+                    merged["address"] = cleaned_address
+        return merged
+
     def _llm_policy_decision(
         self, state: ConversationState, content: str, fallback_decision: str
     ) -> Dict[str, Any]:
@@ -888,6 +1009,7 @@ class AgentRuntime:
                 "current_intent": state.current_intent,
                 "slots": state.slots,
                 "loaded_context": state.loaded_context.model_dump(),
+                "tool_catalog": self.gateway.registry.tool_catalog_for_llm(),
             },
             {
                 "type": "object",
@@ -1025,26 +1147,77 @@ class AgentRuntime:
         return f"Request an exchange for order {order_id}. Please confirm yes or no."
 
     def _infer_intent(self, lowered: str) -> str:
-        if "human" in lowered or "agent" in lowered or "representative" in lowered or "discount" in lowered:
+        # Policy questions are lookups, not operations
+        if re.search(r'\b(return|exchange|cancel|refund)\s+policy\b', lowered):
+            return "lookup"
+
+        # Explicit human transfer request — multiple patterns
+        # Pattern 1: verb + human/agent/representative
+        if re.search(
+            r'\b(?:talk|speak|connect|transfer|want|need|get|like|'
+            r'speak)\s+(?:to|with|a|an)?\s*'
+            r'(?:human|agent|representative|person)\b',
+            lowered,
+        ):
             return "transfer"
-        if "cancel" in lowered:
+        # Pattern 2: standalone unambiguous transfer signals
+        if re.search(
+            r'\b(?:customer\s+service|support\s+agent|real\s+person'
+            r'|human\s+agent|human\s+representative)\b',
+            lowered,
+        ):
+            return "transfer"
+        # Pattern 3: unsupported request types
+        if "discount" in lowered:
+            return "transfer"
+
+        # Cancel — must mention order
+        if re.search(r'\bcancel\b', lowered):
+            if re.search(r'\border\b', lowered) or ORDER_RE.search(lowered):
+                return "cancel_order"
             return "cancel_order"
-        if "exchange" in lowered:
-            return "exchange_items"
-        if "return" in lowered:
-            return "return_items"
-        if "payment" in lowered and ("change" in lowered or "modify" in lowered):
+
+        # Exchange — exclude "exchange rate" and "exchange policy"
+        if re.search(r'\bexchange\b', lowered):
+            if not re.search(r'\bexchange\s+(?:rate|policy)\b', lowered):
+                if re.search(r'\bitems?\b', lowered) or ITEM_RE.search(lowered):
+                    return "exchange_items"
+                return "exchange_items"
+
+        # Return — must mention item or order, not "return policy"
+        if re.search(r'\breturn\b', lowered):
+            if re.search(r'\breturn\s+policy\b', lowered):
+                pass
+            elif re.search(r'\bitems?\b', lowered) or ORDER_RE.search(lowered):
+                return "return_items"
+
+        # Payment modification
+        if "payment" in lowered and re.search(r'\b(change|modify|update|switch)\b',
+                                               lowered):
             return "modify_order_payment"
-        if "item" in lowered and ("change" in lowered or "modify" in lowered):
+
+        # Item modification (pending order)
+        if re.search(r'\b(items?|products?)\b', lowered) and re.search(
+            r'\b(change|modify|replace|switch|swap)\b', lowered):
             return "modify_order_items"
+
+        # User default address
+        if re.search(r'\bmy\b.*\bdefault\b.*\baddress\b', lowered):
+            return "modify_user_address"
         if "default address" in lowered:
             return "modify_user_address"
-        if "address" in lowered and ("change" in lowered or "modify" in lowered):
+
+        # Order address modification
+        if "address" in lowered and re.search(r'\b(change|modify|update)\b',
+                                               lowered):
             if "my" in lowered and "default" in lowered:
                 return "modify_user_address"
             return "modify_order_address"
+
+        # Order mention → lookup
         if "order" in lowered or ORDER_RE.search(lowered):
             return "lookup"
+
         return "unknown"
 
     def _parse_address(self, content: str) -> Optional[Dict[str, str]]:

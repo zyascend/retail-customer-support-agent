@@ -152,7 +152,7 @@ class WriteActionGuard:
             if args.get("reason") not in {"no longer needed", "ordered by mistake"}:
                 return "invalid_cancel_reason"
         if action.tool_name == "modify_pending_order_address":
-            if not order or "pending" not in order.get("status", ""):
+            if not order or order.get("status") != "pending":
                 return "non_pending_order_cannot_be_modified"
         if action.tool_name == "return_delivered_order_items":
             if not order or order.get("status") != "delivered":
@@ -172,7 +172,7 @@ class WriteActionGuard:
             if replacement_reason:
                 return replacement_reason
         if action.tool_name == "modify_pending_order_payment":
-            if not order or "pending" not in order.get("status", ""):
+            if not order or order.get("status") != "pending":
                 return "non_pending_order_cannot_be_modified"
             payment_reason = self._validate_payment_change(db, order, args)
             if payment_reason:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re as _re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol
 
@@ -8,6 +9,16 @@ try:
     from openai import OpenAI
 except ModuleNotFoundError:
     OpenAI = None
+
+
+def _extract_json_block(text: str) -> str:
+    """Extract JSON from LLM output, tolerating markdown fences."""
+    match = _re.search(
+        r'```(?:json)?\s*\n?(.*?)\n?```', text, _re.DOTALL
+    )
+    if match:
+        return match.group(1).strip()
+    return text.strip()
 
 
 class LLMProvider(Protocol):
@@ -43,13 +54,22 @@ class DeepSeekProvider:
     def json(
         self, messages: List[Dict[str, str]], schema: Dict[str, Any]
     ) -> Dict[str, Any]:
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            response_format={"type": "json_object"},
-        )
-        content = response.choices[0].message.content or "{}"
-        return json.loads(content)
+        last_error: Optional[Exception] = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                )
+                content = response.choices[0].message.content or "{}"
+                content = _extract_json_block(content)
+                return json.loads(content)
+            except (json.JSONDecodeError, KeyError) as exc:
+                last_error = exc
+                if attempt == self.max_retries:
+                    raise
+        raise last_error  # type: ignore[misc]
 
     def chat(self, messages: List[Dict[str, str]]) -> str:
         response = self.client.chat.completions.create(

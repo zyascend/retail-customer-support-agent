@@ -6,11 +6,15 @@ from pathlib import Path
 from typing import Optional
 
 DEFAULT_TAU3_RETAIL_ROOT = Path(
-    "/Users/theyang/Documents/ai/AgentProject/data_sources/"
-    "retail_customer_support_transaction_agent/current_tau3_bench"
+    os.path.expanduser(
+        "~/Documents/ai/AgentProject/data_sources/"
+        "retail_customer_support_transaction_agent/current_tau3_bench"
+    )
 )
 DEFAULT_TAU2_BENCH_ROOT = Path(
-    "/Users/theyang/Documents/ai/AgentProject/data_sources/raw/tau2-bench"
+    os.path.expanduser(
+        "~/Documents/ai/AgentProject/data_sources/raw/tau2-bench"
+    )
 )
 DEFAULT_ARTIFACT_DIR = Path("artifacts/phase1")
 DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
@@ -77,7 +81,7 @@ def resolve_config(
         or os.getenv("PHASE1_ARTIFACT_DIR")
         or str(DEFAULT_ARTIFACT_DIR)
     ).expanduser()
-    return AppConfig(
+    config = AppConfig(
         tau3_retail_root=root,
         tau2_bench_root=tau2_root,
         artifact_dir=artifacts,
@@ -91,6 +95,7 @@ def resolve_config(
             "AGENT_LLM_MAX_RETRIES", DEFAULT_AGENT_LLM_MAX_RETRIES
         ),
     )
+    return config
 
 
 def _load_dotenv(path: Path) -> None:
@@ -163,3 +168,5 @@ def _int_env(name: str, default: int) -> int:
     if value < 0:
         raise ValueError(f"{name} must be >= 0")
     return value
+
+

@@ -42,14 +42,25 @@ POLICY_PROMPT = _load_prompt("policy_reasoner_v001", "policy_reasoner_v001.md")
 ACTION_PLANNER_PROMPT = _load_prompt("action_planner_v001", "action_planner_v001.md")
 RESPONSE_PROMPT = _load_prompt("response_generator_v001", "response_generator_v001.md")
 
-INTENT_SLOT_SYSTEM = INTENT_SLOT_PROMPT.content
-POLICY_SYSTEM = POLICY_PROMPT.content
-ACTION_PLANNER_SYSTEM = ACTION_PLANNER_PROMPT.content
-RESPONSE_SYSTEM = RESPONSE_PROMPT.content
+CORE_CONTRACT_PROMPT = _load_prompt("core_contract_v001", "core_contract_v001.md")
+
+INTENT_SLOT_SYSTEM = (
+    CORE_CONTRACT_PROMPT.content + "\n\n" + INTENT_SLOT_PROMPT.content
+)
+POLICY_SYSTEM = (
+    CORE_CONTRACT_PROMPT.content + "\n\n" + POLICY_PROMPT.content
+)
+ACTION_PLANNER_SYSTEM = (
+    CORE_CONTRACT_PROMPT.content + "\n\n" + ACTION_PLANNER_PROMPT.content
+)
+RESPONSE_SYSTEM = (
+    CORE_CONTRACT_PROMPT.content + "\n\n" + RESPONSE_PROMPT.content
+)
 
 
 def prompt_metadata() -> Dict[str, Dict[str, str]]:
     return {
+        "core_contract": CORE_CONTRACT_PROMPT.as_metadata(),
         "intent_slot": INTENT_SLOT_PROMPT.as_metadata(),
         "policy_reasoner": POLICY_PROMPT.as_metadata(),
         "action_planner": ACTION_PLANNER_PROMPT.as_metadata(),
