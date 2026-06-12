@@ -21,12 +21,23 @@ class WorkbenchCaseCatalogTests(unittest.TestCase):
             for item in catalog["all_cases"]
             if item["case_id"] == "cancel_pending_order"
         )
+        source_case = get_case_by_id("cancel_pending_order")
 
         self.assertEqual(case["category"], "cancel")
         self.assertEqual(case["message_count"], 2)
         self.assertEqual(case["expected_intent"], "cancel_order")
         self.assertEqual(case["expected_order_status"], "cancelled")
         self.assertIn("Cancel", case["title"])
+        self.assertEqual(case["messages"], source_case.messages)
+        self.assertIsNot(case["messages"], source_case.messages)
+        for serialized_message, source_message in zip(
+            case["messages"], source_case.messages, strict=True
+        ):
+            self.assertIsNot(serialized_message, source_message)
+        self.assertEqual(case["expected_tool_names"], source_case.expected_tool_names)
+        self.assertIsNot(
+            case["expected_tool_names"], source_case.expected_tool_names
+        )
 
     def test_get_case_by_id_returns_eval_case(self):
         case = get_case_by_id("transfer_to_human")
