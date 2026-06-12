@@ -8,13 +8,36 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     fetchConfig()
       .then(async (nextConfig) => {
+        if (cancelled) {
+          return;
+        }
+
         setConfig(nextConfig);
         const firstCase = nextConfig.case_catalog.demo_cases[0]?.case_id;
-        setSnapshot(await createSession(nextConfig.default_mode, firstCase));
+        const nextSnapshot = await createSession(
+          nextConfig.default_mode,
+          firstCase,
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        setSnapshot(nextSnapshot);
       })
-      .catch((exc: Error) => setError(exc.message));
+      .catch((exc: Error) => {
+        if (!cancelled) {
+          setError(exc.message);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const selectedCase = config?.case_catalog.all_cases.find(

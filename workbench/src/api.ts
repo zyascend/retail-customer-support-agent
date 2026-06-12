@@ -5,15 +5,44 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
     ...init,
   });
-  const payload = await response.json();
+  const text = await response.text();
+  const contentType = response.headers.get("content-type") || "";
+  const isJson = contentType.includes("application/json");
+  let payload: unknown = undefined;
+
+  if (text && isJson) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      if (response.ok) {
+        throw new Error("Failed to parse JSON response");
+      }
+    }
+  } else if (text) {
+    payload = text;
+  }
 
   if (!response.ok) {
     const message =
-      payload?.error?.message || `Request failed: ${response.status}`;
+      getErrorMessage(payload) || text || `Request failed: ${response.status}`;
     throw new Error(message);
   }
 
   return payload as T;
+}
+
+function getErrorMessage(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object" || !("error" in payload)) {
+    return null;
+  }
+
+  const error = (payload as { error?: unknown }).error;
+  if (!error || typeof error !== "object" || !("message" in error)) {
+    return null;
+  }
+
+  const message = (error as { message?: unknown }).message;
+  return typeof message === "string" ? message : null;
 }
 
 export function fetchConfig(): Promise<WorkbenchConfig> {
