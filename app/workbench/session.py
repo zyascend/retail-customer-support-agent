@@ -43,7 +43,7 @@ class WorkbenchSession:
             _validate_mode(mode, self.config)
             self.mode = mode
         if case_id is not None:
-            self.selected_case = get_case_by_id(case_id)
+            self.selected_case = _get_case_or_raise(case_id)
         self.script_cursor = 0
         self.last_error = None
         self._create_runtime_and_state()
@@ -67,15 +67,16 @@ class WorkbenchSession:
                 },
             )
         message = selected_case.messages[self.script_cursor]
-        self._send_user_content(message.get("content", ""))
-        self.script_cursor += 1
+        if self._send_user_content(message.get("content", "")):
+            self.script_cursor += 1
         return self.snapshot()
 
     def run_all(self) -> Dict[str, Any]:
         selected_case = self._require_case()
         while self.script_cursor < len(selected_case.messages):
             message = selected_case.messages[self.script_cursor]
-            self._send_user_content(message.get("content", ""))
+            if not self._send_user_content(message.get("content", "")):
+                break
             self.script_cursor += 1
         return self.snapshot()
 
@@ -125,10 +126,11 @@ class WorkbenchSession:
         )
         self.initial_db_hash = self.runtime.retail_runtime.db_hash()
 
-    def _send_user_content(self, content: str) -> None:
+    def _send_user_content(self, content: str) -> bool:
         try:
             self.runtime.handle_user_message(self.state, content)
             self.last_error = None
+            return True
         except Exception as exc:
             self.last_error = {
                 "code": "runtime_error",
@@ -143,6 +145,7 @@ class WorkbenchSession:
                     detail={"error": str(exc)},
                 )
             )
+            return False
         finally:
             self._write_trace()
 
@@ -187,7 +190,7 @@ class WorkbenchSessionManager:
         self, mode: str = "deterministic", case_id: Optional[str] = None
     ) -> WorkbenchSession:
         _validate_mode(mode, self.config)
-        selected_case = get_case_by_id(case_id) if case_id is not None else None
+        selected_case = _get_case_or_raise(case_id) if case_id is not None else None
         session_id = f"workbench-{uuid.uuid4().hex[:12]}"
         session = WorkbenchSession(
             config=self.config,
@@ -209,6 +212,19 @@ class WorkbenchSessionManager:
                 status_code=404,
             )
         return session
+
+
+def _get_case_or_raise(case_id: str) -> EvalCase:
+    try:
+        return get_case_by_id(case_id)
+    except ValueError as exc:
+        raise WorkbenchAPIError(
+            code="case_not_found",
+            message="Case was not found.",
+            recoverable=True,
+            details={"case_id": case_id},
+            status_code=404,
+        ) from exc
 
 
 def _validate_mode(mode: str, config: AppConfig) -> None:

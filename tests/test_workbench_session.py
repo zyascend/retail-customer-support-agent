@@ -91,6 +91,55 @@ class WorkbenchSessionTests(unittest.TestCase):
             self.assertEqual(context.exception.status_code, 404)
             self.assertEqual(context.exception.details, {"session_id": "missing"})
 
+    def test_runtime_failure_keeps_script_cursor_on_failing_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
+            session = manager.create_session(
+                mode="deterministic", case_id="cancel_pending_order"
+            )
+
+            def fail_handle_user_message(state, content):
+                raise RuntimeError("boom")
+
+            session.runtime.handle_user_message = fail_handle_user_message
+
+            step_snapshot = session.step()
+
+            self.assertEqual(step_snapshot["script_cursor"], 0)
+            self.assertEqual(step_snapshot["last_error"]["code"], "runtime_error")
+            self.assertTrue(Path(step_snapshot["trace_artifact_path"]).exists())
+
+            run_all_snapshot = session.run_all()
+
+            self.assertEqual(run_all_snapshot["script_cursor"], 0)
+            self.assertEqual(run_all_snapshot["last_error"]["code"], "runtime_error")
+
+    def test_unknown_case_ids_raise_structured_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
+
+            with self.assertRaises(WorkbenchAPIError) as create_context:
+                manager.create_session(
+                    mode="deterministic", case_id="missing_case"
+                )
+
+            self.assertEqual(create_context.exception.code, "case_not_found")
+            self.assertEqual(create_context.exception.status_code, 404)
+            self.assertEqual(
+                create_context.exception.details, {"case_id": "missing_case"}
+            )
+
+            session = manager.create_session(mode="deterministic")
+
+            with self.assertRaises(WorkbenchAPIError) as reset_context:
+                session.reset(case_id="missing_case")
+
+            self.assertEqual(reset_context.exception.code, "case_not_found")
+            self.assertEqual(reset_context.exception.status_code, 404)
+            self.assertEqual(
+                reset_context.exception.details, {"case_id": "missing_case"}
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
