@@ -60,6 +60,43 @@ SUPPORTED_PENDING_ACTIONS = {
     "exchange_delivered_order_items",
 }
 
+GUARD_USER_MESSAGES = {
+    "replacement_item_product_mismatch": "I can only replace an item with another available option from the same product.",
+    "replacement_item_unavailable": "That replacement item is not available.",
+    "replacement_item_count_mismatch": "The number of replacement items must match the number of items being replaced.",
+    "replacement_item_not_found": "That replacement item could not be found in the catalog.",
+    "order_item_not_found": "The item you want to replace is not in that order.",
+    "payment_method_not_owned": "I can only use payment methods saved on your account.",
+    "gift_card_balance_insufficient": "That gift card does not have enough balance for this order.",
+    "same_payment_method": "The new payment method must be different from the current one.",
+    "non_pending_order_cannot_be_modified": "I can only modify orders that are still pending.",
+    "non_pending_order_cannot_be_cancelled": "I can only cancel orders that are still pending.",
+    "non_delivered_order_cannot_be_returned": "I can only create returns for delivered orders.",
+    "non_delivered_order_cannot_be_exchanged": "I can only create exchanges for delivered orders.",
+    "exchange_item_count_mismatch": "The number of new items must match the number of items being exchanged.",
+    "ownership_violation": "I cannot access or modify orders for another account.",
+    "read_before_write_required": "I need to review the order details before making changes. Please ask me to look up the order first.",
+    "authentication_required": "Please verify your identity before making changes.",
+    "user_not_found": "I could not verify your account. Please provide different credentials.",
+    "invalid_cancel_reason": "Please provide a valid cancellation reason: no longer needed or ordered by mistake.",
+    "duplicate_write_lock": "A similar change is already in progress for this order.",
+    "order_already_cancelled_or_locked": "This order has already been cancelled.",
+    "order_items_already_modified": "The items in this order have already been modified.",
+    "item_already_returned_or_exchanged": "One or more of these items has already been returned or exchanged.",
+    "unsupported_in_mvp": "That write operation is not yet supported.",
+    "unknown_write_action": "That update type is not recognised.",
+    "explicit_confirmation_required": "Please confirm the requested update before proceeding.",
+    "order_not_found": "That order could not be found.",
+}
+
+
+def _map_guard_error_to_user_message(error: str) -> str:
+    """Return a user-readable message for a guard block reason."""
+    return GUARD_USER_MESSAGES.get(
+        str(error),
+        "I could not complete that update. Please try again or contact support.",
+    )
+
 
 @dataclass
 class AgentRunResult:
@@ -190,7 +227,7 @@ class AgentRuntime:
                 else:
                     self._assistant(
                         state,
-                        f"I could not complete that update: {record.error}.",
+                        _map_guard_error_to_user_message(str(record.error)),
                     )
             elif resolution == "deny":
                 state.pending_action = None

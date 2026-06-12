@@ -698,6 +698,23 @@ class AgentRuntimePhase5Tests(unittest.TestCase):
             self.assertEqual(state.current_intent, "modify_user_address")
             self.assertEqual(state.pending_action.action_name, "modify_user_address")
 
+    def test_guard_block_response_is_user_readable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = self._runtime(tmp)
+            state = ConversationState(session_id="test")
+
+            runtime.handle_user_message(
+                state,
+                (
+                    f"My email is {PENDING_EMAIL}. Change item 1586641416 in order "
+                    f"{PENDING_ORDER} to new item 9612497925."
+                ),
+            )
+            response = runtime.handle_user_message(state, "yes")
+
+            self.assertIn("same product", response.lower())
+            self.assertNotIn("replacement_item_product_mismatch", response)
+
 
 if __name__ == "__main__":
     unittest.main()
