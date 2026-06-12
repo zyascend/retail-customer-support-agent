@@ -2,6 +2,7 @@ import type { WorkbenchSnapshot } from "../types";
 
 interface BusinessStateProps {
   snapshot: WorkbenchSnapshot;
+  busy: boolean;
   onConfirm: () => void;
   onDeny: () => void;
   onChange: () => void;
@@ -9,6 +10,7 @@ interface BusinessStateProps {
 
 export function BusinessState({
   snapshot,
+  busy,
   onConfirm,
   onDeny,
   onChange,
@@ -58,13 +60,18 @@ export function BusinessState({
           <p>{pendingAction.user_facing_summary}</p>
           <pre>{formatJson(pendingAction.arguments)}</pre>
           <div className="control-row compact">
-            <button className="button button-primary" onClick={onConfirm} type="button">
+            <button
+              className="button button-primary"
+              disabled={busy}
+              onClick={onConfirm}
+              type="button"
+            >
               Confirm
             </button>
-            <button className="button" onClick={onDeny} type="button">
+            <button className="button" disabled={busy} onClick={onDeny} type="button">
               Deny
             </button>
-            <button className="button" onClick={onChange} type="button">
+            <button className="button" disabled={busy} onClick={onChange} type="button">
               Change
             </button>
           </div>

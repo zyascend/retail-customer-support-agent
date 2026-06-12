@@ -4,7 +4,7 @@ import type { TimelineEvent } from "../types";
 interface TimelineProps {
   events: TimelineEvent[];
   selectedEventId: string | null;
-  onSelectEvent: (event: TimelineEvent) => void;
+  onSelectEvent: (eventId: string) => void;
 }
 
 export function Timeline({
@@ -29,8 +29,9 @@ export function Timeline({
             return (
               <li key={event.id}>
                 <button
+                  aria-current={isSelected ? "true" : undefined}
                   className={isSelected ? "timeline-row selected" : "timeline-row"}
-                  onClick={() => onSelectEvent(event)}
+                  onClick={() => onSelectEvent(event.id)}
                   type="button"
                 >
                   <span className="timeline-main">

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createSession,
   fetchConfig,
@@ -14,7 +14,6 @@ import { Inspector } from "./components/Inspector";
 import { RunControl } from "./components/RunControl";
 import { Timeline } from "./components/Timeline";
 import type {
-  TimelineEvent,
   WorkbenchConfig,
   WorkbenchMode,
   WorkbenchSnapshot,
@@ -23,9 +22,10 @@ import type {
 export function App() {
   const [config, setConfig] = useState<WorkbenchConfig | null>(null);
   const [snapshot, setSnapshot] = useState<WorkbenchSnapshot | null>(null);
-  const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const busyRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,7 +48,7 @@ export function App() {
         }
 
         setSnapshot(nextSnapshot);
-        setSelectedEvent(nextSnapshot.timeline.at(-1) || null);
+        setSelectedEventId(nextSnapshot.timeline.at(-1)?.id || null);
       })
       .catch((exc: Error) => {
         if (!cancelled) {
@@ -61,35 +61,44 @@ export function App() {
     };
   }, []);
 
-  async function mutate(action: () => Promise<WorkbenchSnapshot>) {
+  async function mutate(action: () => Promise<WorkbenchSnapshot>): Promise<boolean> {
+    if (busyRef.current) {
+      return false;
+    }
+
+    busyRef.current = true;
     setBusy(true);
     setError(null);
 
     try {
       const nextSnapshot = await action();
       setSnapshot(nextSnapshot);
-      setSelectedEvent((currentEvent) => {
+      setSelectedEventId((currentEventId) => {
         if (
-          currentEvent &&
-          nextSnapshot.timeline.some((event) => event.id === currentEvent.id)
+          currentEventId &&
+          nextSnapshot.timeline.some((event) => event.id === currentEventId)
         ) {
-          return currentEvent;
+          return currentEventId;
         }
 
-        return nextSnapshot.timeline.at(-1) || null;
+        return nextSnapshot.timeline.at(-1)?.id || null;
       });
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Workbench request failed");
+      return false;
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
+
+    return true;
   }
 
   const selectedCase = config?.case_catalog.all_cases.find(
     (workbenchCase) => workbenchCase.case_id === snapshot?.selected_case_id,
   );
   const activeEvent =
-    selectedEvent ||
+    snapshot?.timeline.find((event) => event.id === selectedEventId) ||
     (snapshot?.timeline.length ? snapshot.timeline[snapshot.timeline.length - 1] : null);
 
   function handleSelectCase(caseId: string) {
@@ -97,7 +106,7 @@ export function App() {
       return;
     }
 
-    mutate(() => selectCase(snapshot.session_id, caseId));
+    return mutate(() => selectCase(snapshot.session_id, caseId));
   }
 
   function handleStep() {
@@ -105,7 +114,7 @@ export function App() {
       return;
     }
 
-    mutate(() => stepSession(snapshot.session_id));
+    return mutate(() => stepSession(snapshot.session_id));
   }
 
   function handleRunAll() {
@@ -113,7 +122,7 @@ export function App() {
       return;
     }
 
-    mutate(() => runAll(snapshot.session_id));
+    return mutate(() => runAll(snapshot.session_id));
   }
 
   function handleReset() {
@@ -121,17 +130,17 @@ export function App() {
       return;
     }
 
-    mutate(() =>
+    return mutate(() =>
       resetSession(snapshot.session_id, snapshot.selected_case_id || undefined, snapshot.mode),
     );
   }
 
   function handleSendMessage(message: string) {
     if (!snapshot) {
-      return;
+      return false;
     }
 
-    mutate(() => sendMessage(snapshot.session_id, message));
+    return mutate(() => sendMessage(snapshot.session_id, message));
   }
 
   function handleModeChange(mode: WorkbenchMode) {
@@ -139,7 +148,7 @@ export function App() {
       return;
     }
 
-    mutate(() =>
+    return mutate(() =>
       resetSession(snapshot.session_id, snapshot.selected_case_id || undefined, mode),
     );
   }
@@ -176,6 +185,7 @@ export function App() {
             snapshot={snapshot}
           />
           <BusinessState
+            busy={busy}
             onChange={() => handleSendMessage("change")}
             onConfirm={() => handleSendMessage("yes")}
             onDeny={() => handleSendMessage("no")}
@@ -184,7 +194,7 @@ export function App() {
           <Conversation snapshot={snapshot} />
           <Timeline
             events={snapshot.timeline}
-            onSelectEvent={setSelectedEvent}
+            onSelectEvent={setSelectedEventId}
             selectedEventId={activeEvent?.id || null}
           />
           <Inspector event={activeEvent} snapshot={snapshot} />

@@ -15,7 +15,7 @@ interface RunControlProps {
   onStep: () => void;
   onRunAll: () => void;
   onReset: () => void;
-  onSendMessage: (message: string) => void;
+  onSendMessage: (message: string) => void | boolean | Promise<void | boolean>;
   onModeChange: (mode: WorkbenchMode) => void;
 }
 
@@ -35,27 +35,46 @@ export function RunControl({
   const [manualMessage, setManualMessage] = useState("");
   const cases = showAll ? catalog.all_cases : catalog.demo_cases;
 
-  const selectedCaseId = useMemo(() => {
-    const fallback = cases[0]?.case_id || "";
+  const caseOptions = useMemo(() => {
     if (!snapshot.selected_case_id) {
-      return fallback;
+      return cases;
     }
 
-    return cases.some((workbenchCase) => workbenchCase.case_id === snapshot.selected_case_id)
-      ? snapshot.selected_case_id
-      : fallback;
-  }, [cases, snapshot.selected_case_id]);
+    const hasSelectedCase = cases.some(
+      (workbenchCase) => workbenchCase.case_id === snapshot.selected_case_id,
+    );
+    if (hasSelectedCase) {
+      return cases;
+    }
+
+    const selectedCase = catalog.all_cases.find(
+      (workbenchCase) => workbenchCase.case_id === snapshot.selected_case_id,
+    );
+    if (!selectedCase) {
+      return cases;
+    }
+
+    return [selectedCase, ...cases];
+  }, [catalog.all_cases, cases, snapshot.selected_case_id]);
+
+  const selectedCaseId = snapshot.selected_case_id || caseOptions[0]?.case_id || "";
+  const hasSelectedCaseOption = caseOptions.some(
+    (workbenchCase) => workbenchCase.case_id === selectedCaseId,
+  );
+  const hasAnyCaseOption = caseOptions.length > 0 || Boolean(selectedCaseId);
 
   const canSend = manualMessage.trim().length > 0 && !busy;
 
-  function handleSend() {
+  async function handleSend() {
     const nextMessage = manualMessage.trim();
     if (!nextMessage) {
       return;
     }
 
-    onSendMessage(nextMessage);
-    setManualMessage("");
+    const sent = await onSendMessage(nextMessage);
+    if (sent !== false) {
+      setManualMessage("");
+    }
   }
 
   return (
@@ -104,11 +123,14 @@ export function RunControl({
       <label className="field">
         <span>Case</span>
         <select
-          disabled={busy || cases.length === 0}
+          disabled={busy || !hasAnyCaseOption}
           onChange={(event) => onSelectCase(event.target.value)}
           value={selectedCaseId}
         >
-          {cases.map((workbenchCase) => (
+          {selectedCaseId && !hasSelectedCaseOption ? (
+            <option value={selectedCaseId}>{selectedCaseId}</option>
+          ) : null}
+          {caseOptions.map((workbenchCase) => (
             <option key={workbenchCase.case_id} value={workbenchCase.case_id}>
               {workbenchCase.title}
             </option>
