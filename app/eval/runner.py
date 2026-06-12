@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -122,21 +124,26 @@ class CuratedEvalRunner:
         self.require_llm = require_llm
         self.progress_callback = progress_callback
 
-    def run(self, *, subset: str = "curated_mvp", trials: int = 1) -> EvalRunSummary:
+    def run(
+        self,
+        *,
+        subset: str = "curated_mvp",
+        trials: int = 1,
+        max_workers: int = 1,
+    ) -> EvalRunSummary:
         eval_run_id = "eval-" + uuid.uuid4().hex[:12]
         cases = get_cases(subset)
         results: List[EvalCaseResult] = []
         for trial in range(trials):
-            for case in cases:
-                if self.progress_callback:
-                    self.progress_callback(
-                        "start",
-                        self._progress_placeholder(case=case, trial=trial),
-                    )
-                result = self._run_case(eval_run_id, case, trial)
-                results.append(result)
-                if self.progress_callback:
-                    self.progress_callback("finish", result)
+            if max_workers > 1:
+                trial_results = self._run_trial_parallel(
+                    eval_run_id, cases, trial, max_workers,
+                )
+            else:
+                trial_results = self._run_trial_sequential(
+                    eval_run_id, cases, trial,
+                )
+            results.extend(trial_results)
         passed_count = sum(1 for result in results if result.passed)
         result_path = self.artifact_dir / "eval_runs" / f"{eval_run_id}.json"
         report_path = self.artifact_dir / "reports" / f"{eval_run_id}.json"
@@ -172,6 +179,61 @@ class CuratedEvalRunner:
         self._write_summary(summary)
         self._write_report(summary)
         return summary
+
+    def _run_trial_sequential(
+        self,
+        eval_run_id: str,
+        cases: List[EvalCase],
+        trial: int,
+    ) -> List[EvalCaseResult]:
+        results: List[EvalCaseResult] = []
+        for case in cases:
+            if self.progress_callback:
+                self.progress_callback(
+                    "start",
+                    self._progress_placeholder(case=case, trial=trial),
+                )
+            result = self._run_case(eval_run_id, case, trial)
+            results.append(result)
+            if self.progress_callback:
+                self.progress_callback("finish", result)
+        return results
+
+    def _run_trial_parallel(
+        self,
+        eval_run_id: str,
+        cases: List[EvalCase],
+        trial: int,
+        max_workers: int,
+    ) -> List[EvalCaseResult]:
+        results: List[EvalCaseResult] = []
+        lock = threading.Lock()
+        workers = min(max_workers, len(cases))
+
+        def _run_one(case: EvalCase, idx: int) -> EvalCaseResult:
+            result = self._run_case(eval_run_id, case, trial)
+            if self.progress_callback:
+                with lock:
+                    self.progress_callback("finish", result)
+            return result
+
+        # Signal start for all cases
+        if self.progress_callback:
+            for case in cases:
+                self.progress_callback(
+                    "start",
+                    self._progress_placeholder(case=case, trial=trial),
+                )
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(_run_one, case, i)
+                for i, case in enumerate(cases)
+            ]
+            for future in as_completed(futures):
+                results.append(future.result())
+
+        return results
 
     def _run_case(
         self, eval_run_id: str, case: EvalCase, trial: int
