@@ -626,5 +626,78 @@ class RuntimeSmokeTests(unittest.TestCase):
         )
 
 
+class AgentRuntimePhase5Tests(unittest.TestCase):
+    def _runtime(self, tmp: str) -> AgentRuntime:
+        return AgentRuntime(
+            resolve_config(artifact_dir=tmp),
+            provider=DisabledLLMProvider(),
+        )
+
+    def test_authenticates_by_name_and_zip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = self._runtime(tmp)
+            state = ConversationState(session_id="test")
+
+            response = runtime.handle_user_message(
+                state,
+                "My name is Sofia Rossi and my zip code is 78784. What is the status of order #W5918442?",
+            )
+
+            self.assertIn("pending", response.lower())
+            self.assertEqual(state.authenticated_user_id, "sofia_rossi_8776")
+            self.assertEqual(state.auth_method, "name_zip")
+
+    def test_plans_modify_order_items(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = self._runtime(tmp)
+            state = ConversationState(session_id="test")
+
+            response = runtime.handle_user_message(
+                state,
+                (
+                    f"My email is {PENDING_EMAIL}. Change item 1586641416 "
+                    f"in order {PENDING_ORDER} to new item 5925362855."
+                ),
+            )
+
+            self.assertIn("confirm", response.lower())
+            self.assertEqual(state.current_intent, "modify_order_items")
+            self.assertEqual(state.pending_action.action_name, "modify_pending_order_items")
+
+    def test_plans_modify_order_payment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = self._runtime(tmp)
+            state = ConversationState(session_id="test")
+
+            response = runtime.handle_user_message(
+                state,
+                (
+                    f"My email is {PENDING_EMAIL}. Change payment for "
+                    f"order {PENDING_ORDER} to credit_card_8105988."
+                ),
+            )
+
+            self.assertIn("confirm", response.lower())
+            self.assertEqual(state.current_intent, "modify_order_payment")
+            self.assertEqual(state.pending_action.action_name, "modify_pending_order_payment")
+
+    def test_plans_modify_user_default_address(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = self._runtime(tmp)
+            state = ConversationState(session_id="test")
+
+            response = runtime.handle_user_message(
+                state,
+                (
+                    f"My email is {PENDING_EMAIL}. Change my default address to "
+                    "12 Oak St, Unit 4, Austin, TX, USA, 78701."
+                ),
+            )
+
+            self.assertIn("confirm", response.lower())
+            self.assertEqual(state.current_intent, "modify_user_address")
+            self.assertEqual(state.pending_action.action_name, "modify_user_address")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -30,6 +30,11 @@ from app.tools.registry import ToolRegistry
 from app.tools.retail_adapter import RetailAdapter, get_order_from_db
 
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
+ZIP_RE = re.compile(r"\b\d{5}(?:-\d{4})?\b")
+NAME_ZIP_RE = re.compile(
+    r"(?:my name is|i am|i'm)\s+([A-Za-z]+)\s+([A-Za-z]+).*?\bzip(?: code)? is\s+(\d{5}(?:-\d{4})?)",
+    re.IGNORECASE,
+)
 ORDER_RE = re.compile(r"#W\d+")
 ITEM_RE = re.compile(r"\b\d{8,}\b")
 PAYMENT_RE = re.compile(r"\b(?:gift_card|credit_card|paypal)_\d+\b")
@@ -37,6 +42,9 @@ SUPPORTED_INTENTS = {
     "lookup",
     "cancel_order",
     "modify_order_address",
+    "modify_order_items",
+    "modify_order_payment",
+    "modify_user_address",
     "return_items",
     "exchange_items",
     "transfer",
@@ -45,6 +53,9 @@ SUPPORTED_INTENTS = {
 SUPPORTED_PENDING_ACTIONS = {
     "cancel_pending_order",
     "modify_pending_order_address",
+    "modify_pending_order_items",
+    "modify_pending_order_payment",
+    "modify_user_address",
     "return_delivered_order_items",
     "exchange_delivered_order_items",
 }
@@ -208,6 +219,8 @@ class AgentRuntime:
             return
         email_match = EMAIL_RE.search(content)
         if not email_match:
+            if self._identity_resolver_name_zip(state, content):
+                return
             self._assistant(
                 state,
                 "Please provide the email address on your account so I can verify you.",
@@ -235,6 +248,41 @@ class AgentRuntime:
         if user_record.status == "success":
             state.loaded_context.users[user_id] = user_record.observation
         state.add_step("identity_resolver", status="authenticated", user_id=user_id)
+
+    def _identity_resolver_name_zip(
+        self, state: ConversationState, content: str
+    ) -> bool:
+        if state.authenticated_user_id or self._has_assistant_response(state):
+            return False
+        name_zip_match = NAME_ZIP_RE.search(content)
+        if not name_zip_match:
+            return False
+        first_name, last_name, zip_code = name_zip_match.groups()
+        record = self.gateway.execute(
+            state=state,
+            tool_name="find_user_id_by_name_zip",
+            arguments={
+                "first_name": first_name,
+                "last_name": last_name,
+                "zip": zip_code,
+            },
+        )
+        if record.status != "success":
+            self._assistant(state, "I could not verify that name and zip code.")
+            return False
+        user_id = str(record.observation)
+        state.authenticated_user_id = user_id
+        state.auth_method = "name_zip"
+        state.active_user_identity = {"first_name": first_name, "last_name": last_name, "zip": zip_code, "user_id": user_id}
+        user_record = self.gateway.execute(
+            state=state,
+            tool_name="get_user_details",
+            arguments={"user_id": user_id},
+        )
+        if user_record.status == "success":
+            state.loaded_context.users[user_id] = user_record.observation
+        state.add_step("identity_resolver", status="authenticated", user_id=user_id, method="name_zip")
+        return True
 
     def _intent_and_slot_extractor(
         self, state: ConversationState, content: str
@@ -283,7 +331,7 @@ class AgentRuntime:
         if address:
             state.slots["address"] = address
         new_item_marker = re.search(
-            r"(?:new item|exchange for|instead)\s+(\d{8,})",
+            r"(?:new item|exchange for|instead|to new item)\s+(\d{8,})",
             lowered,
         )
         if new_item_marker:
@@ -332,6 +380,9 @@ class AgentRuntime:
         write_intents = {
             "cancel_order",
             "modify_order_address",
+            "modify_order_items",
+            "modify_order_payment",
+            "modify_user_address",
             "return_items",
             "exchange_items",
         }
@@ -398,6 +449,15 @@ class AgentRuntime:
             return
         if intent == "modify_order_address":
             self._plan_address_change(state)
+            return
+        if intent == "modify_order_items":
+            self._plan_modify_items(state)
+            return
+        if intent == "modify_order_payment":
+            self._plan_modify_payment(state)
+            return
+        if intent == "modify_user_address":
+            self._plan_user_address(state)
             return
         if intent == "return_items":
             self._plan_return(state)
@@ -535,6 +595,70 @@ class AgentRuntime:
             },
             f"Request an exchange for order {state.slots['order_id']}. "
             "Please confirm yes or no.",
+        )
+
+    def _plan_modify_items(self, state: ConversationState) -> None:
+        order_id = state.slots.get("order_id")
+        item_ids = state.slots.get("item_ids")
+        new_item_ids = state.slots.get("new_item_ids")
+        if not order_id:
+            self._assistant(state, "Which order would you like to modify items for?")
+            return
+        if not item_ids:
+            self._assistant(state, "Which item would you like to replace?")
+            return
+        if not new_item_ids:
+            self._assistant(state, "Please provide the new item id for the replacement.")
+            return
+        self._set_pending(
+            state,
+            "modify_pending_order_items",
+            {
+                "order_id": order_id,
+                "item_ids": item_ids,
+                "new_item_ids": new_item_ids,
+            },
+            f"Replace items in order {order_id}. Please confirm yes or no.",
+        )
+
+    def _plan_modify_payment(self, state: ConversationState) -> None:
+        order_id = state.slots.get("order_id")
+        payment_method_id = state.slots.get("payment_method_id")
+        if not order_id:
+            self._assistant(state, "Which order would you like to change payment for?")
+            return
+        if not payment_method_id:
+            self._assistant(state, "Which payment method would you like to use?")
+            return
+        self._set_pending(
+            state,
+            "modify_pending_order_payment",
+            {
+                "order_id": order_id,
+                "payment_method_id": payment_method_id,
+            },
+            f"Change payment for order {order_id}. Please confirm yes or no.",
+        )
+
+    def _plan_user_address(self, state: ConversationState) -> None:
+        address = state.slots.get("address")
+        if not address:
+            self._assistant(
+                state,
+                "Please provide the new address as: address to line1, line2, "
+                "city, state, country, zip.",
+            )
+            return
+        user_id = state.authenticated_user_id
+        if not user_id:
+            self._assistant(state, "Please verify your identity first.")
+            return
+        args = {"user_id": user_id, **address}
+        self._set_pending(
+            state,
+            "modify_user_address",
+            args,
+            "Modify your default address. Please confirm yes or no.",
         )
 
     def _respond_with_order_lookup(self, state: ConversationState) -> None:
@@ -771,6 +895,23 @@ class AgentRuntime:
                 "country",
                 "zip",
             ),
+            "modify_pending_order_items": (
+                "order_id",
+                "item_ids",
+                "new_item_ids",
+            ),
+            "modify_pending_order_payment": (
+                "order_id",
+                "payment_method_id",
+            ),
+            "modify_user_address": (
+                "user_id",
+                "address1",
+                "city",
+                "state",
+                "country",
+                "zip",
+            ),
             "return_delivered_order_items": (
                 "order_id",
                 "item_ids",
@@ -820,6 +961,18 @@ class AgentRuntime:
                 f"Modify the shipping address for order {order_id}. "
                 "Please confirm yes or no."
             )
+        if action_name == "modify_pending_order_items":
+            return (
+                f"Replace items in order {order_id}. "
+                "Please confirm yes or no."
+            )
+        if action_name == "modify_pending_order_payment":
+            return (
+                f"Change payment for order {order_id}. "
+                "Please confirm yes or no."
+            )
+        if action_name == "modify_user_address":
+            return "Modify your default address. Please confirm yes or no."
         if action_name == "return_delivered_order_items":
             return f"Request a return for order {order_id}. Please confirm yes or no."
         return f"Request an exchange for order {order_id}. Please confirm yes or no."
@@ -829,18 +982,26 @@ class AgentRuntime:
             return "transfer"
         if "cancel" in lowered:
             return "cancel_order"
-        if "return" in lowered:
-            return "return_items"
         if "exchange" in lowered:
             return "exchange_items"
+        if "return" in lowered:
+            return "return_items"
+        if "payment" in lowered and ("change" in lowered or "modify" in lowered):
+            return "modify_order_payment"
+        if "item" in lowered and ("change" in lowered or "modify" in lowered):
+            return "modify_order_items"
+        if "default address" in lowered:
+            return "modify_user_address"
         if "address" in lowered and ("change" in lowered or "modify" in lowered):
+            if "my" in lowered and "default" in lowered:
+                return "modify_user_address"
             return "modify_order_address"
         if "order" in lowered or ORDER_RE.search(lowered):
             return "lookup"
         return "unknown"
 
     def _parse_address(self, content: str) -> Optional[Dict[str, str]]:
-        marker = re.search(r"address to\s+(.+)$", content, re.IGNORECASE)
+        marker = re.search(r"(?:default )?address to\s+(.+)$", content, re.IGNORECASE)
         if not marker:
             return None
         parts = [part.strip() for part in marker.group(1).split(",")]
