@@ -1,3 +1,5 @@
 from __future__ import annotations
 
-__all__: list[str] = []
+from app.workbench.api import create_app
+
+__all__ = ["create_app"]
