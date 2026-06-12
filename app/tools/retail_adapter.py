@@ -5,11 +5,10 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
 from app.config import AppConfig
 from app.ops.serialization import stable_hash, to_plain_data
-
 
 READ_TOOLS = {
     "find_user_id_by_email",

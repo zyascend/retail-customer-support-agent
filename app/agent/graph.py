@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Iterable
 
-
 PHASE1_NODES = (
     "receive_message",
     "conversation_gate",

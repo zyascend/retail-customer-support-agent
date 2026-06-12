@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-
 DEFAULT_TAU2_BENCH_ROOT = Path(
     "/Users/theyang/Documents/ai/AgentProject/data_sources/raw/tau2-bench"
 )

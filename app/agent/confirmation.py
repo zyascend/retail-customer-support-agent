@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-
 ConfirmationIntent = Literal["confirm", "deny", "changed", "unknown"]
 
 CONFIRM_TERMS = {

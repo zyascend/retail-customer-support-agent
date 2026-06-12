@@ -6,10 +6,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from app.config import resolve_config
 from app.agent.models import ConversationState
 from app.agent.prompts import prompt_metadata
 from app.agent.runtime import AgentRuntime
+from app.config import resolve_config
 from app.ops.tracing import TraceWriter
 
 

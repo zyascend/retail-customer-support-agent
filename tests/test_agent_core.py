@@ -5,17 +5,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.config import resolve_config
 from app.agent.confirmation import ConfirmationResolver
 from app.agent.guard import WriteActionGuard
 from app.agent.models import ConversationState, ToolCall
 from app.agent.providers import DisabledLLMProvider
 from app.agent.runtime import AgentRuntime
+from app.config import resolve_config
+from app.ops.tracing import TraceWriter
 from app.tools.gateway import ToolGateway
 from app.tools.registry import ToolRegistry
 from app.tools.retail_adapter import RetailAdapter
-from app.ops.tracing import TraceWriter
-
 
 PENDING_ORDER = "#W5918442"
 PENDING_EMAIL = "sofia.rossi2645@example.com"

@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 from typing import Any, Callable, Dict, Optional
 
-
 try:
     from pydantic import BaseModel, Field
 except ModuleNotFoundError:

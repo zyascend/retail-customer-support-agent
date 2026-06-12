@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-
 DEFAULT_TAU3_RETAIL_ROOT = Path(
     "/Users/theyang/Documents/ai/AgentProject/data_sources/"
     "retail_customer_support_transaction_agent/current_tau3_bench"

@@ -7,7 +7,6 @@ from app.agent.models import ConversationState, ToolCall
 from app.ops.serialization import stable_hash
 from app.tools.retail_adapter import get_order_from_db, get_user_from_db
 
-
 WRITE_ACTIONS = {
     "cancel_pending_order",
     "modify_pending_order_address",

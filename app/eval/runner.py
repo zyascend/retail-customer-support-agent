@@ -10,13 +10,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from app.agent.providers import DisabledLLMProvider
 from app.agent.prompts import prompt_metadata
+from app.agent.providers import DisabledLLMProvider
 from app.agent.runtime import AgentRuntime
 from app.config import AppConfig
 from app.eval.cases import EvalCase, get_cases
+from app.eval.metrics import (
+    EVAL_RUN_SUMMARY_SCHEMA_VERSION,
+    apply_case_diagnostics,
+    build_failure_analysis,
+    build_report_artifact,
+    compute_metrics,
+)
 from app.tools.retail_adapter import get_order_from_db
-
 
 DEFAULT_EVAL_ARTIFACT_DIR = Path("artifacts/phase2")
 ORDER_RE = re.compile(r"#W\d+")
@@ -24,6 +30,8 @@ ORDER_RE = re.compile(r"#W\d+")
 
 @dataclass
 class EvalCaseResult:
+    run_id: str
+    session_id: str
     case_id: str
     category: str
     trial: int
@@ -43,14 +51,34 @@ class EvalCaseResult:
     actual_guard_block_reasons: List[str] = field(default_factory=list)
     initial_db_hash: Optional[str] = None
     final_db_hash: Optional[str] = None
+    db_changed: bool = False
+    order_status_before: Optional[str] = None
+    order_status_after: Optional[str] = None
     duration_seconds: float = 0.0
     tool_protocol_violations: int = 0
     tool_errors: int = 0
     guard_blocks: int = 0
+    db_accuracy_passed: Optional[bool] = None
+    db_accuracy_basis: Optional[str] = None
+    tool_call_count: int = 0
+    successful_tool_calls: int = 0
+    failed_tool_calls: int = 0
+    blocked_tool_calls: int = 0
+    mutation_detected: bool = False
+    unexpected_mutation: bool = False
+    trial_turn_count: int = 0
+    message_count: int = 0
+    policy_check_count: int = 0
+    failure_category: Optional[str] = None
+    failure_summary: Optional[str] = None
+    expected_actual_diff: Dict[str, Any] = field(default_factory=dict)
+    replay_metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class EvalRunSummary:
+    schema_version: str
+    artifact_created_at: str
     eval_run_id: str
     subset: str
     trials: int
@@ -64,10 +92,13 @@ class EvalRunSummary:
     passed_count: int
     pass_rate: float
     result_artifact_path: str
+    report_artifact_path: str
     dataset_root: str
     dataset_db_path: str
     code_commit: str
     prompt_metadata: Dict[str, Dict[str, str]]
+    metrics: Dict[str, Any]
+    failure_analysis: Dict[str, Any]
     results: List[EvalCaseResult]
 
     def as_dict(self) -> Dict[str, Any]:
@@ -107,19 +138,14 @@ class CuratedEvalRunner:
                     self.progress_callback("finish", result)
         passed_count = sum(1 for result in results if result.passed)
         result_path = self.artifact_dir / "eval_runs" / f"{eval_run_id}.json"
+        report_path = self.artifact_dir / "reports" / f"{eval_run_id}.json"
         created_at = datetime.now(timezone.utc).isoformat()
         code_commit = _git_commit()
-        result_path = self._write_summary(
-            eval_run_id=eval_run_id,
-            subset=subset,
-            trials=trials,
-            created_at=created_at,
-            results=results,
-            passed_count=passed_count,
-            result_path=result_path,
-            code_commit=code_commit,
-        )
-        return EvalRunSummary(
+        metrics = compute_metrics(results)
+        failure_analysis = build_failure_analysis(results)
+        summary = EvalRunSummary(
+            schema_version=EVAL_RUN_SUMMARY_SCHEMA_VERSION,
+            artifact_created_at=created_at,
             eval_run_id=eval_run_id,
             subset=subset,
             trials=trials,
@@ -133,12 +159,18 @@ class CuratedEvalRunner:
             passed_count=passed_count,
             pass_rate=passed_count / len(results) if results else 0.0,
             result_artifact_path=str(result_path),
+            report_artifact_path=str(report_path),
             dataset_root=str(self.config.tau3_retail_root),
             dataset_db_path=str(self.config.retail_db_path),
             code_commit=code_commit,
             prompt_metadata=prompt_metadata(),
+            metrics=metrics,
+            failure_analysis=failure_analysis,
             results=results,
         )
+        self._write_summary(summary)
+        self._write_report(summary)
+        return summary
 
     def _run_case(
         self, eval_run_id: str, case: EvalCase, trial: int
@@ -160,6 +192,7 @@ class CuratedEvalRunner:
             require_llm=self.require_llm,
         )
         session_id = f"{eval_run_id}-{case.case_id}-trial-{trial}"
+        order_status_before = self._order_status(runtime, case)
         started_at = time.perf_counter()
         run_result = runtime.run_script(
             messages=case.messages,
@@ -169,7 +202,7 @@ class CuratedEvalRunner:
         )
         duration_seconds = round(time.perf_counter() - started_at, 3)
         state = run_result.state
-        actual_order_status = self._actual_order_status(runtime, case)
+        actual_order_status = self._order_status(runtime, case)
         guard_block_reasons = [
             str(record.error)
             for record in state.tool_results
@@ -181,6 +214,10 @@ class CuratedEvalRunner:
         guard_blocks = sum(
             1 for record in state.tool_results if record.status == "blocked"
         )
+        successful_tool_calls = sum(
+            1 for record in state.tool_results if record.status == "success"
+        )
+        trace_metadata = self._trace_metadata(run_result.trace_artifact_path)
         failure_label = classify_failure(
             case=case,
             authenticated_user_id=state.authenticated_user_id,
@@ -200,7 +237,9 @@ class CuratedEvalRunner:
             llm_errors=self._llm_error_count(state.steps),
             confirmation_status=state.confirmation_status,
         )
-        return EvalCaseResult(
+        result = EvalCaseResult(
+            run_id=run_result.run_id,
+            session_id=state.session_id,
             case_id=case.case_id,
             category=case.category,
             trial=trial,
@@ -218,19 +257,35 @@ class CuratedEvalRunner:
             actual_confirmation_status=state.confirmation_status,
             expected_guard_block_reason=case.expected_guard_block_reason,
             actual_guard_block_reasons=guard_block_reasons,
-            initial_db_hash=self._trace_metadata(run_result.trace_artifact_path).get(
-                "initial_db_hash"
-            ),
-            final_db_hash=self._trace_metadata(run_result.trace_artifact_path).get(
-                "final_db_hash"
-            ),
+            initial_db_hash=trace_metadata.get("initial_db_hash"),
+            final_db_hash=trace_metadata.get("final_db_hash"),
+            order_status_before=order_status_before,
+            order_status_after=actual_order_status,
             duration_seconds=duration_seconds,
             tool_errors=tool_errors,
             guard_blocks=guard_blocks,
+            tool_call_count=len(state.tool_results),
+            successful_tool_calls=successful_tool_calls,
+            failed_tool_calls=tool_errors,
+            blocked_tool_calls=guard_blocks,
+            trial_turn_count=sum(1 for message in state.messages if message.role == "user"),
+            message_count=len(state.messages),
+            policy_check_count=1 if state.policy_decision else 0,
+            replay_metadata={
+                "run_id": run_result.run_id,
+                "session_id": state.session_id,
+                "task_id": case.case_id,
+                "trace_artifact_path": str(run_result.trace_artifact_path),
+                "trial": trial,
+            },
         )
+        apply_case_diagnostics(result, case)
+        return result
 
     def _progress_placeholder(self, *, case: EvalCase, trial: int) -> EvalCaseResult:
         return EvalCaseResult(
+            run_id="",
+            session_id="",
             case_id=case.case_id,
             category=case.category,
             trial=trial,
@@ -243,9 +298,7 @@ class CuratedEvalRunner:
             expected_write_lock=case.expected_write_lock,
         )
 
-    def _actual_order_status(
-        self, runtime: AgentRuntime, case: EvalCase
-    ) -> Optional[str]:
+    def _order_status(self, runtime: AgentRuntime, case: EvalCase) -> Optional[str]:
         order_id = case.order_id
         for message in case.messages:
             if order_id:
@@ -270,6 +323,7 @@ class CuratedEvalRunner:
         except Exception:
             return {}
 
+
     def _llm_error_count(self, steps: List[Any]) -> int:
         count = 0
         for step in steps:
@@ -281,40 +335,22 @@ class CuratedEvalRunner:
 
     def _write_summary(
         self,
-        *,
-        eval_run_id: str,
-        subset: str,
-        trials: int,
-        created_at: str,
-        results: List[EvalCaseResult],
-        passed_count: int,
-        result_path: Path,
-        code_commit: str,
+        summary: EvalRunSummary,
     ) -> Path:
+        result_path = Path(summary.result_artifact_path)
         result_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "eval_run_id": eval_run_id,
-            "subset": subset,
-            "trials": trials,
-            "created_at": created_at,
-            "agent_strategy": "guarded_workflow_agent",
-            "model": self.config.default_agent_model,
-            "llm_required": self.require_llm,
-            "llm_timeout_seconds": self.config.agent_llm_timeout_seconds,
-            "llm_max_retries": self.config.agent_llm_max_retries,
-            "dataset_root": str(self.config.tau3_retail_root),
-            "dataset_db_path": str(self.config.retail_db_path),
-            "code_commit": code_commit,
-            "prompt_metadata": prompt_metadata(),
-            "case_count": len(results),
-            "passed_count": passed_count,
-            "pass_rate": passed_count / len(results) if results else 0.0,
-            "results": [asdict(result) for result in results],
-        }
         with result_path.open("w", encoding="utf-8") as file:
-            json.dump(payload, file, indent=2, sort_keys=True)
+            json.dump(summary.as_dict(), file, indent=2, sort_keys=True)
             file.write("\n")
         return result_path
+
+    def _write_report(self, summary: EvalRunSummary) -> Path:
+        report_path = Path(summary.report_artifact_path)
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        with report_path.open("w", encoding="utf-8") as file:
+            json.dump(build_report_artifact(summary), file, indent=2, sort_keys=True)
+            file.write("\n")
+        return report_path
 
 
 def classify_failure(

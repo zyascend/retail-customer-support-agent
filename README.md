@@ -1,96 +1,85 @@
 # Retail Customer Support Agent
 
-Transaction-oriented retail customer support Agent based on tau3-bench retail data.
+基于 tau3-bench retail 数据的交易型零售客服 Agent。
 
-## Start Here
+## 从这里开始
 
-- [Technical Architecture](./TECHNICAL_ARCHITECTURE.md)
+- [技术架构文档](./TECHNICAL_ARCHITECTURE.md)
 
-## Phase 0: Baseline Reproduction
+## Phase 0：基线复现
 
-Phase 0 is offline-first. It validates the local tau2-bench retail data and
-summarizes existing retail benchmark results before any project-specific agent
-workflow is built.
+Phase 0 以离线验证为主。在构建项目自己的 Agent workflow 之前，先验证本地 tau2-bench retail 数据是否可用，并汇总已有 retail benchmark 结果。
 
-### Prerequisites
+### 前置条件
 
-- Install `uv`: https://docs.astral.sh/uv/getting-started/installation/
-- Keep the local tau2-bench checkout available at:
+- 安装 `uv`：https://docs.astral.sh/uv/getting-started/installation/
+- 保持本地 tau2-bench checkout 位于：
 
 ```text
 /Users/theyang/Documents/ai/AgentProject/data_sources/raw/tau2-bench
 ```
 
-If your checkout lives elsewhere, copy `.env.example` to `.env` and override
-`TAU2_BENCH_ROOT` and `TAU2_DATA_DIR`.
+如果你的 checkout 在其他目录，请复制 `.env.example` 为 `.env`，并覆盖 `TAU2_BENCH_ROOT` 和 `TAU2_DATA_DIR`。
 
-### Offline Checks
+### 离线检查
 
-Validate the local source and retail data:
+验证本地源码和 retail 数据：
 
 ```bash
 uv run phase0-check
 ```
 
-Summarize the historical retail baseline result:
+汇总历史 retail baseline 结果：
 
 ```bash
 uv run phase0-report \
   --result /Users/theyang/Documents/ai/AgentProject/data_sources/raw/tau2-bench/data/tau2/results/final/gpt-4.1-mini-2025-04-14_retail_base_gpt-4.1-2025-04-14_4trials.json
 ```
 
-Reports are written to `artifacts/phase0/`, which is intentionally ignored by
-git.
+报告会写入 `artifacts/phase0/`。该目录有意被 git 忽略。
 
-### Optional Live Smoke Test
+### 可选 Live Smoke Test
 
-Live smoke testing is optional for Phase 0 because it requires provider API
-keys and tau2 runtime dependencies. Configure a provider key and model names in
-your environment or `.env`, then run:
+Phase 0 的 live smoke test 是可选项，因为它需要 provider API key 和 tau2 runtime 依赖。请先在环境变量或 `.env` 中配置 provider key 和模型名，然后运行：
 
 ```bash
 uv run phase0-smoke --domain retail --num-tasks 1 --num-trials 1
 ```
 
-Without an API key, `phase0-smoke` exits successfully with a skipped message.
+如果没有 API key，`phase0-smoke` 会成功退出，并显示 skipped 信息。
 
-### Local Unit Tests
+### 本地单元测试
 
 ```bash
 python3 -m unittest discover -s tests
 ```
 
+## 代码结构
 
-## Code Layout
-
-Core implementation is organized by product capability rather than iteration phase:
+核心实现按产品能力组织，而不是按迭代 phase 切目录：
 
 ```text
-app/agent/   guarded workflow runtime, prompts, providers, state models
-app/tools/   retail adapter, registry, gateway
-app/eval/    curated cases, eval runner, failure labels
-app/ops/     trace and serialization helpers
-app/cli/     chat and eval command entrypoints
-prompts/     file-versioned LLM prompts with hash metadata
+app/agent/   guarded workflow runtime、prompts、providers、state models
+app/tools/   retail adapter、registry、gateway
+app/eval/    curated cases、eval runner、failure labels
+app/ops/     trace 和 serialization helpers
+app/cli/     chat 和 eval 命令入口
+prompts/     带 hash metadata 的文件版本化 LLM prompts
 ```
 
-Phase-named CLI commands are kept for roadmap clarity, but the implementation
-lives in the capability packages above.
+带 phase 名称的 CLI 命令主要用于保持 roadmap 清晰；实际实现放在上面的能力包中。
 
-## Phase 1: Guarded Workflow Agent
+## Phase 1：Guarded Workflow Agent
 
-Phase 1 adds a CLI-first guarded agent runtime. It authenticates the user,
-loads retail context, creates pending write actions, requires explicit
-confirmation, executes retail tools through a gateway, and writes a replayable
-trace artifact.
+Phase 1 增加 CLI-first 的 guarded agent runtime。它会完成用户认证、加载 retail context、创建 pending write actions、要求显式确认、通过 gateway 执行 retail tools，并写出可回放的 trace artifact。
 
-Run a scripted smoke conversation:
+运行 scripted smoke conversation：
 
 ```bash
 uv run phase1-chat --script examples/chat/cancel_order.json
 ```
 
-Configure DeepSeek for the LLM-backed path in local `.env`:
+如需走 LLM-backed path，请在本地 `.env` 中配置 DeepSeek：
 
 ```text
 DEEPSEEK_API_KEY=...
@@ -100,52 +89,69 @@ AGENT_LLM_TIMEOUT_SECONDS=30
 AGENT_LLM_MAX_RETRIES=2
 ```
 
-Then run:
+然后运行：
 
 ```bash
 uv run phase1-chat --script examples/chat/cancel_order.json --require-llm
 ```
 
-Without `DEEPSEEK_API_KEY`, Phase 1 falls back to deterministic rules so local
-tests and guard checks remain offline and repeatable.
+如果没有 `DEEPSEEK_API_KEY`，Phase 1 会回退到 deterministic rules，以保证本地测试和 guard checks 可以离线、可重复运行。
 
-Run an interactive session:
+运行交互式会话：
 
 ```bash
 uv run phase1-chat --interactive
 ```
 
-Trace artifacts are written to:
+Trace artifacts 会写入：
 
 ```text
 artifacts/phase1/runs/<run_id>.json
 ```
 
-## Phase 2: Curated Eval Runner
+## Phase 2：Curated Eval Runner
 
-Run the curated MVP eval subset. It covers lookup, writes, confirmation flows,
-guard-blocked policy violations, wrong-user access, and human transfer:
+运行 curated MVP eval subset。它覆盖 lookup、写操作、confirmation flows、被 guard 阻止的 policy violations、wrong-user access 和 human transfer：
 
 ```bash
 uv run phase2-eval --subset curated_mvp --trials 1
 ```
 
-Force the LLM-backed path:
+强制使用 LLM-backed path：
 
 ```bash
 uv run phase2-eval --subset curated_mvp --trials 1 --require-llm
 ```
 
-Eval progress is printed to stderr by default so long LLM-backed runs show the
-active case and per-case duration without corrupting `--json` stdout. Use
-`--no-progress` for quiet machine-driven runs.
+Eval progress 默认打印到 stderr，这样长时间 LLM-backed run 可以显示当前 case 和每个 case 的耗时，同时不会污染 `--json` stdout。机器驱动的安静运行可以使用 `--no-progress`。
 
-Eval summaries are written to:
+Eval summary 会写入：
 
 ```text
 artifacts/phase2/eval_runs/<eval_run_id>.json
 ```
 
-Each eval result records dataset paths, code commit, model settings, prompt file
-hashes, trace path, initial/final DB hashes, expected guard-block reasons, and
-failure labels.
+供 dashboard 和 replay tooling 使用的稳定 report artifact 会写入：
+
+```text
+artifacts/phase2/reports/<eval_run_id>.json
+```
+
+两类 artifact 都包含 `schema_version`、dataset paths、code commit、model settings、prompt file hashes、trace paths、DB hashes、replay metadata、failure labels 和 aggregate metrics。当前契约版本为 `phase2.eval_run_summary.v1` 和 `phase2.eval_report.v1`。
+
+指标定义：
+
+- `pass_1`：所有 trials 中按单条 result 计算的原始通过率。
+- `pass_k`：每个 unique case 的所有 trials 都通过时才算通过；该指标是通过的 unique case 占比。
+- `db_accuracy`：可检查 DB 的 results 中，最终状态匹配预期订单状态或 no-write hash invariant 的比例。
+- `tool_call_success_rate`：成功 tool calls / 全部 tool calls；预期内的 guard blocks 单独统计，不算 tool errors。
+- `guard_block_rate`：blocked tool calls / 全部 tool calls。
+- `mutation_error_rate`：标记为 no-write 的 case 中，仍发生写入或 DB hash 变化的比例。
+
+对比两个 Phase 2 artifacts：
+
+```bash
+uv run phase2-eval --compare \
+  artifacts/phase2/eval_runs/<baseline>.json \
+  artifacts/phase2/eval_runs/<candidate>.json
+```

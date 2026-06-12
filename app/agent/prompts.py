@@ -7,7 +7,6 @@ from typing import Any, Dict
 
 from app.ops.serialization import stable_json
 
-
 PROMPT_DIR = Path("prompts")
 
 

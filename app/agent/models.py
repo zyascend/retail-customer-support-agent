@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Literal, Optional
 
 from app.pydantic_compat import BaseModel, Field
 
-
 Role = Literal["user", "assistant", "tool", "system"]
 ConfirmationStatus = Literal[
     "not_required", "required", "confirmed", "denied", "changed", "unknown"

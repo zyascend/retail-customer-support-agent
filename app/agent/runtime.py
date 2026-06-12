@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
 from app.agent.confirmation import ConfirmationResolver
-from app.config import AppConfig
 from app.agent.graph import PHASE1_NODES, build_linear_graph
 from app.agent.models import (
     ConversationState,
@@ -24,11 +23,11 @@ from app.agent.prompts import (
     user_json_prompt,
 )
 from app.agent.providers import DisabledLLMProvider, LLMProvider, build_default_provider
+from app.config import AppConfig
+from app.ops.tracing import TraceWriter, final_state_summary
 from app.tools.gateway import ToolGateway
 from app.tools.registry import ToolRegistry
 from app.tools.retail_adapter import RetailAdapter, get_order_from_db
-from app.ops.tracing import TraceWriter, final_state_summary
-
 
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 ORDER_RE = re.compile(r"#W\d+")

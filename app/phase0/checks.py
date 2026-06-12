@@ -8,7 +8,6 @@ from typing import Any, Dict, List
 
 from app.phase0.config import Phase0Config
 
-
 RETAIL_REQUIRED_FILES = ("db.json", "policy.md", "tasks.json", "split_tasks.json")
 
 
