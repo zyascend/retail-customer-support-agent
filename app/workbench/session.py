@@ -29,8 +29,18 @@ class WorkbenchSession:
         self.last_error: Optional[Dict[str, Any]] = None
         self.trace_artifact_path: Optional[str] = None
         self.initial_db_hash: Optional[str] = None
-        self._create_runtime_and_state()
-        self._write_trace()
+        self.runtime, self.state, self.initial_db_hash = (
+            self._create_runtime_and_state_for(
+                mode=self.mode,
+                selected_case=self.selected_case,
+            )
+        )
+        self.trace_artifact_path = self._write_trace_for(
+            runtime=self.runtime,
+            state=self.state,
+            mode=self.mode,
+            initial_db_hash=self.initial_db_hash,
+        )
 
     @property
     def llm_available(self) -> bool:
@@ -46,13 +56,27 @@ class WorkbenchSession:
             if case_id is not None
             else self.selected_case
         )
+        next_runtime, next_state, next_initial_db_hash = (
+            self._create_runtime_and_state_for(
+                mode=next_mode,
+                selected_case=next_selected_case,
+            )
+        )
+        next_trace_artifact_path = self._write_trace_for(
+            runtime=next_runtime,
+            state=next_state,
+            mode=next_mode,
+            initial_db_hash=next_initial_db_hash,
+        )
 
         self.mode = next_mode
         self.selected_case = next_selected_case
         self.script_cursor = 0
         self.last_error = None
-        self._create_runtime_and_state()
-        self._write_trace()
+        self.runtime = next_runtime
+        self.state = next_state
+        self.initial_db_hash = next_initial_db_hash
+        self.trace_artifact_path = next_trace_artifact_path
         return self.snapshot()
 
     def select_case(self, case_id: str) -> Dict[str, Any]:
@@ -117,19 +141,30 @@ class WorkbenchSession:
         )
 
     def _create_runtime_and_state(self) -> None:
-        provider = DisabledLLMProvider() if self.mode == "deterministic" else None
-        self.runtime = AgentRuntime(
+        self.runtime, self.state, self.initial_db_hash = (
+            self._create_runtime_and_state_for(
+                mode=self.mode,
+                selected_case=self.selected_case,
+            )
+        )
+
+    def _create_runtime_and_state_for(
+        self,
+        *,
+        mode: str,
+        selected_case: Optional[EvalCase],
+    ) -> tuple[AgentRuntime, ConversationState, str]:
+        provider = DisabledLLMProvider() if mode == "deterministic" else None
+        runtime = AgentRuntime(
             self.config,
             provider=provider,
-            require_llm=self.mode == "llm",
+            require_llm=mode == "llm",
         )
-        self.state = ConversationState(
+        state = ConversationState(
             session_id=self.session_id,
-            task_id=(
-                self.selected_case.case_id if self.selected_case is not None else None
-            ),
+            task_id=(selected_case.case_id if selected_case is not None else None),
         )
-        self.initial_db_hash = self.runtime.retail_runtime.db_hash()
+        return runtime, state, runtime.retail_runtime.db_hash()
 
     def _send_user_content(self, content: str) -> bool:
         try:
@@ -155,26 +190,41 @@ class WorkbenchSession:
             self._write_trace()
 
     def _write_trace(self) -> None:
+        self.trace_artifact_path = self._write_trace_for(
+            runtime=self.runtime,
+            state=self.state,
+            mode=self.mode,
+            initial_db_hash=self.initial_db_hash,
+        )
+
+    def _write_trace_for(
+        self,
+        *,
+        runtime: AgentRuntime,
+        state: ConversationState,
+        mode: str,
+        initial_db_hash: Optional[str],
+    ) -> str:
         trace_path = TraceWriter(self.config.run_artifact_dir).write(
             run_id=self.session_id,
-            state=self.state,
+            state=state,
             metadata={
-                "runtime_source": self.runtime.retail_runtime.source,
+                "runtime_source": runtime.retail_runtime.source,
                 "model": self.config.default_agent_model,
-                "mode": self.mode,
+                "mode": mode,
                 "llm_available": self.llm_available,
-                "llm_enabled": self.runtime.provider is not None,
+                "llm_enabled": runtime.provider is not None,
                 "llm_timeout_seconds": self.config.agent_llm_timeout_seconds,
                 "llm_max_retries": self.config.agent_llm_max_retries,
-                "initial_db_hash": self.initial_db_hash,
-                "final_db_hash": self.runtime.retail_runtime.db_hash(),
+                "initial_db_hash": initial_db_hash,
+                "final_db_hash": runtime.retail_runtime.db_hash(),
                 "tau2_bench_root": str(self.config.tau2_bench_root),
                 "tau3_retail_root": str(self.config.tau3_retail_root),
                 "retail_db_path": str(self.config.retail_db_path),
                 "prompts": prompt_metadata(),
             },
         )
-        self.trace_artifact_path = str(trace_path)
+        return str(trace_path)
 
     def _require_case(self) -> EvalCase:
         if self.selected_case is None:

@@ -166,6 +166,36 @@ class WorkbenchSessionTests(unittest.TestCase):
             self.assertIs(session.runtime, before_runtime)
             self.assertEqual(session.snapshot()["messages"], before_snapshot["messages"])
 
+    def test_failed_reset_during_trace_write_preserves_existing_session_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
+            session = manager.create_session(
+                mode="deterministic", case_id="cancel_pending_order"
+            )
+            before_snapshot = session.step()
+            before_case = session.selected_case
+            before_messages = list(session.state.messages)
+            before_runtime = session.runtime
+            before_state = session.state
+            before_trace_path = session.trace_artifact_path
+
+            def fail_write_trace_for(runtime, state, mode, initial_db_hash):
+                raise RuntimeError("trace unavailable")
+
+            session._write_trace_for = fail_write_trace_for
+
+            with self.assertRaises(RuntimeError):
+                session.reset(case_id="return_delivered_order_item")
+
+            self.assertEqual(session.mode, "deterministic")
+            self.assertIs(session.selected_case, before_case)
+            self.assertEqual(session.script_cursor, 1)
+            self.assertEqual(session.state.messages, before_messages)
+            self.assertIs(session.runtime, before_runtime)
+            self.assertIs(session.state, before_state)
+            self.assertEqual(session.trace_artifact_path, before_trace_path)
+            self.assertEqual(session.snapshot()["messages"], before_snapshot["messages"])
+
 
 if __name__ == "__main__":
     unittest.main()
