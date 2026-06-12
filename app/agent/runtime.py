@@ -346,54 +346,60 @@ class AgentRuntime:
             },
         )
         if llm_payload:
+            llm_intent = str(llm_payload.get("intent") or "").strip()
+            if llm_intent and llm_intent != state.current_intent:
+                state.add_step(
+                    "intent_and_slot_extractor_divergence",
+                    code_intent=state.current_intent,
+                    llm_intent=llm_intent,
+                    resolved=state.current_intent,
+                )
             self._apply_llm_intent_slots(state, llm_payload)
+        llm_slots = (llm_payload.get("slots") or {}) if llm_payload else {}
+        code_slots: Dict[str, Any] = dict(state.slots)
+
         order_match = ORDER_RE.search(content)
         if order_match:
-            state.slots["order_id"] = order_match.group(0)
+            code_slots["order_id"] = order_match.group(0)
         payment_match = PAYMENT_RE.search(content)
         if payment_match:
-            state.slots["payment_method_id"] = payment_match.group(0)
+            code_slots["payment_method_id"] = payment_match.group(0)
         item_ids = [
             item
             for item in ITEM_RE.findall(content)
             if not item.startswith("000") and len(item) >= 8
         ]
         if item_ids:
-            state.slots["item_ids"] = item_ids
+            code_slots["item_ids"] = item_ids
         if "ordered by mistake" in lowered:
-            state.slots["reason"] = "ordered by mistake"
+            code_slots["reason"] = "ordered by mistake"
         elif "no longer needed" in lowered or "don't need" in lowered:
-            state.slots["reason"] = "no longer needed"
+            code_slots["reason"] = "no longer needed"
         address = self._parse_address(content)
         if address:
-            state.slots["address"] = address
+            code_slots["address"] = address
         item_pairs = self._parse_item_replacement_pairs(lowered)
         if item_pairs:
-            state.slots["item_ids"] = [old for old, _new in item_pairs]
-            state.slots["new_item_ids"] = [new for _old, new in item_pairs]
-            state.add_step(
-                "intent_and_slot_extractor",
-                intent=state.current_intent,
-                slots=state.slots,
-            )
-            return
+            code_slots["item_ids"] = [old for old, _new in item_pairs]
+            code_slots["new_item_ids"] = [new for _old, new in item_pairs]
+
         new_item_marker = re.search(
-            r"(?:new items?|exchange for|instead|to new item|for new items?)\s+(\d{8,})",
+            r"(?:new items?|exchange for|instead|to new item|"
+            r"for new items?)\s+(\d{8,})",
             lowered,
         )
         if new_item_marker:
             new_item_id = new_item_marker.group(1)
-            state.slots["new_item_ids"] = [new_item_id]
-            if "item_ids" in state.slots:
-                state.slots["item_ids"] = [
-                    item_id
-                    for item_id in state.slots["item_ids"]
-                    if item_id != new_item_id
+            code_slots["new_item_ids"] = [new_item_id]
+            if "item_ids" in code_slots:
+                code_slots["item_ids"] = [
+                    iid for iid in code_slots["item_ids"]
+                    if iid != new_item_id
                 ]
-        state.add_step(
-            "intent_and_slot_extractor",
-            intent=state.current_intent,
-            slots=state.slots,
+
+        state.slots = self._merge_slots(
+            code_slots=code_slots,
+            llm_slots=llm_slots,
         )
 
     def _context_loader(self, state: ConversationState, content: str) -> None:
@@ -832,6 +838,38 @@ class AgentRuntime:
             }
             if cleaned_address["address1"] and cleaned_address["zip"]:
                 state.slots["address"] = cleaned_address
+
+    def _merge_slots(
+        self,
+        *,
+        code_slots: Dict[str, Any],
+        llm_slots: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Merge code and LLM slots. Code wins for ID formats; LLM for semantic."""
+        if not llm_slots:
+            return dict(code_slots)
+        merged = dict(code_slots)
+        for key, value in llm_slots.items():
+            if key not in merged or not merged[key]:
+                if value:
+                    merged[key] = value
+                continue
+            if key == "reason":
+                cleaned = self._clean_llm_scalar(value)
+                if cleaned and cleaned.lower() in {
+                    "no longer needed",
+                    "ordered by mistake",
+                }:
+                    merged[key] = cleaned.lower()
+            if key == "address" and isinstance(value, dict):
+                cleaned_address = {
+                    k: self._clean_llm_scalar(value.get(k)) or ""
+                    for k in ("address1", "address2", "city", "state",
+                              "country", "zip")
+                }
+                if cleaned_address.get("address1") and cleaned_address.get("zip"):
+                    merged["address"] = cleaned_address
+        return merged
 
     def _llm_policy_decision(
         self, state: ConversationState, content: str, fallback_decision: str
