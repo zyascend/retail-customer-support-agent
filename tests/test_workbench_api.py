@@ -39,6 +39,38 @@ class WorkbenchAPITests(unittest.TestCase):
         self.assertEqual(second["script_cursor"], 2)
         self.assertEqual(second["business"]["confirmation_status"], "confirmed")
 
+    def test_create_session_accepts_no_body(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = create_app(config=resolve_config(artifact_dir=tmp))
+            client = TestClient(app)
+
+            response = client.post("/api/sessions")
+
+        self.assertEqual(response.status_code, 200)
+        snapshot = response.json()
+        self.assertEqual(snapshot["mode"], "deterministic")
+        self.assertIsNone(snapshot["selected_case_id"])
+
+    def test_reset_accepts_no_body(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = create_app(config=resolve_config(artifact_dir=tmp))
+            client = TestClient(app)
+            created = client.post(
+                "/api/sessions",
+                json={"mode": "deterministic", "case_id": "cancel_pending_order"},
+            ).json()
+            session_id = created["session_id"]
+            client.post(f"/api/sessions/{session_id}/step")
+
+            response = client.post(f"/api/sessions/{session_id}/reset")
+
+        self.assertEqual(response.status_code, 200)
+        snapshot = response.json()
+        self.assertEqual(snapshot["session_id"], session_id)
+        self.assertEqual(snapshot["mode"], "deterministic")
+        self.assertEqual(snapshot["selected_case_id"], "cancel_pending_order")
+        self.assertEqual(snapshot["script_cursor"], 0)
+
     def test_manual_message_route(self):
         with tempfile.TemporaryDirectory() as tmp:
             app = create_app(config=resolve_config(artifact_dir=tmp))
@@ -69,6 +101,54 @@ class WorkbenchAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json()["error"]["code"], "session_not_found")
+
+    def test_create_session_with_unknown_case_returns_structured_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = create_app(config=resolve_config(artifact_dir=tmp))
+            client = TestClient(app)
+
+            response = client.post(
+                "/api/sessions",
+                json={"mode": "deterministic", "case_id": "not_a_case"},
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"]["code"], "case_not_found")
+
+    def test_create_session_with_invalid_mode_returns_structured_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = create_app(config=resolve_config(artifact_dir=tmp))
+            client = TestClient(app)
+
+            response = client.post("/api/sessions", json={"mode": "unknown"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_mode")
+
+    def test_step_without_case_returns_structured_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = create_app(config=resolve_config(artifact_dir=tmp))
+            client = TestClient(app)
+            session_id = client.post("/api/sessions").json()["session_id"]
+
+            response = client.post(f"/api/sessions/{session_id}/step")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "case_required")
+
+    def test_blank_message_returns_structured_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = create_app(config=resolve_config(artifact_dir=tmp))
+            client = TestClient(app)
+            session_id = client.post("/api/sessions").json()["session_id"]
+
+            response = client.post(
+                f"/api/sessions/{session_id}/messages",
+                json={"content": "   "},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "empty_message")
 
 
 if __name__ == "__main__":

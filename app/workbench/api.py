@@ -65,7 +65,10 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         }
 
     @app.post("/api/sessions")
-    def create_session(request: CreateSessionRequest) -> dict[str, Any]:
+    def create_session(
+        request: Optional[CreateSessionRequest] = None,
+    ) -> dict[str, Any]:
+        request = request or CreateSessionRequest()
         session = manager.create_session(
             mode=request.mode,
             case_id=request.case_id,
@@ -93,7 +96,11 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         return manager.get(session_id).send_message(request.content)
 
     @app.post("/api/sessions/{session_id}/reset")
-    def reset_session(session_id: str, request: ResetRequest) -> dict[str, Any]:
+    def reset_session(
+        session_id: str,
+        request: Optional[ResetRequest] = None,
+    ) -> dict[str, Any]:
+        request = request or ResetRequest()
         return manager.get(session_id).reset(
             case_id=request.case_id,
             mode=request.mode,
