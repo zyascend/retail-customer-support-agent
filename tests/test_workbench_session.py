@@ -1,5 +1,7 @@
 import json
 import tempfile
+import threading
+import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -31,6 +33,38 @@ class WorkbenchSessionTests(unittest.TestCase):
                 "order:#W5918442:cancel", second["business"]["write_locks"]
             )
             self.assertTrue(Path(second["trace_artifact_path"]).exists())
+
+    def test_concurrent_steps_serialize_script_cursor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
+            session = manager.create_session(
+                mode="deterministic", case_id="cancel_pending_order"
+            )
+            original_send = session._send_user_content
+            seen_contents = []
+
+            def synchronized_send(content):
+                seen_contents.append(content)
+                time.sleep(0.05)
+                return original_send(content)
+
+            session._send_user_content = synchronized_send
+
+            threads = [threading.Thread(target=session.step) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=5)
+
+            self.assertTrue(all(not thread.is_alive() for thread in threads))
+            self.assertEqual(session.script_cursor, 2)
+            self.assertEqual(
+                seen_contents,
+                [
+                    "My email is sofia.rossi2645@example.com. Cancel order #W5918442 because no longer needed.",
+                    "yes",
+                ],
+            )
 
     def test_manual_message_does_not_move_script_cursor(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -241,6 +275,23 @@ class WorkbenchSessionTests(unittest.TestCase):
             self.assertEqual(
                 list(before_trace_path.parent.glob(f".{session.session_id}.*.tmp")),
                 [],
+            )
+
+    def test_wrong_user_demo_exposes_guard_block_signal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
+            session = manager.create_session(
+                mode="deterministic", case_id="block_wrong_user_order_access"
+            )
+
+            snapshot = session.run_all()
+
+            self.assertEqual(snapshot["selected_case_id"], "block_wrong_user_order_access")
+            self.assertIn("another account", snapshot["messages"][-1]["content"])
+            self.assertEqual(len(snapshot["guard_blocks"]), 1)
+            self.assertEqual(snapshot["guard_blocks"][0]["status"], "blocked")
+            self.assertEqual(
+                snapshot["guard_blocks"][0]["error"], "wrong_user_order_access"
             )
 
 

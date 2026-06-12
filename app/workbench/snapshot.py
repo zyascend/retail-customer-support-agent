@@ -72,86 +72,109 @@ def snapshot_from_state(
         "tool_results": tool_results,
         "timeline": build_timeline(state),
         "audit_logs": audit_logs,
-        "guard_blocks": [
-            redact_value(to_plain_data(record))
-            for record in state.tool_results
-            if record.status == "blocked"
-        ],
+        "guard_blocks": build_guard_blocks(state),
         "trace_artifact_path": trace_artifact_path,
         "last_error": last_error,
     }
 
 
 def build_timeline(state: ConversationState) -> List[Dict[str, Any]]:
-    timeline: List[Dict[str, Any]] = []
+    timeline: List[tuple[tuple[int, int, int], Dict[str, Any]]] = []
 
     for index, message in enumerate(state.messages):
         detail = redact_value(to_plain_data(message))
         timeline.append(
-            _timeline_event(
-                event_id=f"message-{index}",
-                kind="message",
-                label=message.name or message.role,
-                status=None,
-                timestamp=message.created_at,
-                summary=_summarize_detail(detail.get("content")),
-                detail=detail,
-                source_index=index,
+            (
+                _message_sort_key(state.messages[: index + 1], message.role, index),
+                _timeline_event(
+                    event_id=f"message-{index}",
+                    kind="message",
+                    label=message.name or message.role,
+                    status=None,
+                    timestamp=message.created_at,
+                    summary=_summarize_detail(detail.get("content")),
+                    detail=detail,
+                    source_index=index,
+                ),
             )
         )
 
+    tool_index = 0
     for index, step in enumerate(state.steps):
         detail = redact_value(to_plain_data(step.detail))
+        turn_index = _step_turn_index(state.steps[: index + 1])
         timeline.append(
-            _timeline_event(
-                event_id=f"step-{index}",
-                kind="step",
-                label=step.node,
-                status=step.status,
-                timestamp=None,
-                summary=_summarize_detail(detail),
-                detail=detail,
-                source_index=index,
+            (
+                (turn_index, 20 + index, index),
+                _timeline_event(
+                    event_id=f"step-{index}",
+                    kind="step",
+                    label=step.node,
+                    status=step.status,
+                    timestamp=None,
+                    summary=_summarize_detail(detail),
+                    detail=detail,
+                    source_index=index,
+                ),
             )
         )
+        if step.node in {"tool_executor", "write_action_guard"} and tool_index < len(
+            state.tool_results
+        ):
+            record = state.tool_results[tool_index]
+            if step.node == "write_action_guard" or record.status != "blocked":
+                timeline.append(
+                    (
+                        (turn_index, 21 + index, tool_index),
+                        _tool_timeline_event(record, tool_index),
+                    )
+                )
+                tool_index += 1
 
-    for index, record in enumerate(state.tool_results):
-        detail = redact_value(to_plain_data(record))
+    fallback_turn_index = max(_step_turn_index(state.steps), 0)
+    while tool_index < len(state.tool_results):
         timeline.append(
-            _timeline_event(
-                event_id=f"tool_call-{index}",
-                kind="tool_call",
-                label=record.tool_name,
-                status=record.status,
-                timestamp=None,
-                summary=_summarize_detail(detail.get("error"))
-                or _summarize_detail(detail.get("observation")),
-                detail=detail,
-                source_index=index,
+            (
+                (fallback_turn_index, 70, tool_index),
+                _tool_timeline_event(state.tool_results[tool_index], tool_index),
             )
         )
+        tool_index += 1
 
     for index, audit in enumerate(state.audit_logs):
         detail = redact_value(audit)
         timeline.append(
-            _timeline_event(
-                event_id=f"write_audit-{index}",
-                kind="write_audit",
-                label=str(
-                    audit.get("tool_name")
-                    or audit.get("action_name")
-                    or audit.get("event")
-                    or "write_audit"
+            (
+                (fallback_turn_index, 80, index),
+                _timeline_event(
+                    event_id=f"write_audit-{index}",
+                    kind="write_audit",
+                    label=str(
+                        audit.get("tool_name")
+                        or audit.get("action_name")
+                        or audit.get("event")
+                        or "write_audit"
+                    ),
+                    status=audit.get("status"),
+                    timestamp=audit.get("timestamp") or audit.get("created_at"),
+                    summary=_summarize_detail(detail),
+                    detail=detail,
+                    source_index=index,
                 ),
-                status=audit.get("status"),
-                timestamp=audit.get("timestamp") or audit.get("created_at"),
-                summary=_summarize_detail(detail),
-                detail=detail,
-                source_index=index,
             )
         )
 
-    return timeline
+    return [event for _, event in sorted(timeline, key=lambda item: item[0])]
+
+
+def build_guard_blocks(state: ConversationState) -> List[Dict[str, Any]]:
+    guard_blocks = [
+        redact_value(to_plain_data(record))
+        for record in state.tool_results
+        if record.status == "blocked"
+    ]
+    guard_blocks.extend(_wrong_user_guard_blocks(state))
+    return guard_blocks
 
 
 def redact_value(value: Any, key: str = "") -> Any:
@@ -221,6 +244,61 @@ def _timeline_event(
         "detail": detail,
         "source_index": source_index,
     }
+
+
+def _tool_timeline_event(record: Any, index: int) -> Dict[str, Any]:
+    detail = redact_value(to_plain_data(record))
+    return _timeline_event(
+        event_id=f"tool_call-{index}",
+        kind="tool_call",
+        label=record.tool_name,
+        status=record.status,
+        timestamp=None,
+        summary=_summarize_detail(detail.get("error"))
+        or _summarize_detail(detail.get("observation")),
+        detail=detail,
+        source_index=index,
+    )
+
+
+def _message_sort_key(messages_so_far: List[Any], role: str, index: int) -> tuple[int, int, int]:
+    turn_index = sum(1 for message in messages_so_far if message.role == "user") - 1
+    if turn_index < 0:
+        turn_index = 0
+    phase = 10 if role == "user" else 90
+    return (turn_index, phase, index)
+
+
+def _step_turn_index(steps: List[Any]) -> int:
+    receive_count = sum(1 for step in steps if step.node == "receive_message")
+    return max(receive_count - 1, 0)
+
+
+def _wrong_user_guard_blocks(state: ConversationState) -> List[Dict[str, Any]]:
+    if not state.authenticated_user_id:
+        return []
+
+    guard_blocks = []
+    for order_id, order in state.loaded_context.orders.items():
+        if order.get("user_id") == state.authenticated_user_id:
+            continue
+        guard_blocks.append(
+            redact_value(
+                {
+                    "tool_name": "context_loader",
+                    "arguments": {"order_id": order_id},
+                    "tool_kind": "read",
+                    "status": "blocked",
+                    "error": "wrong_user_order_access",
+                    "observation": {
+                        "order_id": order_id,
+                        "order_user_id": order.get("user_id"),
+                        "authenticated_user_id": state.authenticated_user_id,
+                    },
+                }
+            )
+        )
+    return guard_blocks
 
 
 def _summarize_detail(detail: Any) -> Optional[str]:

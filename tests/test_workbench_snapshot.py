@@ -74,6 +74,36 @@ class WorkbenchSnapshotTests(unittest.TestCase):
         self.assertEqual(timeline[2]["status"], "blocked")
         self.assertEqual(timeline[2]["label"], "cancel_pending_order")
 
+    def test_timeline_preserves_message_and_step_chronology(self):
+        state = ConversationState(session_id="session-1")
+        state.messages.append(
+            Message(
+                role="user",
+                content="first",
+                created_at="2026-06-12T00:00:00+00:00",
+            )
+        )
+        state.messages.append(
+            Message(
+                role="assistant",
+                content="reply",
+                created_at="2026-06-12T00:00:01+00:00",
+            )
+        )
+        state.add_step("receive_message", status="ok")
+        state.add_step("response_generator", status="ok")
+
+        timeline = build_timeline(state)
+
+        self.assertEqual(
+            [event["kind"] for event in timeline],
+            ["message", "step", "step", "message"],
+        )
+        self.assertEqual(
+            [event["label"] for event in timeline],
+            ["user", "receive_message", "response_generator", "assistant"],
+        )
+
     def test_snapshot_includes_pending_action_and_business_summary(self):
         state = ConversationState(
             session_id="session-1", authenticated_user_id="user-1"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 from typing import Any, Dict, Optional
 
 from app.agent.models import AgentStep, ConversationState
@@ -26,6 +27,7 @@ class WorkbenchSession:
     script_cursor: int = 0
 
     def __post_init__(self) -> None:
+        self._lock = RLock()
         _validate_mode(self.mode, self.config)
         self.last_error: Optional[Dict[str, Any]] = None
         self.trace_artifact_path: Optional[str] = None
@@ -50,96 +52,103 @@ class WorkbenchSession:
     def reset(
         self, case_id: Optional[str] = None, mode: Optional[str] = None
     ) -> Dict[str, Any]:
-        next_mode = mode if mode is not None else self.mode
-        _validate_mode(next_mode, self.config)
-        next_selected_case = (
-            _get_case_or_raise(case_id)
-            if case_id is not None
-            else self.selected_case
-        )
-        next_runtime, next_state, next_initial_db_hash = (
-            self._create_runtime_and_state_for(
-                mode=next_mode,
-                selected_case=next_selected_case,
+        with self._lock:
+            next_mode = mode if mode is not None else self.mode
+            _validate_mode(next_mode, self.config)
+            next_selected_case = (
+                _get_case_or_raise(case_id)
+                if case_id is not None
+                else self.selected_case
             )
-        )
-        next_trace_artifact_path = self._stage_reset_trace_for(
-            runtime=next_runtime,
-            state=next_state,
-            mode=next_mode,
-            initial_db_hash=next_initial_db_hash,
-        )
+            next_runtime, next_state, next_initial_db_hash = (
+                self._create_runtime_and_state_for(
+                    mode=next_mode,
+                    selected_case=next_selected_case,
+                )
+            )
+            next_trace_artifact_path = self._stage_reset_trace_for(
+                runtime=next_runtime,
+                state=next_state,
+                mode=next_mode,
+                initial_db_hash=next_initial_db_hash,
+            )
 
-        self.mode = next_mode
-        self.selected_case = next_selected_case
-        self.script_cursor = 0
-        self.last_error = None
-        self.runtime = next_runtime
-        self.state = next_state
-        self.initial_db_hash = next_initial_db_hash
-        self.trace_artifact_path = next_trace_artifact_path
-        return self.snapshot()
+            self.mode = next_mode
+            self.selected_case = next_selected_case
+            self.script_cursor = 0
+            self.last_error = None
+            self.runtime = next_runtime
+            self.state = next_state
+            self.initial_db_hash = next_initial_db_hash
+            self.trace_artifact_path = next_trace_artifact_path
+            return self.snapshot()
 
     def select_case(self, case_id: str) -> Dict[str, Any]:
         return self.reset(case_id=case_id)
 
     def step(self) -> Dict[str, Any]:
-        selected_case = self._require_case()
-        if self.script_cursor >= len(selected_case.messages):
-            raise WorkbenchAPIError(
-                code="script_complete",
-                message="No scripted messages remain.",
-                recoverable=True,
-                details={
-                    "case_id": selected_case.case_id,
-                    "script_cursor": self.script_cursor,
-                    "script_message_count": len(selected_case.messages),
-                },
-            )
-        message = selected_case.messages[self.script_cursor]
-        if self._send_user_content(message.get("content", "")):
-            self.script_cursor += 1
-        return self.snapshot()
+        with self._lock:
+            selected_case = self._require_case()
+            if self.script_cursor >= len(selected_case.messages):
+                raise WorkbenchAPIError(
+                    code="script_complete",
+                    message="No scripted messages remain.",
+                    recoverable=True,
+                    details={
+                        "case_id": selected_case.case_id,
+                        "script_cursor": self.script_cursor,
+                        "script_message_count": len(selected_case.messages),
+                    },
+                )
+            message = selected_case.messages[self.script_cursor]
+            if self._send_user_content(message.get("content", "")):
+                self.script_cursor += 1
+            return self.snapshot()
 
     def run_all(self) -> Dict[str, Any]:
-        selected_case = self._require_case()
-        while self.script_cursor < len(selected_case.messages):
-            message = selected_case.messages[self.script_cursor]
-            if not self._send_user_content(message.get("content", "")):
-                break
-            self.script_cursor += 1
-        return self.snapshot()
+        with self._lock:
+            selected_case = self._require_case()
+            while self.script_cursor < len(selected_case.messages):
+                message = selected_case.messages[self.script_cursor]
+                if not self._send_user_content(message.get("content", "")):
+                    break
+                self.script_cursor += 1
+            return self.snapshot()
 
     def send_message(self, content: str) -> Dict[str, Any]:
-        if not content.strip():
-            raise WorkbenchAPIError(
-                code="empty_message",
-                message="Message content is required.",
-                recoverable=True,
-            )
-        self._send_user_content(content)
-        return self.snapshot()
+        with self._lock:
+            if not content.strip():
+                raise WorkbenchAPIError(
+                    code="empty_message",
+                    message="Message content is required.",
+                    recoverable=True,
+                )
+            self._send_user_content(content)
+            return self.snapshot()
 
     def snapshot(self) -> Dict[str, Any]:
-        return snapshot_from_state(
-            session_id=self.session_id,
-            mode=self.mode,
-            llm_available=self.llm_available,
-            state=self.state,
-            initial_db_hash=self.initial_db_hash,
-            current_db_hash=self.runtime.retail_runtime.db_hash(),
-            trace_artifact_path=self.trace_artifact_path,
-            selected_case_id=(
-                self.selected_case.case_id if self.selected_case is not None else None
-            ),
-            script_cursor=self.script_cursor,
-            script_message_count=(
-                len(self.selected_case.messages)
-                if self.selected_case is not None
-                else 0
-            ),
-            last_error=self.last_error,
-        )
+        with self._lock:
+            return snapshot_from_state(
+                session_id=self.session_id,
+                mode=self.mode,
+                llm_available=self.llm_available,
+                state=self.state,
+                initial_db_hash=self.initial_db_hash,
+                current_db_hash=self.runtime.retail_runtime.db_hash(),
+                trace_artifact_path=self.trace_artifact_path,
+                selected_case_id=(
+                    self.selected_case.case_id
+                    if self.selected_case is not None
+                    else None
+                ),
+                script_cursor=self.script_cursor,
+                script_message_count=(
+                    len(self.selected_case.messages)
+                    if self.selected_case is not None
+                    else 0
+                ),
+                last_error=self.last_error,
+            )
 
     def _create_runtime_and_state(self) -> None:
         self.runtime, self.state, self.initial_db_hash = (
