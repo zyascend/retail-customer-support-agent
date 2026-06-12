@@ -794,6 +794,13 @@ class DualTrackMergeTests(unittest.TestCase):
             ),
             "ask_clarification",
         )
+        # Code transfer (unsupported request) overrides LLM deny
+        self.assertEqual(
+            self.runtime._merge_policy_decisions(
+                code_decision="transfer", llm_decision="deny",
+            ),
+            "transfer",
+        )
 
     def test_llm_none_falls_back_to_code(self):
         result = self.runtime._merge_policy_decisions(

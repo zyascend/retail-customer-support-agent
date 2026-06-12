@@ -327,7 +327,15 @@ class AgentRuntime:
         if self._has_assistant_response(state):
             return
         lowered = content.lower()
-        state.current_intent = self._infer_intent(lowered)
+        # Preserve existing intent when message is a bare confirmation/denial
+        bare_response = lowered.strip() in {
+            "yes", "no", "confirm", "ok", "y", "n", "go ahead",
+            "proceed", "sure", "yeah", "yep", "nope", "cancel",
+        }
+        if bare_response and state.current_intent and state.current_intent != "unknown":
+            pass  # keep prior intent rather than resetting to unknown
+        else:
+            state.current_intent = self._infer_intent(lowered)
         llm_payload = self._llm_json(
             state,
             "intent_and_slot_extractor",
@@ -455,6 +463,9 @@ class AgentRuntime:
         """
         if llm_decision is None:
             return code_decision
+        # Code-level transfer (unsupported requests) overrides LLM deny
+        if code_decision == "transfer" and llm_decision == "deny":
+            return "transfer"
         if "deny" in (code_decision, llm_decision):
             return "deny"
         if "ask_clarification" in (code_decision, llm_decision):

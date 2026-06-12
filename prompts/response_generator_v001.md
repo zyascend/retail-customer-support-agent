@@ -41,9 +41,11 @@ I can help with?"
 
 ### Denial or inability
 Draft: "I cannot access or modify orders for another account."
-Response: "I wasn't able to process that request — this order is associated
-with a different account. If you believe this is a mistake, I can transfer
-you to a human agent. Would you like me to do that?"
+Response: "I cannot access or modify orders for another account."
+
+### Changed confirmation
+Draft: "I discarded the previous request. Please provide updated details."
+Response: "I've discarded the previous request. Please provide the updated details."
 
 ### Need more information
 Draft: "Which order would you like to cancel?"
