@@ -39,11 +39,16 @@ class WorkbenchSession:
     def reset(
         self, case_id: Optional[str] = None, mode: Optional[str] = None
     ) -> Dict[str, Any]:
-        if mode is not None:
-            _validate_mode(mode, self.config)
-            self.mode = mode
-        if case_id is not None:
-            self.selected_case = _get_case_or_raise(case_id)
+        next_mode = mode if mode is not None else self.mode
+        _validate_mode(next_mode, self.config)
+        next_selected_case = (
+            _get_case_or_raise(case_id)
+            if case_id is not None
+            else self.selected_case
+        )
+
+        self.mode = next_mode
+        self.selected_case = next_selected_case
         self.script_cursor = 0
         self.last_error = None
         self._create_runtime_and_state()

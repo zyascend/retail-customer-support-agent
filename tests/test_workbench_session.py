@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from app.config import resolve_config
@@ -139,6 +140,31 @@ class WorkbenchSessionTests(unittest.TestCase):
             self.assertEqual(
                 reset_context.exception.details, {"case_id": "missing_case"}
             )
+
+    def test_failed_reset_preserves_existing_session_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = replace(
+                resolve_config(artifact_dir=tmp),
+                deepseek_api_key="dummy",
+            )
+            manager = WorkbenchSessionManager(config=config)
+            session = manager.create_session(
+                mode="deterministic", case_id="cancel_pending_order"
+            )
+            before_snapshot = session.step()
+            before_messages = list(session.state.messages)
+            before_runtime = session.runtime
+
+            with self.assertRaises(WorkbenchAPIError) as context:
+                session.reset(case_id="missing_case", mode="llm")
+
+            self.assertEqual(context.exception.code, "case_not_found")
+            self.assertEqual(session.mode, "deterministic")
+            self.assertEqual(session.selected_case.case_id, "cancel_pending_order")
+            self.assertEqual(session.script_cursor, 1)
+            self.assertEqual(session.state.messages, before_messages)
+            self.assertIs(session.runtime, before_runtime)
+            self.assertEqual(session.snapshot()["messages"], before_snapshot["messages"])
 
 
 if __name__ == "__main__":
