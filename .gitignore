@@ -18,6 +18,7 @@ build/
 coverage/
 
 artifacts/
+.superpowers/
 
 *.log
 *.sqlite
