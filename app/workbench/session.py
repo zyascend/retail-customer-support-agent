@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from app.agent.models import AgentStep, ConversationState
@@ -10,7 +13,7 @@ from app.agent.providers import DisabledLLMProvider
 from app.agent.runtime import AgentRuntime
 from app.config import AppConfig
 from app.eval.cases import EvalCase
-from app.ops.tracing import TraceWriter
+from app.ops.tracing import TraceWriter, final_state_summary
 from app.workbench.cases import get_case_by_id
 from app.workbench.errors import WorkbenchAPIError
 from app.workbench.snapshot import snapshot_from_state
@@ -62,7 +65,7 @@ class WorkbenchSession:
                 selected_case=next_selected_case,
             )
         )
-        next_trace_artifact_path = self._write_trace_for(
+        next_trace_artifact_path = self._stage_reset_trace_for(
             runtime=next_runtime,
             state=next_state,
             mode=next_mode,
@@ -204,27 +207,109 @@ class WorkbenchSession:
         state: ConversationState,
         mode: str,
         initial_db_hash: Optional[str],
+        trace_path: Optional[Path] = None,
     ) -> str:
+        if trace_path is not None:
+            self._write_trace_payload_for(
+                trace_path=trace_path,
+                runtime=runtime,
+                state=state,
+                mode=mode,
+                initial_db_hash=initial_db_hash,
+            )
+            return str(trace_path)
         trace_path = TraceWriter(self.config.run_artifact_dir).write(
             run_id=self.session_id,
             state=state,
-            metadata={
-                "runtime_source": runtime.retail_runtime.source,
-                "model": self.config.default_agent_model,
-                "mode": mode,
-                "llm_available": self.llm_available,
-                "llm_enabled": runtime.provider is not None,
-                "llm_timeout_seconds": self.config.agent_llm_timeout_seconds,
-                "llm_max_retries": self.config.agent_llm_max_retries,
-                "initial_db_hash": initial_db_hash,
-                "final_db_hash": runtime.retail_runtime.db_hash(),
-                "tau2_bench_root": str(self.config.tau2_bench_root),
-                "tau3_retail_root": str(self.config.tau3_retail_root),
-                "retail_db_path": str(self.config.retail_db_path),
-                "prompts": prompt_metadata(),
-            },
+            metadata=self._trace_metadata_for(
+                runtime=runtime,
+                mode=mode,
+                initial_db_hash=initial_db_hash,
+            ),
         )
         return str(trace_path)
+
+    def _stage_reset_trace_for(
+        self,
+        *,
+        runtime: AgentRuntime,
+        state: ConversationState,
+        mode: str,
+        initial_db_hash: Optional[str],
+    ) -> str:
+        artifact_dir = self.config.run_artifact_dir
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        final_path = artifact_dir / f"{self.session_id}.json"
+        temp_path = artifact_dir / f".{self.session_id}.{uuid.uuid4().hex}.tmp"
+        try:
+            self._write_trace_for(
+                runtime=runtime,
+                state=state,
+                mode=mode,
+                initial_db_hash=initial_db_hash,
+                trace_path=temp_path,
+            )
+            temp_path.replace(final_path)
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
+        return str(final_path)
+
+    def _write_trace_payload_for(
+        self,
+        *,
+        trace_path: Path,
+        runtime: AgentRuntime,
+        state: ConversationState,
+        mode: str,
+        initial_db_hash: Optional[str],
+    ) -> None:
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "run_id": self.session_id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "metadata": self._trace_metadata_for(
+                runtime=runtime,
+                mode=mode,
+                initial_db_hash=initial_db_hash,
+            ),
+            "messages": [message.model_dump() for message in state.messages],
+            "steps": [step.model_dump() for step in state.steps],
+            "tool_calls": [record.model_dump() for record in state.tool_results],
+            "policy_checks": (
+                [state.policy_decision.model_dump()]
+                if state.policy_decision
+                else []
+            ),
+            "write_audit_logs": state.audit_logs,
+            "final_state": final_state_summary(state),
+        }
+        with trace_path.open("w", encoding="utf-8") as file:
+            json.dump(payload, file, indent=2, sort_keys=True, default=str)
+            file.write("\n")
+
+    def _trace_metadata_for(
+        self,
+        *,
+        runtime: AgentRuntime,
+        mode: str,
+        initial_db_hash: Optional[str],
+    ) -> Dict[str, Any]:
+        return {
+            "runtime_source": runtime.retail_runtime.source,
+            "model": self.config.default_agent_model,
+            "mode": mode,
+            "llm_available": self.llm_available,
+            "llm_enabled": runtime.provider is not None,
+            "llm_timeout_seconds": self.config.agent_llm_timeout_seconds,
+            "llm_max_retries": self.config.agent_llm_max_retries,
+            "initial_db_hash": initial_db_hash,
+            "final_db_hash": runtime.retail_runtime.db_hash(),
+            "tau2_bench_root": str(self.config.tau2_bench_root),
+            "tau3_retail_root": str(self.config.tau3_retail_root),
+            "retail_db_path": str(self.config.retail_db_path),
+            "prompts": prompt_metadata(),
+        }
 
     def _require_case(self) -> EvalCase:
         if self.selected_case is None:
