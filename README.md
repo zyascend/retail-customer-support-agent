@@ -176,3 +176,29 @@ Dashboard 默认会对 trace 中常见邮箱、电话、地址、支付字段做
 ```bash
 uv run phase3-dashboard artifacts/phase2/reports/<eval_run_id>.json --no-redact
 ```
+
+## Phase 4：Hybrid Ops Workbench
+
+Phase 4 增加一个本地单会话 workbench，用于 scripted 和 manual agent demo。它展示 run controls、business state、pending actions、conversation、timeline、tool calls、guard blocks 和 write audit details。
+
+启动 Python API：
+
+```bash
+uv run phase4-workbench
+```
+
+在另一个终端启动 React workbench：
+
+```bash
+cd workbench
+npm install
+npm run dev
+```
+
+然后打开：
+
+```text
+http://localhost:5173
+```
+
+默认模式是 deterministic/offline，不需要 API key。如果配置了 `DEEPSEEK_API_KEY`，UI 也会开放 LLM mode。
