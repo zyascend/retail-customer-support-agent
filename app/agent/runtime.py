@@ -427,6 +427,44 @@ class AgentRuntime:
             loaded_orders=list(state.loaded_context.orders),
         )
 
+    def _code_missing_slots(self, state: ConversationState) -> list[str]:
+        """Code-side check for missing required slots per intent."""
+        required_map: Dict[str, tuple[str, ...]] = {
+            "cancel_order": ("order_id", "reason"),
+            "modify_order_address": ("order_id", "address"),
+            "modify_order_items": ("order_id", "item_ids", "new_item_ids"),
+            "modify_order_payment": ("order_id", "payment_method_id"),
+            "modify_user_address": ("address",),
+            "return_items": ("order_id", "item_ids", "payment_method_id"),
+            "exchange_items": (
+                "order_id", "item_ids", "new_item_ids", "payment_method_id",
+            ),
+        }
+        required = required_map.get(state.current_intent, ())
+        return [key for key in required if not state.slots.get(key)]
+
+    def _merge_policy_decisions(
+        self,
+        *,
+        code_decision: str,
+        llm_decision: Optional[str],
+    ) -> str:
+        """Conservative dual-track merge.
+        Any deny → deny. Any ask → ask. Transfer needs both to agree.
+        Only allow when both allow.
+        """
+        if llm_decision is None:
+            return code_decision
+        if "deny" in (code_decision, llm_decision):
+            return "deny"
+        if "ask_clarification" in (code_decision, llm_decision):
+            return "ask_clarification"
+        if code_decision == "transfer" and llm_decision == "transfer":
+            return "transfer"
+        if code_decision == "transfer" or llm_decision == "transfer":
+            return "ask_clarification"
+        return "allow"
+
     def _policy_reasoner(self, state: ConversationState, content: str) -> None:
         if self._has_assistant_response(state):
             return
@@ -439,40 +477,74 @@ class AgentRuntime:
             "return_items",
             "exchange_items",
         }
+
+        # ── Code track ──
         if state.current_intent == "transfer":
-            decision = "transfer"
-        elif state.current_intent in write_intents:
-            decision = "allow"
+            code_decision = "transfer"
         elif state.current_intent == "lookup":
-            decision = "allow"
+            code_decision = "allow"
+        elif state.current_intent in write_intents:
+            if self._code_missing_slots(state):
+                code_decision = "ask_clarification"
+            else:
+                code_decision = "allow"
         else:
-            decision = "ask_clarification"
-        llm_decision = self._llm_policy_decision(state, content, decision)
-        if (
-            state.current_intent in write_intents
-            and llm_decision.get("decision") == "deny"
-        ):
-            llm_decision["decision"] = "allow"
-            llm_decision["internal_reasoning_summary"] = (
-                "Supported write intent deferred to deterministic write guard."
+            code_decision = "ask_clarification"
+
+        # ── LLM track ──
+        llm_payload = self._llm_policy_decision(state, content, code_decision)
+        llm_decision = llm_payload.get("decision") if llm_payload else None
+
+        # ── Conservative merge ──
+        final_decision = self._merge_policy_decisions(
+            code_decision=code_decision,
+            llm_decision=llm_decision,
+        )
+
+        # Log divergence for audit
+        if llm_decision and llm_decision != code_decision:
+            state.add_step(
+                "policy_reasoner_divergence",
+                code=code_decision,
+                llm=llm_decision,
+                merged=final_decision,
             )
+
+        explanation = ""
+        if llm_payload and final_decision == "deny":
+            explanation = self._clean_llm_scalar(
+                llm_payload.get("explanation_for_user")
+            ) or ""
+
         state.policy_decision = PolicyDecision(
-            decision=llm_decision.get("decision", decision),
-            intent=llm_decision.get("intent", state.current_intent),
-            missing_slots=llm_decision.get("missing_slots", []),
-            user_confirmation_required=llm_decision.get(
-                "user_confirmation_required",
-                state.current_intent in write_intents,
+            decision=final_decision,
+            intent=(
+                llm_payload.get("intent", state.current_intent)
+                if llm_payload
+                else state.current_intent
             ),
-            explanation_for_user=llm_decision.get("explanation_for_user", ""),
-            internal_reasoning_summary=llm_decision.get(
-                "internal_reasoning_summary", ""
+            missing_slots=(
+                llm_payload.get("missing_slots")
+                if llm_payload and isinstance(llm_payload.get("missing_slots"), list)
+                else []
+            ),
+            user_confirmation_required=(
+                llm_payload.get("user_confirmation_required", False)
+                if llm_payload
+                else state.current_intent in write_intents
+            ),
+            explanation_for_user=explanation,
+            internal_reasoning_summary=(
+                llm_payload.get("internal_reasoning_summary", "")
+                if llm_payload
+                else ""
             ),
         )
         state.add_step(
             "policy_reasoner",
-            decision=state.policy_decision.decision,
-            llm_used=bool(llm_decision),
+            decision=final_decision,
+            llm_used=bool(llm_payload),
+            code_decision=code_decision,
         )
 
     def _action_planner(self, state: ConversationState, content: str) -> None:
