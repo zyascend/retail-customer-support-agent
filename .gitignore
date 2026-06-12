@@ -17,6 +17,9 @@ build/
 .next/
 coverage/
 
+workbench/node_modules/
+workbench/dist/
+
 artifacts/
 .superpowers/
 .worktrees/
