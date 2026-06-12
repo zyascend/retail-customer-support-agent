@@ -19,6 +19,7 @@ coverage/
 
 artifacts/
 .superpowers/
+.worktrees/
 
 *.log
 *.sqlite
