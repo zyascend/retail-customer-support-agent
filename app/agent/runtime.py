@@ -1025,26 +1025,70 @@ class AgentRuntime:
         return f"Request an exchange for order {order_id}. Please confirm yes or no."
 
     def _infer_intent(self, lowered: str) -> str:
-        if "human" in lowered or "agent" in lowered or "representative" in lowered or "discount" in lowered:
+        # Policy questions are lookups, not operations
+        if re.search(r'\b(return|exchange|cancel|refund)\s+policy\b', lowered):
+            return "lookup"
+
+        # Explicit human transfer request
+        if re.search(
+            r'\b(?:talk|speak|connect|transfer)\s+(?:to|with)?\s*'
+            r'(?:a\s+)?(?:human|agent|representative|person)\b',
+            lowered,
+        ):
             return "transfer"
-        if "cancel" in lowered:
+        if re.search(r'\b(?:customer\s+service|support\s+agent|real\s+person)\b',
+                     lowered):
+            return "transfer"
+        if "discount" in lowered:
+            return "transfer"
+
+        # Cancel — must mention order
+        if re.search(r'\bcancel\b', lowered):
+            if re.search(r'\border\b', lowered) or ORDER_RE.search(lowered):
+                return "cancel_order"
             return "cancel_order"
-        if "exchange" in lowered:
-            return "exchange_items"
-        if "return" in lowered:
-            return "return_items"
-        if "payment" in lowered and ("change" in lowered or "modify" in lowered):
+
+        # Exchange — exclude "exchange rate" and "exchange policy"
+        if re.search(r'\bexchange\b', lowered):
+            if not re.search(r'\bexchange\s+(?:rate|policy)\b', lowered):
+                if re.search(r'\bitem\b', lowered) or ITEM_RE.search(lowered):
+                    return "exchange_items"
+                return "exchange_items"
+
+        # Return — must mention item or order, not "return policy"
+        if re.search(r'\breturn\b', lowered):
+            if re.search(r'\breturn\s+policy\b', lowered):
+                pass
+            elif re.search(r'\bitem\b', lowered) or ORDER_RE.search(lowered):
+                return "return_items"
+
+        # Payment modification
+        if "payment" in lowered and re.search(r'\b(change|modify|update|switch)\b',
+                                               lowered):
             return "modify_order_payment"
-        if "item" in lowered and ("change" in lowered or "modify" in lowered):
+
+        # Item modification (pending order)
+        if re.search(r'\b(item|product)\b', lowered) and re.search(
+            r'\b(change|modify|replace|switch|swap)\b', lowered):
             return "modify_order_items"
+
+        # User default address
+        if re.search(r'\bmy\b.*\bdefault\b.*\baddress\b', lowered):
+            return "modify_user_address"
         if "default address" in lowered:
             return "modify_user_address"
-        if "address" in lowered and ("change" in lowered or "modify" in lowered):
+
+        # Order address modification
+        if "address" in lowered and re.search(r'\b(change|modify|update)\b',
+                                               lowered):
             if "my" in lowered and "default" in lowered:
                 return "modify_user_address"
             return "modify_order_address"
+
+        # Order mention → lookup
         if "order" in lowered or ORDER_RE.search(lowered):
             return "lookup"
+
         return "unknown"
 
     def _parse_address(self, content: str) -> Optional[Dict[str, str]]:
