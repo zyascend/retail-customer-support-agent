@@ -1,5 +1,6 @@
 import { Play, RotateCcw, Send, StepForward } from "lucide-react";
 import { useMemo, useState } from "react";
+import { modeLabel } from "../labels";
 import type {
   CaseCatalog,
   WorkbenchMode,
@@ -78,13 +79,13 @@ export function RunControl({
   }
 
   return (
-    <section className="panel run-control" aria-label="Run control">
+    <section className="panel run-control" aria-label="运行控制">
       <div className="panel-header">
         <div>
-          <div className="panel-kicker">Run Control</div>
-          <h2>Session</h2>
+          <div className="panel-kicker">运行控制</div>
+          <h2>会话</h2>
         </div>
-        <div className="segmented-control" aria-label="Case list scope">
+        <div className="segmented-control" aria-label="案例范围">
           <button
             aria-pressed={!showAll}
             className={!showAll ? "active" : ""}
@@ -92,7 +93,7 @@ export function RunControl({
             onClick={() => setShowAll(false)}
             type="button"
           >
-            Demo
+            演示
           </button>
           <button
             aria-pressed={showAll}
@@ -101,27 +102,27 @@ export function RunControl({
             onClick={() => setShowAll(true)}
             type="button"
           >
-            All
+            全部
           </button>
         </div>
       </div>
 
       <label className="field">
-        <span>Mode</span>
+        <span>模式</span>
         <select
           disabled={busy}
           onChange={(event) => onModeChange(event.target.value as WorkbenchMode)}
           value={snapshot.mode}
         >
-          <option value="deterministic">Deterministic</option>
+          <option value="deterministic">{modeLabel("deterministic")}</option>
           <option disabled={!llmAvailable} value="llm">
-            LLM{llmAvailable ? "" : " unavailable"}
+            {llmAvailable ? modeLabel("llm") : "LLM 不可用"}
           </option>
         </select>
       </label>
 
       <label className="field">
-        <span>Case</span>
+        <span>案例</span>
         <select
           disabled={busy || !hasAnyCaseOption}
           onChange={(event) => onSelectCase(event.target.value)}
@@ -146,7 +147,7 @@ export function RunControl({
           type="button"
         >
           <StepForward aria-hidden="true" size={16} />
-          <span>Step</span>
+          <span>单步执行</span>
         </button>
         <button
           className="button"
@@ -155,7 +156,7 @@ export function RunControl({
           type="button"
         >
           <Play aria-hidden="true" size={16} />
-          <span>Run all</span>
+          <span>运行全部</span>
         </button>
         <button
           className="button"
@@ -164,17 +165,17 @@ export function RunControl({
           type="button"
         >
           <RotateCcw aria-hidden="true" size={16} />
-          <span>Reset</span>
+          <span>重置</span>
         </button>
       </div>
 
       <div className="manual-message">
         <label className="field">
-          <span>Manual user message</span>
+          <span>手动用户消息</span>
           <textarea
             disabled={busy}
             onChange={(event) => setManualMessage(event.target.value)}
-            placeholder="Type a customer reply..."
+            placeholder="输入客户回复..."
             rows={4}
             value={manualMessage}
           />
@@ -186,7 +187,7 @@ export function RunControl({
           type="button"
         >
           <Send aria-hidden="true" size={16} />
-          <span>Send</span>
+          <span>发送</span>
         </button>
       </div>
     </section>

@@ -13,6 +13,7 @@ import { Conversation } from "./components/Conversation";
 import { Inspector } from "./components/Inspector";
 import { RunControl } from "./components/RunControl";
 import { Timeline } from "./components/Timeline";
+import { modeLabel } from "./labels";
 import type {
   WorkbenchConfig,
   WorkbenchMode,
@@ -84,7 +85,7 @@ export function App() {
         return nextSnapshot.timeline.at(-1)?.id || null;
       });
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Workbench request failed");
+      setError(exc instanceof Error ? exc.message : "工作台请求失败");
       return false;
     } finally {
       busyRef.current = false;
@@ -157,13 +158,13 @@ export function App() {
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <h1>Retail Agent Workbench</h1>
-          <p>Single-session Phase 4 operations dashboard</p>
+          <h1>零售客服工作台</h1>
+          <p>Phase 4 单会话运营演示面板</p>
         </div>
         <div className="topbar-status">
-          <span className="case-label">{selectedCase?.title || "Loading case"}</span>
+          <span className="case-label">{selectedCase?.title || "正在加载案例"}</span>
           <span className="mode-pill">
-            {snapshot?.mode || config?.default_mode || "loading"}
+            {modeLabel(snapshot?.mode || config?.default_mode)}
           </span>
         </div>
       </header>
@@ -171,7 +172,7 @@ export function App() {
       {error ? <div className="error-banner">{error}</div> : null}
 
       {config && snapshot ? (
-        <section className="dashboard-grid" aria-label="Workbench dashboard">
+        <section className="dashboard-grid" aria-label="工作台仪表盘">
           <RunControl
             busy={busy}
             catalog={config.case_catalog}
@@ -201,7 +202,7 @@ export function App() {
         </section>
       ) : (
         <section className="loading-shell" aria-live="polite">
-          Loading workbench...
+          正在加载工作台...
         </section>
       )}
     </main>

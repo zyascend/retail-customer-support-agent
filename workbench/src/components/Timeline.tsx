@@ -1,4 +1,5 @@
 import { StatusBadge } from "./StatusBadge";
+import { eventLabel, timelineKindLabel } from "../labels";
 import type { TimelineEvent } from "../types";
 
 interface TimelineProps {
@@ -13,11 +14,11 @@ export function Timeline({
   onSelectEvent,
 }: TimelineProps) {
   return (
-    <section className="panel timeline-panel" aria-label="Timeline">
+    <section className="panel timeline-panel" aria-label="时间线">
       <div className="panel-header">
         <div>
-          <div className="panel-kicker">Timeline</div>
-          <h2>Events</h2>
+          <div className="panel-kicker">时间线</div>
+          <h2>事件</h2>
         </div>
         <span className="count-label">{events.length}</span>
       </div>
@@ -35,14 +36,16 @@ export function Timeline({
                   type="button"
                 >
                   <span className="timeline-main">
-                    <span className="timeline-title">{event.label || event.kind}</span>
+                    <span className="timeline-title">
+                      {eventLabel(event.label || event.kind)}
+                    </span>
                     <span className="timeline-summary">
-                      {event.summary || "No summary available"}
+                      {event.summary || "暂无摘要"}
                     </span>
                   </span>
                   <span className="timeline-meta">
                     <StatusBadge label={event.status} tone={toneForStatus(event.status)} />
-                    <span>{event.kind}</span>
+                    <span>{timelineKindLabel(event.kind)}</span>
                   </span>
                 </button>
               </li>
@@ -50,7 +53,7 @@ export function Timeline({
           })}
         </ol>
       ) : (
-        <div className="empty-state">No timeline events yet.</div>
+        <div className="empty-state">暂无时间线事件。</div>
       )}
     </section>
   );

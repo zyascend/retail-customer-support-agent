@@ -15,7 +15,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       payload = JSON.parse(text);
     } catch {
       if (response.ok) {
-        throw new Error("Failed to parse JSON response");
+        throw new Error("无法解析服务端响应");
       }
     }
   } else if (text) {
@@ -24,7 +24,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const message =
-      getErrorMessage(payload) || text || `Request failed: ${response.status}`;
+      getErrorMessage(payload) || text || `请求失败：${response.status}`;
     throw new Error(message);
   }
 

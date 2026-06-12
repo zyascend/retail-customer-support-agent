@@ -1,3 +1,5 @@
+import { statusLabel } from "../labels";
+
 export function StatusBadge({
   label,
   tone = "neutral",
@@ -6,6 +8,6 @@ export function StatusBadge({
   tone?: "neutral" | "good" | "warn" | "bad";
 }) {
   return (
-    <span className={`status-badge status-${tone}`}>{label || "unknown"}</span>
+    <span className={`status-badge status-${tone}`}>{statusLabel(label)}</span>
   );
 }

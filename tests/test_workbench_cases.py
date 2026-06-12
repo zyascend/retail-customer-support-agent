@@ -27,7 +27,7 @@ class WorkbenchCaseCatalogTests(unittest.TestCase):
         self.assertEqual(case["message_count"], 2)
         self.assertEqual(case["expected_intent"], "cancel_order")
         self.assertEqual(case["expected_order_status"], "cancelled")
-        self.assertIn("Cancel", case["title"])
+        self.assertEqual(case["title"], "取消待处理订单")
         self.assertEqual(case["messages"], source_case.messages)
         self.assertIsNot(case["messages"], source_case.messages)
         for serialized_message, source_message in zip(

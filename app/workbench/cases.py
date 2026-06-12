@@ -13,19 +13,19 @@ DEMO_CASE_IDS = [
 ]
 
 CASE_TITLES = {
-    "lookup_pending_order": "Lookup pending order",
-    "cancel_pending_order": "Cancel pending order",
-    "modify_pending_order_address": "Modify pending order address",
-    "return_delivered_order_item": "Return delivered item",
-    "exchange_delivered_order_item": "Exchange delivered item",
-    "transfer_to_human": "Transfer to human",
-    "deny_cancel_confirmation": "Deny cancellation confirmation",
+    "lookup_pending_order": "查询待处理订单",
+    "cancel_pending_order": "取消待处理订单",
+    "modify_pending_order_address": "修改待处理订单地址",
+    "return_delivered_order_item": "退回已送达商品",
+    "exchange_delivered_order_item": "换货已送达商品",
+    "transfer_to_human": "转接人工客服",
+    "deny_cancel_confirmation": "拒绝取消确认",
     "changed_confirmation_discards_pending_action": (
-        "Changed confirmation discards pending action"
+        "变更确认并丢弃待处理操作"
     ),
-    "block_cancel_processed_order": "Guard blocks processed cancellation",
-    "block_return_pending_order": "Guard blocks pending return",
-    "block_wrong_user_order_access": "Guard blocks wrong-user access",
+    "block_cancel_processed_order": "阻止取消已处理订单",
+    "block_return_pending_order": "阻止退回待处理订单",
+    "block_wrong_user_order_access": "阻止访问他人订单",
 }
 
 

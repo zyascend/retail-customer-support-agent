@@ -1,3 +1,4 @@
+import { actionLabel, intentLabel, statusLabel } from "../labels";
 import type { WorkbenchSnapshot } from "../types";
 
 interface BusinessStateProps {
@@ -18,45 +19,45 @@ export function BusinessState({
   const { business, pending_action: pendingAction } = snapshot;
 
   return (
-    <section className="panel business-state" aria-label="Business state">
+    <section className="panel business-state" aria-label="业务状态">
       <div className="panel-header">
         <div>
-          <div className="panel-kicker">Business State</div>
-          <h2>Context</h2>
+          <div className="panel-kicker">业务状态</div>
+          <h2>上下文</h2>
         </div>
         <span className={business.db_changed ? "change-flag changed" : "change-flag"}>
-          DB {business.db_changed ? "changed" : "unchanged"}
+          数据库{business.db_changed ? "已变更" : "未变更"}
         </span>
       </div>
 
       <dl className="fact-grid">
         <div>
-          <dt>User</dt>
-          <dd>{business.authenticated_user_id || "Unauthenticated"}</dd>
+          <dt>用户</dt>
+          <dd>{business.authenticated_user_id || "未认证"}</dd>
         </div>
         <div>
-          <dt>Order</dt>
-          <dd>{business.active_order_id || "None"}</dd>
+          <dt>订单</dt>
+          <dd>{business.active_order_id || "无"}</dd>
         </div>
         <div>
-          <dt>Intent</dt>
-          <dd>{business.current_intent || "Unknown"}</dd>
+          <dt>意图</dt>
+          <dd>{intentLabel(business.current_intent)}</dd>
         </div>
         <div>
-          <dt>Confirmation</dt>
-          <dd>{business.confirmation_status || "Unknown"}</dd>
+          <dt>确认状态</dt>
+          <dd>{statusLabel(business.confirmation_status)}</dd>
         </div>
       </dl>
 
       <div className="json-section">
-        <div className="section-label">Slots</div>
+        <div className="section-label">槽位</div>
         <pre>{formatJson(business.slots)}</pre>
       </div>
 
       {pendingAction ? (
-        <section className="pending-action" aria-label="Pending action">
-          <div className="section-label">Pending Action</div>
-          <h3>{pendingAction.action_name}</h3>
+        <section className="pending-action" aria-label="待确认操作">
+          <div className="section-label">待确认操作</div>
+          <h3>{actionLabel(pendingAction.action_name)}</h3>
           <p>{pendingAction.user_facing_summary}</p>
           <pre>{formatJson(pendingAction.arguments)}</pre>
           <div className="control-row compact">
@@ -66,18 +67,18 @@ export function BusinessState({
               onClick={onConfirm}
               type="button"
             >
-              Confirm
+              确认
             </button>
             <button className="button" disabled={busy} onClick={onDeny} type="button">
-              Deny
+              拒绝
             </button>
             <button className="button" disabled={busy} onClick={onChange} type="button">
-              Change
+              修改
             </button>
           </div>
         </section>
       ) : (
-        <div className="empty-state">No pending action.</div>
+        <div className="empty-state">暂无待确认操作。</div>
       )}
     </section>
   );
