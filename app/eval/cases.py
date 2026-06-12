@@ -20,6 +20,11 @@ class EvalCase:
     expected_tool_names: List[str] = field(default_factory=list)
     expected_assistant_contains: Optional[str] = None
     max_turns: int = 8
+    subset: str = "curated_mvp"
+    capability: Optional[str] = None
+    policy_area: Optional[str] = None
+    expected_db_assertions: Dict[str, object] = field(default_factory=dict)
+    expected_tool_sequence: List[str] = field(default_factory=list)
 
 
 CURATED_MVP_CASES: List[EvalCase] = [
@@ -254,7 +259,38 @@ CURATED_MVP_CASES: List[EvalCase] = [
 ]
 
 
+def _case_for_subset(case: EvalCase, subset: str) -> EvalCase:
+    return EvalCase(
+        case_id=case.case_id,
+        category=case.category,
+        messages=[dict(message) for message in case.messages],
+        expected_user_id=case.expected_user_id,
+        expected_intent=case.expected_intent,
+        order_id=case.order_id,
+        expected_write_lock=case.expected_write_lock,
+        expected_order_status=case.expected_order_status,
+        expected_confirmation_status=case.expected_confirmation_status,
+        expected_guard_block_reason=case.expected_guard_block_reason,
+        expected_no_write=case.expected_no_write,
+        expected_tool_names=list(case.expected_tool_names),
+        expected_assistant_contains=case.expected_assistant_contains,
+        max_turns=case.max_turns,
+        subset=subset,
+        capability=case.capability,
+        policy_area=case.policy_area,
+        expected_db_assertions=dict(case.expected_db_assertions),
+        expected_tool_sequence=list(case.expected_tool_sequence),
+    )
+
+
+GENERALIZED_MVP_CASES: List[EvalCase] = [
+    _case_for_subset(case, "generalized_mvp") for case in CURATED_MVP_CASES
+]
+
+
 def get_cases(subset: str) -> List[EvalCase]:
-    if subset != "curated_mvp":
-        raise ValueError("unsupported subset: " + subset)
-    return list(CURATED_MVP_CASES)
+    if subset == "curated_mvp":
+        return list(CURATED_MVP_CASES)
+    if subset == "generalized_mvp":
+        return list(GENERALIZED_MVP_CASES)
+    raise ValueError("unsupported subset: " + subset)

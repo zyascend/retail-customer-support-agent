@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.config import resolve_config
-from app.eval.cases import get_cases
+from app.eval.cases import EvalCase, get_cases
 from app.eval.metrics import (
     apply_case_diagnostics,
     build_comparison_artifact,
@@ -256,6 +256,50 @@ class CuratedEvalTests(unittest.TestCase):
             comparison["metric_deltas"]["average_latency_seconds"]["delta"],
             -0.5,
         )
+
+    def test_generalized_subset_starts_as_curated_regression_copy(self):
+        curated_cases = get_cases("curated_mvp")
+        generalized_cases = get_cases("generalized_mvp")
+
+        self.assertEqual(len(generalized_cases), len(curated_cases))
+        self.assertEqual({case.subset for case in curated_cases}, {"curated_mvp"})
+        self.assertEqual({case.subset for case in generalized_cases}, {"generalized_mvp"})
+        self.assertEqual(
+            [case.case_id for case in generalized_cases],
+            [case.case_id for case in curated_cases],
+        )
+        self.assertIsNot(generalized_cases[0].messages, curated_cases[0].messages)
+        self.assertEqual(generalized_cases[0].expected_db_assertions, {})
+        self.assertEqual(generalized_cases[0].expected_tool_sequence, [])
+
+    def test_expected_tool_sequence_detects_wrong_order(self):
+        case = EvalCase(
+            case_id="ordered_tools",
+            category="test",
+            messages=[],
+            expected_user_id="user",
+            expected_intent="lookup",
+            expected_tool_names=["first_tool", "second_tool"],
+            expected_tool_sequence=["first_tool", "second_tool"],
+        )
+
+        label = classify_failure(
+            case=case,
+            authenticated_user_id="user",
+            final_intent="lookup",
+            write_locks=[],
+            actual_order_status=None,
+            assistant_messages=[],
+            tool_names=["second_tool", "first_tool"],
+            guard_block_reasons=[],
+            tool_errors=0,
+            guard_blocks=0,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="not_required",
+        )
+
+        self.assertEqual(label, "wrong_tool_sequence")
 
 
 def _result(

@@ -404,6 +404,15 @@ def classify_failure(
         transcript = "\n".join(assistant_messages)
         if case.expected_assistant_contains not in transcript:
             return "response_mismatch"
+    if case.expected_tool_sequence:
+        sequence_cursor = 0
+        for tool_name in tool_names:
+            if tool_name == case.expected_tool_sequence[sequence_cursor]:
+                sequence_cursor += 1
+                if sequence_cursor == len(case.expected_tool_sequence):
+                    break
+        if sequence_cursor < len(case.expected_tool_sequence):
+            return "wrong_tool_sequence"
     return None
 
 
