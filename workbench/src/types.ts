@@ -6,11 +6,14 @@ export interface WorkbenchCase {
   category: string;
   message_count: number;
   messages: Array<{ role: string; content: string }>;
+  expected_user_id: string | null;
   expected_intent: string;
   expected_order_status: string | null;
   expected_confirmation_status: string | null;
   expected_guard_block_reason: string | null;
   expected_no_write: boolean;
+  expected_tool_names: string[];
+  expected_assistant_contains: string | null;
 }
 
 export interface CaseCatalog {
@@ -63,13 +66,13 @@ export interface WorkbenchSnapshot {
     auth_method: string | null;
     active_user_identity: unknown;
     active_order_id: string | null;
-    current_intent: string | null;
+    current_intent: string;
     slots: Record<string, unknown>;
-    confirmation_status: string | null;
+    confirmation_status: string;
     db_changed: boolean;
     initial_db_hash: string | null;
     current_db_hash: string | null;
-    write_locks: unknown;
+    write_locks: string[];
   };
   pending_action: null | {
     action_name: string;
