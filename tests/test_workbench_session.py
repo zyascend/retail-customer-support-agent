@@ -294,6 +294,32 @@ class WorkbenchSessionTests(unittest.TestCase):
                 snapshot["guard_blocks"][0]["error"], "wrong_user_order_access"
             )
 
+    def test_confirmed_write_tool_call_appears_after_confirmation_message(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
+            session = manager.create_session(
+                mode="deterministic", case_id="cancel_pending_order"
+            )
+
+            snapshot = session.run_all()
+
+            labels = [
+                (event["kind"], event["label"], event["summary"])
+                for event in snapshot["timeline"]
+            ]
+            yes_index = next(
+                index
+                for index, (kind, label, summary) in enumerate(labels)
+                if kind == "message" and label == "user" and summary == "yes"
+            )
+            write_index = next(
+                index
+                for index, (kind, label, _summary) in enumerate(labels)
+                if kind == "tool_call" and label == "cancel_pending_order"
+            )
+
+            self.assertGreater(write_index, yes_index)
+
 
 if __name__ == "__main__":
     unittest.main()

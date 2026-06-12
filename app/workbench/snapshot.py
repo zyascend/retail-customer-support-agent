@@ -122,7 +122,14 @@ def build_timeline(state: ConversationState) -> List[Dict[str, Any]]:
             state.tool_results
         ):
             record = state.tool_results[tool_index]
-            if step.node == "write_action_guard" or record.status != "blocked":
+            if (
+                (step.node == "write_action_guard" and record.status == "blocked")
+                or (
+                    step.node == "tool_executor"
+                    and record.status != "blocked"
+                    and "tool_name" in detail
+                )
+            ):
                 timeline.append(
                     (
                         (turn_index, 21 + index, tool_index),
