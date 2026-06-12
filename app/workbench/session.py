@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -13,7 +11,7 @@ from app.agent.providers import DisabledLLMProvider
 from app.agent.runtime import AgentRuntime
 from app.config import AppConfig
 from app.eval.cases import EvalCase
-from app.ops.tracing import TraceWriter, final_state_summary
+from app.ops.tracing import TraceWriter
 from app.workbench.cases import get_case_by_id
 from app.workbench.errors import WorkbenchAPIError
 from app.workbench.snapshot import snapshot_from_state
@@ -265,28 +263,16 @@ class WorkbenchSession:
         initial_db_hash: Optional[str],
     ) -> None:
         trace_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "run_id": self.session_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "metadata": self._trace_metadata_for(
+        TraceWriter(self.config.run_artifact_dir).write_path(
+            path=trace_path,
+            run_id=self.session_id,
+            state=state,
+            metadata=self._trace_metadata_for(
                 runtime=runtime,
                 mode=mode,
                 initial_db_hash=initial_db_hash,
             ),
-            "messages": [message.model_dump() for message in state.messages],
-            "steps": [step.model_dump() for step in state.steps],
-            "tool_calls": [record.model_dump() for record in state.tool_results],
-            "policy_checks": (
-                [state.policy_decision.model_dump()]
-                if state.policy_decision
-                else []
-            ),
-            "write_audit_logs": state.audit_logs,
-            "final_state": final_state_summary(state),
-        }
-        with trace_path.open("w", encoding="utf-8") as file:
-            json.dump(payload, file, indent=2, sort_keys=True, default=str)
-            file.write("\n")
+        )
 
     def _trace_metadata_for(
         self,

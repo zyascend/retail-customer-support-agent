@@ -21,23 +21,48 @@ class TraceWriter:
     ) -> Path:
         self.artifact_dir.mkdir(parents=True, exist_ok=True)
         path = self.artifact_dir / f"{run_id}.json"
-        payload = {
-            "run_id": run_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "metadata": metadata,
-            "messages": [message.model_dump() for message in state.messages],
-            "steps": [step.model_dump() for step in state.steps],
-            "tool_calls": [record.model_dump() for record in state.tool_results],
-            "policy_checks": (
-                [state.policy_decision.model_dump()] if state.policy_decision else []
-            ),
-            "write_audit_logs": state.audit_logs,
-            "final_state": final_state_summary(state),
-        }
+        self.write_path(path=path, run_id=run_id, state=state, metadata=metadata)
+        return path
+
+    def write_path(
+        self,
+        *,
+        path: Path,
+        run_id: str,
+        state: ConversationState,
+        metadata: Dict[str, Any],
+    ) -> Path:
+        payload = build_trace_payload(
+            run_id=run_id,
+            state=state,
+            metadata=metadata,
+        )
+        path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as file:
             json.dump(payload, file, indent=2, sort_keys=True, default=str)
             file.write("\n")
         return path
+
+
+def build_trace_payload(
+    *,
+    run_id: str,
+    state: ConversationState,
+    metadata: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "metadata": metadata,
+        "messages": [message.model_dump() for message in state.messages],
+        "steps": [step.model_dump() for step in state.steps],
+        "tool_calls": [record.model_dump() for record in state.tool_results],
+        "policy_checks": (
+            [state.policy_decision.model_dump()] if state.policy_decision else []
+        ),
+        "write_audit_logs": state.audit_logs,
+        "final_state": final_state_summary(state),
+    }
 
 
 def final_state_summary(state: ConversationState) -> Dict[str, Any]:
@@ -55,4 +80,3 @@ def final_state_summary(state: ConversationState) -> Dict[str, Any]:
         "write_locks": state.write_locks,
         "termination_reason": state.termination_reason,
     }
-

@@ -238,6 +238,10 @@ class WorkbenchSessionTests(unittest.TestCase):
                 before_trace_path.read_text(encoding="utf-8"),
                 before_trace_text,
             )
+            self.assertEqual(
+                list(before_trace_path.parent.glob(f".{session.session_id}.*.tmp")),
+                [],
+            )
 
 
 if __name__ == "__main__":
