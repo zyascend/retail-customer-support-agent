@@ -34,6 +34,28 @@ between product behavior, tool coverage, guard rules, and eval cases.
 - 3-4 confirmation/no-write cases.
 - 2-3 unsupported or transfer cases.
 
+## Implemented Cases
+
+Current `generalized_mvp` contains these implemented cases, grouped by
+capability:
+
+- `auth_name_zip`: `auth_name_zip_lookup_order`
+- `cancel`: `cancel_pending_order`
+- `confirmation`: `deny_cancel_confirmation`, `changed_confirmation_discards_pending_action`
+- `exchange`: `exchange_delivered_order_item`
+- `exchange_items`: `block_exchange_product_mismatch`, `block_exchange_unavailable_replacement`
+- `guard`: `block_cancel_processed_order`, `block_return_pending_order`, `block_wrong_user_order_access`
+- `lookup`: `lookup_pending_order`
+- `modify_address`: `modify_pending_order_address`
+- `modify_items`: `modify_pending_order_items_success`, `changed_modify_items_confirmation`, `block_item_product_mismatch`, `block_item_unavailable`, `block_modify_items_non_pending_order`
+- `modify_payment`: `modify_pending_order_payment_success`, `deny_modify_payment_confirmation`, `block_payment_not_owned`, `block_payment_insufficient_gift_card`, `block_same_payment_method`, `block_modify_payment_processed_order`
+- `modify_user_address`: `modify_user_default_address_success`, `deny_modify_address_confirmation`
+- `multi_item_exchange`: `multi_item_exchange_success`
+- `multi_item_return`: `multi_item_return_success`
+- `return`: `return_delivered_order_item`
+- `transfer`: `transfer_to_human`
+- `unsupported_request`: `transfer_unsupported_discount_request`
+
 ## Hard Acceptance Rules
 
 - Deterministic `generalized_mvp` must pass before Phase 5 is considered done.

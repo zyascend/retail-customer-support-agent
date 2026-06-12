@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -306,6 +307,81 @@ class CuratedEvalTests(unittest.TestCase):
         )
         subsets = {case.subset for case in cases}
         self.assertEqual(subsets, {"generalized_mvp"})
+
+    def test_phase5_cases_cover_multi_item_exchange_and_user_address_write(self):
+        cases = {case.case_id: case for case in get_cases("generalized_mvp")}
+
+        exchange_case = cases["multi_item_exchange_success"]
+        exchange_text = " ".join(message["content"] for message in exchange_case.messages)
+        exchange_item_ids = re.findall(r"\b\d{8,}\b", exchange_text)
+        self.assertGreaterEqual(len(set(exchange_item_ids)), 4)
+        self.assertEqual(
+            exchange_case.expected_write_lock,
+            "item:6700049080,6777246137:exchange",
+        )
+        self.assertEqual(exchange_case.capability, "multi_item_exchange")
+
+        address_case = cases["modify_user_default_address_success"]
+        self.assertEqual(
+            address_case.expected_write_lock,
+            "user:sofia_rossi_8776:modify_address",
+        )
+        self.assertEqual(
+            address_case.expected_db_assertions,
+            {
+                "user_id": "sofia_rossi_8776",
+                "address": {
+                    "address1": "12 Oak St",
+                    "address2": "Unit 4",
+                    "city": "Austin",
+                    "state": "TX",
+                    "country": "USA",
+                    "zip": "78701",
+                },
+            },
+        )
+
+    def test_expected_db_assertions_detect_user_address_mismatch(self):
+        case = EvalCase(
+            case_id="user_address_assertion",
+            category="modify_address",
+            messages=[],
+            expected_user_id="user",
+            expected_intent="modify_user_address",
+            expected_db_assertions={
+                "user_id": "user",
+                "address": {"zip": "78701"},
+            },
+        )
+
+        label = classify_failure(
+            case=case,
+            authenticated_user_id="user",
+            final_intent="modify_user_address",
+            write_locks=[],
+            actual_order_status=None,
+            assistant_messages=[],
+            tool_names=[],
+            guard_block_reasons=[],
+            tool_errors=0,
+            guard_blocks=0,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="confirmed",
+            db_assertion_failures=["user:user address.zip expected 78701 actual 78702"],
+        )
+
+        self.assertEqual(label, "db_assertion_mismatch")
+
+    def test_phase5_capability_matrix_lists_implemented_cases(self):
+        matrix = Path("docs/phase5-capability-matrix.md").read_text(encoding="utf-8")
+        self.assertIn("## Implemented Cases", matrix)
+        missing = [
+            case.case_id
+            for case in get_cases("generalized_mvp")
+            if case.case_id not in matrix
+        ]
+        self.assertEqual(missing, [])
 
     def test_generalized_eval_runner_passes_phase5_subset(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -36,6 +36,86 @@ No frontend layout files should change unless a type mismatch appears during `np
 
 ---
 
+## Risk Table
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| `modify_pending_order_payment` moved from `DEFERRED_WRITE_ACTIONS` activates payment paths prematurely | Untested payment mutation could corrupt DB or produce wrong results | Complete guard + tool implementation before runtime integration; run targeted guard tests first |
+| `_validate_item_replacements` reused for exchange path | May change existing exchange guard behavior, breaking regression | Run `curated_mvp` eval after guard changes to catch regressions |
+| `GUARD_USER_MESSAGES` incomplete coverage | Some guard reasons still leak machine-readable codes to users | Map covers all 20 return values from `_validate_policy`, `_validate_ownership`, `_validate_read_before_write`, and `_lock_conflict` |
+| New `EvalCase` fields (`subset`, `capability`, `policy_area`, `expected_db_assertions`, `expected_tool_sequence`) added | Older serialization code may fail on unknown fields | Add fields to `EvalCase` dataclass with defaults; verify workbench `_serialize_case` includes them |
+| `find_user_id_by_name_zip` not yet verified working end-to-end | Name+zip auth fails in runtime even after planner is added | Pre-flight Check 1 verifies the tool before any implementation starts |
+| Chinese `check:i18n` fails on new case titles | CI/local build breaks | Task 7 Step 3 includes Chinese titles for every new case; verify with `npm run check:i18n` in Step 7 |
+
+## Pre-Flight Checks
+
+Before starting any Phase 5 task, verify that existing dependencies are in good shape:
+
+- [ ] **Check 1: `find_user_id_by_name_zip` tool works**
+  Run:
+  ```bash
+  uv run python -c "
+  from app.config import resolve_config
+  from app.tools.retail_adapter import RetailAdapter
+  r = RetailAdapter(resolve_config()).create_runtime()
+  uid = r.tools.find_user_id_by_name_zip(first_name='Sofia', last_name='Rossi', zip='78784')
+  print('PASS:', uid)
+  "
+  ```
+  Expected: prints user id for Sofia Rossi.
+
+- [ ] **Check 2: `modify_user_address` tool exists and works**
+  Run:
+  ```bash
+  uv run python -c "
+  from app.config import resolve_config
+  from app.tools.retail_adapter import RetailAdapter
+  r = RetailAdapter(resolve_config()).create_runtime()
+  result = r.tools.modify_user_address(user_id='sofia_rossi_8776', address1='12 Oak St', city='Austin', state='TX', country='USA', zip='78701')
+  print('PASS:', result.get('default_address', {}).get('address1'))
+  "
+  ```
+
+- [ ] **Check 3: `_get_payment_method` and `_get_variant` helpers exist**
+  Run:
+  ```bash
+  uv run python -c "
+  from app.config import resolve_config
+  from app.tools.retail_adapter import RetailAdapter
+  r = RetailAdapter(resolve_config()).create_runtime()
+  pm = r.tools._get_payment_method('sofia_rossi_8776', 'credit_card_5051208')
+  print('PASS pm:', pm['source'])
+  v = r.tools._get_variant('66fd7e9e', '1586641416')
+  print('PASS var:', v['available'])
+  "
+  ```
+
+- [ ] **Check 4: All existing tests still pass**
+  Run:
+  ```bash
+  uv run python -m unittest discover -s tests -v 2>&1 | tail -5
+  ```
+  Expected: `OK`.
+
+- [ ] **Check 5: `curated_mvp` eval still passes**
+  Run:
+  ```bash
+  uv run phase2-eval --subset curated_mvp --trials 1 --no-progress --json 2>&1 | python -c "import sys,json; d=json.load(sys.stdin); assert d['pass_rate']==1.0, f'pass_rate={d[\"pass_rate\"]}'; print('PASS:', d['passed_count'], '/', d['count'])"
+  ```
+
+If any pre-flight check fails, fix the underlying issue before starting Phase 5 implementation.
+
+---
+
+## Execution Guidance
+
+The 8 tasks below are organized for clarity, but **Task 1 and Task 6** both modify eval files (`app/eval/cases.py`, `app/eval/runner.py`, `tests/test_eval_runner.py`), and **Task 4 and Task 5** both modify `app/agent/runtime.py` and `tests/test_agent_core.py`. Implementers should work these pairs as merged units to reduce file churn and test loops:
+
+- **Merged unit A** (Task 1 + Task 6): eval contract plumbing → eval case definitions
+- **Merged unit B** (Task 4 + Task 5): runtime authentication/planning → guard response mapping
+
+The remaining tasks (2, 3, 7, 8) each have distinct file targets and can be executed individually.
+
 ### Task 1: Extend Eval Case Contract For Phase 5
 
 **Files:**
@@ -509,7 +589,7 @@ Expected: FAIL because guard does not yet implement all Phase 5 checks.
 
 - [ ] **Step 3: Import new retail helpers**
 
-Modify imports in `app/agent/guard.py`:
+Modify imports in `app/agent/guard.py`. The file already imports `get_order_from_db` and `get_user_from_db`. Add only the two new helpers (`find_variant_in_db`, `get_current_payment_method_id`):
 
 ```python
 from app.tools.retail_adapter import (
@@ -520,21 +600,21 @@ from app.tools.retail_adapter import (
 )
 ```
 
-- [ ] **Step 4: Add `modify_pending_order_payment` to write actions**
+- [ ] **Step 4: Activate `modify_pending_order_payment`**
 
-Change constants in `app/agent/guard.py`:
+In `app/agent/guard.py`, `modify_pending_order_payment` is currently in `DEFERRED_WRITE_ACTIONS` (blocked as `unsupported_in_mvp`). Move it to `WRITE_ACTIONS` and empty `DEFERRED_WRITE_ACTIONS`. `modify_pending_order_items` is already present — verify it is not missing:
 
 ```python
 WRITE_ACTIONS = {
     "cancel_pending_order",
     "modify_pending_order_address",
-    "modify_pending_order_items",
-    "modify_pending_order_payment",
+    "modify_pending_order_items",        # already present — verify
+    "modify_pending_order_payment",      # moved from DEFERRED
     "modify_user_address",
     "return_delivered_order_items",
     "exchange_delivered_order_items",
 }
-DEFERRED_WRITE_ACTIONS: set[str] = set()
+DEFERRED_WRITE_ACTIONS: set[str] = set()   # was {"modify_pending_order_payment"}
 ```
 
 - [ ] **Step 5: Add item replacement policy helper**
@@ -626,16 +706,16 @@ In `_validate_policy`, add:
                 return payment_reason
 ```
 
-- [ ] **Step 9: Ensure payment locks are order-level locks**
+- [ ] **Step 9: Add payment lock to existing `_resource_lock` map**
 
-Update `_resource_lock` category map:
+`_resource_lock` already maps `cancel_pending_order`, `modify_pending_order_address`, and `modify_pending_order_items`. Add only the missing entry for payment:
 
 ```python
         category = {
             "cancel_pending_order": "cancel",
             "modify_pending_order_address": "modify_address",
-            "modify_pending_order_items": "modify_items",
-            "modify_pending_order_payment": "modify_payment",
+            "modify_pending_order_items": "modify_items",       # already present
+            "modify_pending_order_payment": "modify_payment",   # new
         }.get(action.tool_name, action.tool_name)
 ```
 
@@ -989,32 +1069,54 @@ uv run python -m unittest tests.test_agent_core.AgentRuntimePhase5Tests.test_gua
 
 Expected: FAIL because the raw guard reason is returned.
 
-- [ ] **Step 3: Add guard reason mapping**
+- [ ] **Step 3: Add guard reason mapping with dedicated method**
 
-In `app/agent/runtime.py`, add module constant:
+In `app/agent/runtime.py`, add a module-level constant and a helper method. The constant maps every guard block reason to a user-readable message. The method provides the lookup with a safe fallback that never leaks machine-readable codes:
 
 ```python
 GUARD_USER_MESSAGES = {
     "replacement_item_product_mismatch": "I can only replace an item with another available option from the same product.",
     "replacement_item_unavailable": "That replacement item is not available.",
+    "replacement_item_count_mismatch": "The number of replacement items must match the number of items being replaced.",
+    "replacement_item_not_found": "That replacement item could not be found in the catalog.",
+    "order_item_not_found": "The item you want to replace is not in that order.",
     "payment_method_not_owned": "I can only use payment methods saved on your account.",
     "gift_card_balance_insufficient": "That gift card does not have enough balance for this order.",
     "same_payment_method": "The new payment method must be different from the current one.",
     "non_pending_order_cannot_be_modified": "I can only modify orders that are still pending.",
+    "non_pending_order_cannot_be_cancelled": "I can only cancel orders that are still pending.",
+    "non_delivered_order_cannot_be_returned": "I can only create returns for delivered orders.",
+    "non_delivered_order_cannot_be_exchanged": "I can only create exchanges for delivered orders.",
+    "exchange_item_count_mismatch": "The number of new items must match the number of items being exchanged.",
     "ownership_violation": "I cannot access or modify orders for another account.",
+    "read_before_write_required": "I need to review the order details before making changes. Please ask me to look up the order first.",
+    "authentication_required": "Please verify your identity before making changes.",
+    "user_not_found": "I could not verify your account. Please provide different credentials.",
+    "invalid_cancel_reason": "Please provide a valid cancellation reason: no longer needed or ordered by mistake.",
+    "duplicate_write_lock": "A similar change is already in progress for this order.",
+    "order_already_cancelled_or_locked": "This order has already been cancelled.",
+    "order_items_already_modified": "The items in this order have already been modified.",
+    "item_already_returned_or_exchanged": "One or more of these items has already been returned or exchanged.",
 }
+
+
+def _map_guard_error_to_user_message(error: str) -> str:
+    """Return a user-readable message for a guard block reason."""
+    return GUARD_USER_MESSAGES.get(
+        str(error),
+        "I could not complete that update. Please try again or contact support.",
+    )
 ```
 
-- [ ] **Step 4: Use mapping in confirmation execution failure**
+- [ ] **Step 4: Use mapping in `_conversation_gate`**
 
-In `_conversation_gate`, change the blocked/error assistant response to:
+In `_conversation_gate`, replace the raw error passthrough with the `_map_guard_error_to_user_message` helper. The current code uses `record.error` directly; change it to:
 
 ```python
-                    user_message = GUARD_USER_MESSAGES.get(
-                        str(record.error),
-                        f"I could not complete that update: {record.error}.",
+                    self._assistant(
+                        state,
+                        _map_guard_error_to_user_message(str(record.error)),
                     )
-                    self._assistant(state, user_message)
 ```
 
 - [ ] **Step 5: Run focused tests**
@@ -1497,15 +1599,29 @@ PHASE5_DEMO_CASE_IDS = [
 ]
 ```
 
-Extend `CASE_TITLES`:
+Extend `CASE_TITLES` with Chinese labels for all new Phase 5 cases:
 
 ```python
-    "auth_name_zip_lookup_order": "姓名和邮编认证查询订单",
+    # Phase 5 new success cases
+    "auth_name_zip_lookup_order": "姓名加邮编认证查询订单",
     "modify_pending_order_items_success": "修改待处理订单商品",
     "modify_pending_order_payment_success": "修改待处理订单支付方式",
     "modify_user_default_address_success": "修改用户默认地址",
+    # Phase 5 guard block cases
     "block_item_product_mismatch": "阻止跨商品替换",
+    "block_item_unavailable": "阻止替换缺货商品",
+    "block_payment_not_owned": "阻止使用他人支付方式",
     "block_payment_insufficient_gift_card": "阻止余额不足礼品卡支付",
+    "block_same_payment_method": "阻止重复支付方式",
+    "block_modify_items_non_pending_order": "阻止修改非待处理订单商品",
+    "block_modify_payment_processed_order": "阻止修改已处理订单支付",
+    "block_exchange_product_mismatch": "阻止跨商品换货",
+    "block_exchange_unavailable_replacement": "阻止换货缺货商品",
+    # Phase 5 confirmation / no-write cases
+    "block_modify_items_changed_confirmation": "变更确认放弃修改商品",
+    "deny_modify_user_default_address_confirmation": "拒绝修改默认地址",
+    # Phase 5 transfer cases
+    "transfer_unsupported_discount_request": "转接不支持折扣请求",
 ```
 
 - [ ] **Step 4: Select demo ids by subset**
@@ -1623,6 +1739,27 @@ uv run phase2-eval --subset generalized_mvp --trials 1 --no-progress --json
 ```
 
 Expected: JSON summary with `"pass_rate": 1.0`, `"case_count"` at least `30`, and `"mutation_error_rate": 0.0`.
+
+- [ ] **Step 5a: Add programmatic case count assertion test**
+
+Add this test to `tests/test_eval_runner.py` to enforce the minimum case count:
+
+```python
+    def test_generalized_mvp_has_minimum_case_count(self):
+        cases = get_cases("generalized_mvp")
+        self.assertGreaterEqual(
+            len(cases), 30,
+            f"generalized_mvp has {len(cases)} cases, expected at least 30"
+        )
+        subsets = {case.subset for case in cases}
+        self.assertEqual(subsets, {"generalized_mvp"})
+```
+
+Run:
+```bash
+uv run python -m unittest tests.test_eval_runner.CuratedEvalTests.test_generalized_mvp_has_minimum_case_count -v
+```
+Expected: PASS.
 
 - [ ] **Step 6: Run frontend build**
 

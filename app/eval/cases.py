@@ -368,11 +368,23 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         ],
         expected_user_id="sofia_rossi_8776",
         expected_intent="modify_user_address",
+        expected_write_lock="user:sofia_rossi_8776:modify_address",
         expected_confirmation_status="confirmed",
         expected_tool_names=["modify_user_address"],
         subset="generalized_mvp",
         capability="modify_user_address",
         policy_area="user_profile",
+        expected_db_assertions={
+            "user_id": "sofia_rossi_8776",
+            "address": {
+                "address1": "12 Oak St",
+                "address2": "Unit 4",
+                "city": "Austin",
+                "state": "TX",
+                "country": "USA",
+                "zip": "78701",
+            },
+        },
     ),
     EvalCase(
         case_id="multi_item_return_success",
@@ -406,8 +418,8 @@ PHASE5_NEW_CASES: List[EvalCase] = [
             {
                 "role": "user",
                 "content": (
-                    "My email is ava.moore6020@example.com. Exchange item "
-                    "6777246137 from order #W4817420 for new item 4579334072 "
+                    "My email is ava.moore6020@example.com. Exchange items "
+                    "6777246137 to 4579334072 and 6700049080 to 5925362855 "
                     "from order #W4817420 using gift_card_8168843."
                 ),
             },
@@ -416,12 +428,12 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         expected_user_id="ava_moore_2033",
         expected_intent="exchange_items",
         order_id="#W4817420",
-        expected_write_lock="item:6777246137:exchange",
+        expected_write_lock="item:6700049080,6777246137:exchange",
         expected_order_status="exchange requested",
         expected_confirmation_status="confirmed",
         expected_tool_names=["exchange_delivered_order_items"],
         subset="generalized_mvp",
-        capability="exchange_items",
+        capability="multi_item_exchange",
         policy_area="exchange_items",
     ),
     EvalCase(

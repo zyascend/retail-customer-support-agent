@@ -22,7 +22,7 @@ from app.eval.metrics import (
     build_report_artifact,
     compute_metrics,
 )
-from app.tools.retail_adapter import get_order_from_db
+from app.tools.retail_adapter import get_order_from_db, get_user_from_db
 
 DEFAULT_EVAL_ARTIFACT_DIR = Path("artifacts/phase2")
 ORDER_RE = re.compile(r"#W\d+")
@@ -73,6 +73,7 @@ class EvalCaseResult:
     failure_summary: Optional[str] = None
     expected_actual_diff: Dict[str, Any] = field(default_factory=dict)
     replay_metadata: Dict[str, Any] = field(default_factory=dict)
+    db_assertion_failures: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -218,6 +219,7 @@ class CuratedEvalRunner:
             1 for record in state.tool_results if record.status == "success"
         )
         trace_metadata = self._trace_metadata(run_result.trace_artifact_path)
+        db_assertion_failures = self._db_assertion_failures(runtime, case)
         failure_label = classify_failure(
             case=case,
             authenticated_user_id=state.authenticated_user_id,
@@ -236,6 +238,7 @@ class CuratedEvalRunner:
             pending_action=state.pending_action is not None,
             llm_errors=self._llm_error_count(state.steps),
             confirmation_status=state.confirmation_status,
+            db_assertion_failures=db_assertion_failures,
         )
         result = EvalCaseResult(
             run_id=run_result.run_id,
@@ -278,6 +281,7 @@ class CuratedEvalRunner:
                 "trace_artifact_path": str(run_result.trace_artifact_path),
                 "trial": trial,
             },
+            db_assertion_failures=db_assertion_failures,
         )
         apply_case_diagnostics(result, case)
         return result
@@ -323,6 +327,28 @@ class CuratedEvalRunner:
         except Exception:
             return {}
 
+    def _db_assertion_failures(
+        self, runtime: AgentRuntime, case: EvalCase
+    ) -> List[str]:
+        assertions = case.expected_db_assertions
+        if not assertions:
+            return []
+        failures: List[str] = []
+        user_id = assertions.get("user_id")
+        if user_id:
+            user = get_user_from_db(runtime.retail_runtime.db, str(user_id))
+            if not user:
+                return [f"user:{user_id} not found"]
+            address_assertions = assertions.get("address")
+            if isinstance(address_assertions, dict):
+                actual_address = user.get("address", {})
+                for key, expected in address_assertions.items():
+                    actual = actual_address.get(key)
+                    if actual != expected:
+                        failures.append(
+                            f"user:{user_id} address.{key} expected {expected} actual {actual}"
+                        )
+        return failures
 
     def _llm_error_count(self, steps: List[Any]) -> int:
         count = 0
@@ -368,6 +394,7 @@ def classify_failure(
     pending_action: bool,
     llm_errors: int,
     confirmation_status: str,
+    db_assertion_failures: Optional[List[str]] = None,
 ) -> Optional[str]:
     if llm_errors:
         return "llm_json_failure"
@@ -400,6 +427,8 @@ def classify_failure(
         return "mutation_missing"
     if case.expected_order_status and actual_order_status != case.expected_order_status:
         return "db_state_mismatch"
+    if db_assertion_failures:
+        return "db_assertion_mismatch"
     if case.expected_assistant_contains:
         transcript = "\n".join(assistant_messages)
         if case.expected_assistant_contains not in transcript:

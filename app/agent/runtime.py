@@ -367,6 +367,16 @@ class AgentRuntime:
         address = self._parse_address(content)
         if address:
             state.slots["address"] = address
+        item_pairs = self._parse_item_replacement_pairs(lowered)
+        if item_pairs:
+            state.slots["item_ids"] = [old for old, _new in item_pairs]
+            state.slots["new_item_ids"] = [new for _old, new in item_pairs]
+            state.add_step(
+                "intent_and_slot_extractor",
+                intent=state.current_intent,
+                slots=state.slots,
+            )
+            return
         new_item_marker = re.search(
             r"(?:new items?|exchange for|instead|to new item|for new items?)\s+(\d{8,})",
             lowered,
@@ -1041,7 +1051,10 @@ class AgentRuntime:
         marker = re.search(r"(?:default )?address to\s+(.+)$", content, re.IGNORECASE)
         if not marker:
             return None
-        parts = [part.strip() for part in marker.group(1).split(",")]
+        parts = [
+            part.strip().rstrip(".")
+            for part in marker.group(1).split(",")
+        ]
         if len(parts) == 5:
             address1, city, state, country, zip_code = parts
             address2 = ""
@@ -1057,6 +1070,15 @@ class AgentRuntime:
             "country": country,
             "zip": zip_code,
         }
+
+    def _parse_item_replacement_pairs(self, lowered: str) -> list[tuple[str, str]]:
+        pairs = re.findall(r"\b(\d{8,})\s+(?:to|for|instead)\s+(\d{8,})\b", lowered)
+        if pairs:
+            return pairs
+        return re.findall(
+            r"\bitem\s+(\d{8,}).*?\b(?:new item|instead)\s+(\d{8,})\b",
+            lowered,
+        )
 
     def _assistant(
         self, state: ConversationState, content: str, allow_llm: bool = True

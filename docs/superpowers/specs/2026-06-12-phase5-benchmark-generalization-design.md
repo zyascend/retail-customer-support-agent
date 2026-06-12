@@ -238,9 +238,9 @@ are allowed and apply mutations.
 
 Add or complete local fallback behavior for:
 
-- `modify_pending_order_items`
-- `modify_pending_order_payment`
-- `modify_user_address` tests and runtime path
+- `modify_pending_order_items` (new tool implementation)
+- `modify_pending_order_payment` (new tool implementation)
+- `modify_user_address`: the tool already exists in `retail_adapter.py`; this phase adds runtime intent routing, slot extraction, planner method, and guard integration
 
 Local fallback behavior should mirror tau retail tool behavior where possible.
 When tau and local behavior differ, record the difference in tests or docs rather
