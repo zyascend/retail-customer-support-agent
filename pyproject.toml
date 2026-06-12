@@ -9,10 +9,12 @@ description = "Transaction-oriented retail customer support agent baseline tooli
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.115.0",
     "langgraph>=0.2.70",
     "openai>=1.60.0",
     "pydantic>=2.10.0",
     "python-dotenv>=1.0.0",
+    "uvicorn>=0.34.0",
 ]
 
 [project.scripts]
@@ -22,6 +24,7 @@ phase0-smoke = "app.phase0.cli:smoke_main"
 phase1-chat = "app.cli.chat:chat_main"
 phase2-eval = "app.cli.eval:eval_main"
 phase3-dashboard = "app.dashboard.cli:dashboard_main"
+phase4-workbench = "app.workbench.cli:workbench_main"
 
 [project.optional-dependencies]
 dev = [
