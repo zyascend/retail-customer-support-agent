@@ -29,6 +29,7 @@ def eval_main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--tau3-retail-root", help="Override TAU3_RETAIL_ROOT.")
     parser.add_argument("--tau2-bench-root", help="Override TAU2_BENCH_ROOT.")
     parser.add_argument("--require-llm", action="store_true")
+    parser.add_argument("--max-workers", type=int, default=50)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
     args = parser.parse_args(argv)
@@ -50,7 +51,11 @@ def eval_main(argv: Optional[list[str]] = None) -> int:
             artifact_dir=Path(args.artifact_dir).expanduser(),
             require_llm=args.require_llm,
             progress_callback=None if args.no_progress else _print_progress,
-        ).run(subset=args.subset, trials=args.trials)
+        ).run(
+            subset=args.subset,
+            trials=args.trials,
+            max_workers=args.max_workers,
+        )
     except Exception as exc:
         print(f"phase2-eval failed: {exc}", file=sys.stderr)
         return 1
