@@ -1,0 +1,84 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from app.config import resolve_config
+from app.workbench.session import WorkbenchSessionManager
+
+
+class WorkbenchSessionTests(unittest.TestCase):
+    def test_step_and_run_all_share_conversation_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
+            session = manager.create_session(
+                mode="deterministic", case_id="cancel_pending_order"
+            )
+
+            first = session.step()
+            self.assertEqual(first["script_cursor"], 1)
+            self.assertEqual(first["business"]["confirmation_status"], "required")
+            self.assertEqual(
+                first["pending_action"]["action_name"], "cancel_pending_order"
+            )
+
+            second = session.run_all()
+            self.assertEqual(second["script_cursor"], 2)
+            self.assertEqual(second["business"]["confirmation_status"], "confirmed")
+            self.assertIn(
+                "order:#W5918442:cancel", second["business"]["write_locks"]
+            )
+            self.assertTrue(Path(second["trace_artifact_path"]).exists())
+
+    def test_manual_message_does_not_move_script_cursor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
+            session = manager.create_session(
+                mode="deterministic", case_id="transfer_to_human"
+            )
+
+            snapshot = session.send_message(
+                "My email is sofia.rossi2645@example.com. What is the status of order #W5918442?"
+            )
+
+            self.assertEqual(snapshot["script_cursor"], 0)
+            self.assertEqual(snapshot["business"]["current_intent"], "lookup")
+            self.assertGreaterEqual(len(snapshot["messages"]), 2)
+
+    def test_reset_recreates_runtime_and_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
+            session = manager.create_session(
+                mode="deterministic", case_id="cancel_pending_order"
+            )
+            session.step()
+
+            reset_snapshot = session.reset(case_id="return_delivered_order_item")
+
+            self.assertEqual(
+                reset_snapshot["selected_case_id"], "return_delivered_order_item"
+            )
+            self.assertEqual(reset_snapshot["script_cursor"], 0)
+            self.assertEqual(reset_snapshot["messages"], [])
+            self.assertEqual(
+                reset_snapshot["business"]["confirmation_status"], "not_required"
+            )
+
+    def test_trace_artifact_updates_after_each_operation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
+            session = manager.create_session(
+                mode="deterministic", case_id="transfer_to_human"
+            )
+
+            snapshot = session.step()
+            trace = json.loads(
+                Path(snapshot["trace_artifact_path"]).read_text(encoding="utf-8")
+            )
+
+            self.assertEqual(trace["run_id"], session.session_id)
+            self.assertEqual(trace["final_state"]["current_intent"], "transfer")
+
+
+if __name__ == "__main__":
+    unittest.main()
