@@ -8,6 +8,7 @@ from typing import Optional
 import uvicorn
 
 from app.config import resolve_config
+from app.workbench.api import create_app
 from app.workbench.cases import build_case_catalog
 
 
@@ -50,9 +51,9 @@ def workbench_main(argv: Optional[list[str]] = None) -> int:
     )
     print("Then open: http://localhost:5173", file=sys.stderr)
 
+    app = create_app(config=config)
     uvicorn.run(
-        "app.workbench.api:create_app",
-        factory=True,
+        app,
         host=args.host,
         port=args.port,
         reload=False,
