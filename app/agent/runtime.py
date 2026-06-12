@@ -998,6 +998,7 @@ class AgentRuntime:
                 "current_intent": state.current_intent,
                 "slots": state.slots,
                 "loaded_context": state.loaded_context.model_dump(),
+                "tool_catalog": self.gateway.registry.tool_catalog_for_llm(),
             },
             {
                 "type": "object",
