@@ -242,6 +242,66 @@ class LocalRetailTools:
         }
         return copy.deepcopy(order)
 
+    def modify_pending_order_items(
+        self, order_id: str, item_ids: list[str], new_item_ids: list[str]
+    ) -> Dict[str, Any]:
+        order = self._get_order(order_id)
+        if order["status"] != "pending":
+            raise ValueError("Non-pending order cannot be modified")
+        if len(item_ids) != len(new_item_ids):
+            raise ValueError("The number of replacement items should match.")
+
+        for old_item_id, new_item_id in zip(item_ids, new_item_ids):
+            matching_index = next(
+                (
+                    index
+                    for index, item in enumerate(order["items"])
+                    if item["item_id"] == old_item_id
+                ),
+                None,
+            )
+            if matching_index is None:
+                raise ValueError(f"Item {old_item_id} not found in order")
+
+            old_item = order["items"][matching_index]
+            new_variant = self._get_variant(old_item["product_id"], new_item_id)
+            if not new_variant["available"]:
+                raise ValueError(f"New item {new_item_id} not available")
+
+            replacement = copy.deepcopy(old_item)
+            replacement["item_id"] = new_item_id
+            replacement["price"] = new_variant["price"]
+            replacement["options"] = copy.deepcopy(new_variant["options"])
+            order["items"][matching_index] = replacement
+
+        order["status"] = "pending (item modified)"
+        return copy.deepcopy(order)
+
+    def modify_pending_order_payment(
+        self, order_id: str, payment_method_id: str
+    ) -> Dict[str, Any]:
+        order = self._get_order(order_id)
+        if "pending" not in order["status"]:
+            raise ValueError("Non-pending order cannot be modified")
+        payment_method = self._get_payment_method(order["user_id"], payment_method_id)
+        current_payment_method_id = get_current_payment_method_id(order)
+        if payment_method_id == current_payment_method_id:
+            raise ValueError("New payment method must be different")
+
+        amount = sum(float(item.get("price", 0.0)) for item in order["items"])
+        if payment_method.get("source") == "gift_card":
+            if float(payment_method.get("balance", 0.0)) < amount:
+                raise ValueError("Gift card balance is insufficient")
+
+        order["payment_history"].append(
+            {
+                "transaction_type": "payment",
+                "amount": round(amount, 2),
+                "payment_method_id": payment_method_id,
+            }
+        )
+        return copy.deepcopy(order)
+
     def return_delivered_order_items(
         self, order_id: str, item_ids: list[str], payment_method_id: str
     ) -> Dict[str, Any]:
@@ -331,4 +391,23 @@ def find_product_for_item(db: Any, item_id: str) -> Optional[Dict[str, Any]]:
     for product in data.get("products", {}).values():
         if item_id in product.get("variants", {}):
             return copy.deepcopy(product)
+    return None
+
+
+def find_variant_in_db(db: Any, item_id: str) -> Optional[Dict[str, Any]]:
+    data = to_plain_data(db)
+    for product_id, product in data.get("products", {}).items():
+        variant = product.get("variants", {}).get(item_id)
+        if variant:
+            payload = copy.deepcopy(variant)
+            payload["product_id"] = product_id
+            payload["product_name"] = product.get("name")
+            return payload
+    return None
+
+
+def get_current_payment_method_id(order: Dict[str, Any]) -> Optional[str]:
+    for entry in reversed(order.get("payment_history", [])):
+        if entry.get("transaction_type") == "payment":
+            return entry.get("payment_method_id")
     return None

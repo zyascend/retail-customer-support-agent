@@ -186,6 +186,36 @@ class RetailAdapterTests(unittest.TestCase):
         self.assertEqual(registry.kind("cancel_pending_order"), "write")
         self.assertEqual(registry.kind("transfer_to_human_agents"), "generic")
 
+    def test_local_tools_modify_pending_order_items(self):
+        config = resolve_config()
+        tools = RetailAdapter(config)._create_local_runtime("policy").tools
+
+        updated = tools.modify_pending_order_items(
+            order_id=PENDING_ORDER,
+            item_ids=["1586641416"],
+            new_item_ids=["5925362855"],
+        )
+
+        self.assertEqual(updated["status"], "pending (item modified)")
+        self.assertIn("5925362855", [item["item_id"] for item in updated["items"]])
+        self.assertNotIn("1586641416", [item["item_id"] for item in updated["items"]])
+
+    def test_local_tools_modify_pending_order_payment(self):
+        config = resolve_config()
+        tools = RetailAdapter(config)._create_local_runtime("policy").tools
+
+        updated = tools.modify_pending_order_payment(
+            order_id="#W8855135",
+            payment_method_id="credit_card_8105988",
+        )
+
+        self.assertEqual(updated["status"], "pending")
+        self.assertEqual(
+            updated["payment_history"][-1]["payment_method_id"],
+            "credit_card_8105988",
+        )
+        self.assertEqual(updated["payment_history"][-1]["transaction_type"], "payment")
+
 
 class ConfirmationResolverTests(unittest.TestCase):
     def test_resolves_confirmation_intents(self):
