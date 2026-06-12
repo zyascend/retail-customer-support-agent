@@ -26,6 +26,7 @@ def snapshot_from_state(
     selected_case_id: Optional[str],
     script_cursor: int,
     script_message_count: int,
+    last_error: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     can_advance = bool(selected_case_id) and script_cursor < script_message_count
     messages = redact_value(to_plain_data(state.messages))
@@ -77,7 +78,7 @@ def snapshot_from_state(
             if record.status == "blocked"
         ],
         "trace_artifact_path": trace_artifact_path,
-        "last_error": _last_error(state),
+        "last_error": last_error,
     }
 
 
@@ -172,10 +173,9 @@ def redact_value(value: Any, key: str = "") -> Any:
         return [redact_value(item, key) for item in plain_value]
 
     if isinstance(plain_value, str):
-        if EMAIL_RE.search(plain_value):
-            return "[redacted-email]"
-        if PHONE_RE.search(plain_value):
-            return "[redacted-phone]"
+        text = EMAIL_RE.sub("[redacted-email]", plain_value)
+        text = PHONE_RE.sub("[redacted-phone]", text)
+        return text
 
     return plain_value
 
@@ -241,15 +241,3 @@ def _truncate(value: str, limit: int = 160) -> str:
         return value
     return f"{value[: limit - 3]}..."
 
-
-def _last_error(state: ConversationState) -> Optional[str]:
-    for record in reversed(state.tool_results):
-        if record.error:
-            return record.error
-        if record.status == "error":
-            return record.tool_name
-    for step in reversed(state.steps):
-        if step.status == "error":
-            summary = _summarize_detail(redact_value(step.detail))
-            return summary or step.node
-    return None
