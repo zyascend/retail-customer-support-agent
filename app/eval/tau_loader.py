@@ -52,13 +52,22 @@ def load_tau_tasks_from_dir(retail_dir: Path) -> list[dict]:
 def _build_user_message(task: dict) -> str:
     """Build a single user message from tau3 user_scenario instructions.
 
-    Concatenates reason_for_call + known_info + unknown_info into one
-    natural-language message.
+    Converts tau3's second-person directives ("You are...") into first-person
+    messages the agent's identity resolver can parse ("My name is...").
+
+    The agent expects:
+      - Email auth: "My email is X"
+      - Name+zip auth: "My name is First Last and I live in zip Z"
     """
     instructions = task.get("user_scenario", {}).get("instructions", {})
     reason = instructions.get("reason_for_call", "")
     known = instructions.get("known_info", "")
     unknown = instructions.get("unknown_info", "")
+
+    # Convert to first-person
+    reason = _to_first_person(reason)
+    known = _to_first_person(known)
+    unknown = _to_first_person(unknown)
 
     parts = []
     if reason:
@@ -68,6 +77,46 @@ def _build_user_message(task: dict) -> str:
     if unknown:
         parts.append(unknown.strip())
     return " ".join(parts)
+
+
+def _to_first_person(text: str) -> str:
+    """Convert tau3 second-person instructions to first-person user message.
+
+    Common patterns in tau3 instructions:
+      "You are X in zip Y" → "My name is X and I live in zip Y"
+      "Your email is X"    → "My email is X"
+      "You do not remember X" → "I don't remember X"
+      "You received..."    → "I received..."
+      "You want to..."     → "I want to..."
+    """
+    import re
+
+    # "You are First Last in zip 12345." → "My name is First Last and I live in zip 12345."
+    text = re.sub(
+        r"\bYou are ([\w\s]+?) in zip (\d{5})\b",
+        r"My name is \1 and I live in zip \2",
+        text,
+    )
+    # "Your email is X" → "My email is X"
+    text = re.sub(r"\bYour email is\b", "My email is", text)
+    # "You do not remember X" → "I don't remember X"
+    text = re.sub(r"\bYou do not remember\b", "I don't remember", text)
+    # "You received" → "I received"
+    text = re.sub(r"\bYou received\b", "I received", text)
+    # "You wish to" → "I want to"
+    text = re.sub(r"\bYou wish to\b", "I want to", text)
+    # "You want to" → "I want to"
+    text = re.sub(r"\bYou want to\b", "I want to", text)
+    # "your order" → "my order"
+    text = re.sub(r"\byour order\b", "my order", text)
+    # "you'd" → "I'd"
+    text = re.sub(r"\byou'd\b", "I'd", text)
+    # "you" at sentence start → "I" (catch-all)
+    text = re.sub(r"\bYou\b", "I", text)
+    # "your" → "my" (catch-all)
+    text = re.sub(r"\byour\b", "my", text)
+
+    return text
 
 
 def _derive_db_assertions(task: dict) -> dict:
