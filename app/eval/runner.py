@@ -106,6 +106,8 @@ class EvalRunSummary:
     metrics: Dict[str, Any]
     failure_analysis: Dict[str, Any]
     results: List[EvalCaseResult]
+    generalization_families: List[str] = field(default_factory=list)
+    generalization_variant_count: int = 0
 
     def as_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -185,6 +187,15 @@ class CuratedEvalRunner:
             metrics=metrics,
             failure_analysis=failure_analysis,
             results=results,
+            generalization_families=sorted(
+                set(getattr(r, "scenario_family", "") for r in results)
+                - {""}
+            )
+            if subset == "generalization"
+            else [],
+            generalization_variant_count=len(results)
+            if subset == "generalization"
+            else 0,
         )
         self._write_summary(summary)
         self._write_report(summary)
