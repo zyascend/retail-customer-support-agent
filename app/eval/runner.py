@@ -81,6 +81,11 @@ class EvalCaseResult:
     replay_metadata: Dict[str, Any] = field(default_factory=dict)
     db_assertion_failures: List[str] = field(default_factory=list)
 
+    # ── Phase 5: LLM tool-calling metrics ──
+    eval_backend: str = "scripted"
+    llm_token_usage: Optional[Dict[str, Any]] = None
+    llm_loop_iterations: int = 0
+
 
 @dataclass
 class EvalRunSummary:
@@ -109,6 +114,9 @@ class EvalRunSummary:
     results: List[EvalCaseResult]
     generalization_families: List[str] = field(default_factory=list)
     generalization_variant_count: int = 0
+
+    # ── Phase 5 ──
+    eval_backend: str = "scripted"
 
     def as_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -214,6 +222,7 @@ class CuratedEvalRunner:
             generalization_variant_count=len(results)
             if subset == "generalization"
             else 0,
+            eval_backend="scripted",
         )
         self._write_summary(summary)
         self._write_report(summary)
@@ -432,6 +441,7 @@ class CuratedEvalRunner:
             final_intent="",
             termination_reason=None,
             expected_write_lock=case.expected_write_lock,
+            eval_backend="scripted",
         )
 
     def _order_status(self, runtime: AgentRuntime, case: EvalCase) -> Optional[str]:

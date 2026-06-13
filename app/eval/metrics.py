@@ -4,8 +4,8 @@ from collections import Counter, defaultdict
 from dataclasses import asdict
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
-EVAL_REPORT_SCHEMA_VERSION = "phase2.eval_report.v1"
-EVAL_RUN_SUMMARY_SCHEMA_VERSION = "phase2.eval_run_summary.v1"
+EVAL_REPORT_SCHEMA_VERSION = "phase5.eval_report.v1"
+EVAL_RUN_SUMMARY_SCHEMA_VERSION = "phase5.eval_run_summary.v1"
 EVAL_COMPARISON_SCHEMA_VERSION = "phase2.eval_comparison.v1"
 
 
@@ -224,7 +224,7 @@ def build_failure_analysis(results: Iterable[MetricResult]) -> Dict[str, Any]:
 def build_report_artifact(summary: Any) -> Dict[str, Any]:
     return {
         "schema_version": EVAL_REPORT_SCHEMA_VERSION,
-        "report_type": "phase2_eval_report",
+        "report_type": "phase5_eval_report",
         "artifact_created_at": summary.created_at,
         "eval_run_id": summary.eval_run_id,
         "created_at": summary.created_at,
@@ -239,6 +239,7 @@ def build_report_artifact(summary: Any) -> Dict[str, Any]:
         "dataset_db_path": summary.dataset_db_path,
         "code_commit": summary.code_commit,
         "prompt_metadata": summary.prompt_metadata,
+        "eval_backend": summary.eval_backend,
         "result_artifact_path": summary.result_artifact_path,
         "report_artifact_path": summary.report_artifact_path,
         "metrics": summary.metrics,

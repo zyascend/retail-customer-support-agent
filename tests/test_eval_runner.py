@@ -107,7 +107,7 @@ class CuratedEvalTests(unittest.TestCase):
             )
 
         self.assertEqual(summary.case_count, 11)
-        self.assertEqual(summary.schema_version, "phase2.eval_run_summary.v1")
+        self.assertEqual(summary.schema_version, "phase5.eval_run_summary.v1")
         self.assertEqual(summary.passed_count, 11)
         self.assertEqual(summary.pass_rate, 1.0)
         self.assertEqual(payload["passed_count"], 11)
@@ -126,7 +126,7 @@ class CuratedEvalTests(unittest.TestCase):
         self.assertEqual(payload["metrics"]["db_accuracy_denominator"], 9)
         self.assertEqual(payload["metrics"]["tool_error_rate"], 0.0)
         self.assertEqual(payload["metrics"]["mutation_error_rate"], 0.0)
-        self.assertEqual(payload["schema_version"], "phase2.eval_run_summary.v1")
+        self.assertEqual(payload["schema_version"], "phase5.eval_run_summary.v1")
         self.assertIn("failure_label_counts", payload["failure_analysis"])
         self.assertIn("run_id", payload["results"][0])
         self.assertIn("session_id", payload["results"][0])
@@ -134,8 +134,8 @@ class CuratedEvalTests(unittest.TestCase):
         self.assertIn("message_count", payload["results"][0])
         self.assertIn("policy_check_count", payload["results"][0])
         self.assertTrue(report_exists)
-        self.assertEqual(report["schema_version"], "phase2.eval_report.v1")
-        self.assertEqual(report["report_type"], "phase2_eval_report")
+        self.assertEqual(report["schema_version"], "phase5.eval_report.v1")
+        self.assertEqual(report["report_type"], "phase5_eval_report")
         self.assertEqual(report["metrics"]["pass_1"], 1.0)
 
     def test_curated_eval_runner_reports_progress(self):
@@ -486,6 +486,28 @@ class CuratedEvalTests(unittest.TestCase):
         )
 
         self.assertEqual(label, "forbidden_tool_called")
+
+    def test_eval_case_result_defaults_to_scripted_backend(self):
+        result = _result("test_case", 0)
+        self.assertEqual(result.eval_backend, "scripted")
+
+    def test_eval_case_result_carries_llm_metrics(self):
+        result = _result("test_case", 0)
+        result.llm_token_usage = {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
+        result.llm_loop_iterations = 3
+
+        self.assertEqual(result.eval_backend, "scripted")
+        self.assertEqual(result.llm_token_usage["total_tokens"], 150)
+        self.assertEqual(result.llm_loop_iterations, 3)
+
+    def test_eval_run_summary_has_eval_backend(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            summary = CuratedEvalRunner(
+                config=config,
+                artifact_dir=Path(tmp),
+            ).run(subset="curated_mvp", trials=1)
+        self.assertEqual(summary.eval_backend, "scripted")
 
     def test_required_and_forbidden_pass_when_satisfied(self):
         case = EvalCase(
