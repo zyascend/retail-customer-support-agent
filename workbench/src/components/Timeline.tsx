@@ -16,7 +16,6 @@ export function Timeline({
 }: TimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to latest
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
@@ -53,7 +52,8 @@ export function Timeline({
         <div className="timeline-line">
           {events.map((event, i) => {
             const isSelected = event.id === selectedEventId;
-            const dotTone = dotStatus(event.status);
+            const tone = dotStatus(event.status);
+            const shape = kindShape(event.kind);
             return (
               <button
                 key={event.id}
@@ -66,9 +66,8 @@ export function Timeline({
                 onClick={() => onSelectEvent(event.id)}
                 type="button"
               >
-                {/* Connector to previous */}
                 {i > 0 && <span className="timeline-segment" />}
-                <span className={"timeline-dot dot-" + dotTone} />
+                <span className={"timeline-marker marker-" + shape + " marker-" + tone} />
                 <span className="timeline-dot-label">
                   {abbreviate(eventLabel(event.label))}
                 </span>
@@ -89,9 +88,19 @@ export function Timeline({
           </span>
         </div>
       )}
+
+      {/* Legend */}
+      <div className="timeline-legend">
+        <span className="legend-item"><span className="legend-marker marker-step" /> 管道节点</span>
+        <span className="legend-item"><span className="legend-marker marker-tool" /> 工具调用</span>
+        <span className="legend-item"><span className="legend-marker marker-msg" /> 消息</span>
+        <span className="legend-item"><span className="legend-marker marker-audit" /> 写入审计</span>
+      </div>
     </section>
   );
 }
+
+// ── helpers ──
 
 function dotStatus(status: string | null): string {
   const s = (status || "").toLowerCase();
@@ -105,21 +114,28 @@ function statusTone(status: string | null): "neutral" | "good" | "warn" | "bad" 
   return dotStatus(status) as "neutral" | "good" | "warn" | "bad";
 }
 
+function kindShape(kind: string): string {
+  if (kind === "tool_call") return "tool";
+  if (kind === "write_audit") return "audit";
+  if (kind === "message") return "msg";
+  return "step";
+}
+
 const ABBREV: Record<string, string> = {
   receive_message: "接收",
-  conversation_gate: "会话确认",
-  identity_resolver: "身份识别",
-  intent_and_slot_extractor: "意图提取",
-  context_loader: "上下文加载",
-  policy_reasoner: "策略判断",
-  action_planner: "动作规划",
-  write_action_guard: "写入保护",
-  tool_executor: "工具执行",
-  observation_reducer: "结果归纳",
-  response_generator: "回复生成",
-  run_logger: "运行记录",
+  conversation_gate: "会话",
+  identity_resolver: "身份",
+  intent_and_slot_extractor: "意图",
+  context_loader: "上下文",
+  policy_reasoner: "策略",
+  action_planner: "规划",
+  write_action_guard: "护栏",
+  tool_executor: "工具",
+  observation_reducer: "归纳",
+  response_generator: "回复",
+  run_logger: "记录",
 };
 
 function abbreviate(label: string): string {
-  return ABBREV[label] || label.slice(0, 6);
+  return ABBREV[label] || label.slice(0, 4);
 }
