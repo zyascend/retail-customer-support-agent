@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from app.agent.models import ToolCallRequest, ToolCallResponse, ToolExecutionError
+from app.agent.providers import FakeFailingProvider, ScriptedToolCallingProvider
 
 
 def test_tool_call_response_defaults_to_no_tool_calls() -> None:
@@ -37,3 +40,65 @@ def test_tool_execution_error_has_retry_metadata() -> None:
     assert error.status == "error"
     assert error.retryable is True
     assert error.missing_args == ["order_id"]
+
+
+def test_scripted_provider_returns_scripted_tool_call() -> None:
+    provider = ScriptedToolCallingProvider(
+        responses=[
+            ToolCallResponse(
+                tool_calls=[
+                    ToolCallRequest(
+                        id="call_1",
+                        tool_name="get_order_details",
+                        arguments={"order_id": "ORDER-1"},
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        ]
+    )
+
+    response = provider.chat_with_tools(messages=[], tools=[])
+
+    assert response.tool_calls[0].tool_name == "get_order_details"
+    assert response.finish_reason == "tool_calls"
+
+
+def test_scripted_provider_returns_final_text() -> None:
+    provider = ScriptedToolCallingProvider(
+        responses=[
+            ToolCallResponse(
+                assistant_content="I found your order.",
+                finish_reason="stop",
+            )
+        ]
+    )
+
+    response = provider.chat_with_tools(messages=[], tools=[])
+
+    assert response.assistant_content == "I found your order."
+    assert response.tool_calls == []
+
+
+def test_scripted_provider_raises_when_script_exhausted() -> None:
+    provider = ScriptedToolCallingProvider(responses=[])
+
+    with pytest.raises(RuntimeError, match="No scripted tool-calling responses remain"):
+        provider.chat_with_tools(messages=[], tools=[])
+
+
+def test_fake_failing_provider_timeout() -> None:
+    provider = FakeFailingProvider(error_type="timeout")
+
+    with pytest.raises(TimeoutError):
+        provider.chat_with_tools(messages=[], tools=[])
+
+
+def test_fake_failing_provider_malformed_arguments_response() -> None:
+    provider = FakeFailingProvider(error_type="malformed_arguments")
+
+    response = provider.chat_with_tools(messages=[], tools=[])
+
+    assert response.tool_calls[0].tool_name == "get_order_details"
+    assert response.tool_calls[0].arguments == {}
+    assert response.tool_calls[0].raw_arguments == "{not-json"
