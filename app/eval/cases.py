@@ -25,6 +25,7 @@ class EvalCase:
     policy_area: Optional[str] = None
     expected_db_assertions: Dict[str, object] = field(default_factory=dict)
     expected_tool_sequence: List[str] = field(default_factory=list)
+    seed: Optional[int] = None
 
 
 CURATED_MVP_CASES: List[EvalCase] = [
@@ -279,6 +280,7 @@ def _case_for_subset(case: EvalCase, subset: str) -> EvalCase:
         policy_area=case.policy_area,
         expected_db_assertions=dict(case.expected_db_assertions),
         expected_tool_sequence=list(case.expected_tool_sequence),
+        seed=case.seed,
     )
 
 

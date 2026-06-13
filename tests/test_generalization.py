@@ -129,3 +129,55 @@ def test_select_shipping_block_nonpending():
     from app.synthetic.oracle import select_entity_for_variant
     entities = select_entity_for_variant(world, "shipping_block_nonpending")
     assert entities["order"]["status"] != "pending"
+
+
+# ── Family / build_generalization_cases tests ──
+
+
+def test_all_15_variants_generate_without_error():
+    from app.synthetic.families import ALL_FAMILIES
+    for family in ALL_FAMILIES:
+        for variant in family.variants:
+            case = variant.to_eval_case()
+            assert case.case_id == variant.variant_id
+            assert case.subset == "generalization"
+            assert case.expected_user_id
+            assert case.expected_intent
+            assert len(case.messages) >= 1
+
+
+def test_cancel_family_has_5_variants():
+    from app.synthetic.families import CANCEL_FAMILY
+    assert len(CANCEL_FAMILY.variants) == 5
+
+
+def test_all_families_total_15_variants():
+    from app.synthetic.families import ALL_FAMILIES
+    total = sum(len(f.variants) for f in ALL_FAMILIES)
+    assert total == 15
+
+
+def test_generated_case_is_reproducible():
+    from app.synthetic.families import FamilyVariant
+    v = FamilyVariant("test_s100", "cancel_success", 100,
+                       "cancel_order", "order_lifecycle", "cancel")
+    case1 = v.to_eval_case()
+    case2 = v.to_eval_case()
+    assert case1.messages == case2.messages
+    assert case1.expected_user_id == case2.expected_user_id
+    assert case1.order_id == case2.order_id
+
+
+def test_no_write_cases_have_no_write_flag():
+    from app.synthetic.families import COUPON_REFUSAL_FAMILY
+    for variant in COUPON_REFUSAL_FAMILY.variants:
+        case = variant.to_eval_case()
+        assert case.expected_no_write is True, f"{variant.variant_id} should be no-write"
+
+
+def test_cancel_success_cases_expect_cancelled():
+    from app.synthetic.families import CANCEL_FAMILY
+    for variant in CANCEL_FAMILY.variants:
+        if "success" in variant.variant_type:
+            case = variant.to_eval_case()
+            assert case.expected_order_status == "cancelled"
