@@ -451,6 +451,128 @@ class TestAgentLoopToolErrors:
         assert "W5918442" in result.assistant_message
         assert result.turn.loop_iterations == 3
 
+class TestAgentLoopIntegration:
+    """Tests: full integration with context builder and turn tracking."""
+
+    def test_context_summary_in_prompt(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+
+        session = _session()
+        session.loaded_context.orders["O1"] = {
+            "order_id": "O1", "user_id": "U1", "status": "pending",
+            "items": [{"item_id": "I1", "name": "Widget"}],
+        }
+
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    assistant_content="I see your pending order O1.",
+                    finish_reason="stop",
+                )
+            ]
+        )
+        loop = AgentLoop(
+            provider=provider,
+            gateway=_gateway(),
+            registry=_registry(),
+            context_builder=_context_builder(),
+        )
+        result = loop.run_turn(session, "Show my orders")
+
+        assert "O1" in result.assistant_message
+        assert result.turn.termination == "final_response"
+
+    def test_pending_action_persisted_in_session(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+        from app.agent.models import ToolCallRequest
+        from app.tools.retail_adapter import get_order_from_db
+
+        gateway = _gateway()
+        db = gateway.runtime.db
+        db_orders = db.get("orders", {})
+        pending_order = next(
+            (oid for oid, o in db_orders.items() if o.get("status") == "pending"),
+            None,
+        )
+        assert pending_order is not None
+
+        order = get_order_from_db(db, pending_order)
+        user_id = order["user_id"]
+        session = _session(
+            authenticated_user_id=user_id,
+            active_user_identity={"user_id": user_id},
+        )
+        session.loaded_context.orders[pending_order] = order
+
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_cancel",
+                            tool_name="cancel_pending_order",
+                            arguments={
+                                "order_id": pending_order,
+                                "reason": "no longer needed",
+                            },
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+            ]
+        )
+        loop = AgentLoop(
+            provider=provider,
+            gateway=gateway,
+            registry=_registry(),
+            context_builder=_context_builder(),
+        )
+        result = loop.run_turn(session, "Cancel")
+
+        assert result.pending_action_set is True
+        assert session.pending_action is not None
+        assert session.pending_action.action_name == "cancel_pending_order"
+
+    def test_turn_context_fully_populated(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+        from app.agent.models import ToolCallRequest
+
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_1",
+                            tool_name="get_order_details",
+                            arguments={"order_id": "#W5918442"},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                ToolCallResponse(
+                    assistant_content="Order #W5918442 is pending.",
+                    finish_reason="stop",
+                ),
+            ]
+        )
+        loop = AgentLoop(
+            provider=provider,
+            gateway=_gateway(),
+            registry=_registry(),
+            context_builder=_context_builder(),
+        )
+        result = loop.run_turn(_session(), "Check order")
+
+        assert result.turn.loop_iterations == 2
+        assert result.turn.termination == "final_response"
+        assert len(result.turn.steps) >= 3
+        step_nodes = {s.node for s in result.turn.steps}
+        assert "llm_reason" in step_nodes
+        assert "tool_execute" in step_nodes
+        assert "finalize" in step_nodes
+        assert result.turn.step_durations
+
+
 class TestAgentLoopSafetyGuards:
     """Tests: max iterations, consecutive failures, provider timeout."""
 
