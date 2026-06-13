@@ -56,6 +56,10 @@ export function BusinessState({
 
       {pendingAction ? (
         <section className="pending-action" aria-label="待确认操作">
+          <div className="pending-action-banner">
+            <span className="pending-action-icon">⏳</span>
+            <span className="pending-action-prompt">需要用户确认才能执行</span>
+          </div>
           <div className="section-label">待确认操作</div>
           <h3>{actionLabel(pendingAction.action_name)}</h3>
           <p>{pendingAction.user_facing_summary}</p>
