@@ -10,12 +10,8 @@ supported / partial / unsupported，分析 NL 断言，并生成综合性的 Mar
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import List, Optional
-
-from app.config import AppConfig, resolve_config
 
 
 @dataclass
