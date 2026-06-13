@@ -285,6 +285,90 @@ def analyze_nl_assertions(tasks: list[dict]) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Capability aggregation
+# ---------------------------------------------------------------------------
+
+# Map tool names to capability groups
+TOOL_TO_CAPABILITY: dict[str, str] = {
+    "cancel_pending_order": "cancel",
+    "return_delivered_order_items": "return",
+    "exchange_delivered_order_items": "exchange",
+    "modify_pending_order_address": "modify_address",
+    "modify_pending_order_items": "modify_items",
+    "modify_pending_order_payment": "modify_payment",
+    "modify_user_address": "modify_user_address",
+    "transfer_to_human_agents": "transfer",
+    "find_user_id_by_email": "lookup",
+    "find_user_id_by_name_zip": "lookup",
+    "get_user_details": "lookup",
+    "get_order_details": "lookup",
+    "get_product_details": "lookup",
+    "calculate": "calculate",
+    "get_item_details": "lookup",
+}
+
+
+def _primary_capability(tools_used: list[str]) -> str:
+    """Determine the primary capability from the tools used.
+
+    Priority: write tools > auxiliary tools > read tools.
+    If multiple in the same tier, pick the first alphabetically for consistency.
+    """
+    write_caps: set[str] = set()
+    auxiliary_caps: set[str] = set()
+    read_caps: set[str] = set()
+    for tool in tools_used:
+        cap = TOOL_TO_CAPABILITY.get(tool, "unknown")
+        if tool in SUPPORTED_WRITE_TOOLS:
+            write_caps.add(cap)
+        elif tool in AUXILIARY_TOOLS:
+            auxiliary_caps.add(cap)
+        else:
+            read_caps.add(cap)
+    if write_caps:
+        return sorted(write_caps)[0]
+    if auxiliary_caps:
+        return sorted(auxiliary_caps)[0]
+    if "lookup" in read_caps:
+        return "lookup"
+    if read_caps:
+        return sorted(read_caps)[0]
+    return "unknown"
+
+
+def aggregate_by_capability(classifications: list[TaskClassification]) -> dict:
+    """Aggregate classifications by capability group.
+
+    Returns:
+        dict of capability_name -> {
+            "total": int,
+            "supported": int,
+            "partial": int,
+            "unsupported": int,
+            "train": int,
+            "test": int,
+        }
+    """
+    caps: dict[str, dict] = {}
+    for c in classifications:
+        cap = _primary_capability(c.tools_used)
+        if cap not in caps:
+            caps[cap] = {
+                "total": 0,
+                "supported": 0,
+                "partial": 0,
+                "unsupported": 0,
+                "train": 0,
+                "test": 0,
+            }
+        caps[cap]["total"] += 1
+        caps[cap][c.status] += 1
+        if c.split in ("train", "test"):
+            caps[cap][c.split] += 1
+    return caps
+
+
+# ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
 

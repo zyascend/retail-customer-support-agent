@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from app.analysis.tau_task_analyzer import (
+    TaskClassification,
     _resolve_tau3_retail_dir,
+    aggregate_by_capability,
     analyze_nl_assertions,
     classify_task,
     compute_task_space_stats,
@@ -238,3 +240,32 @@ def test_analyze_nl_assertions_no_assertions_returns_empty():
     assert result["total_tasks_with_nl"] == 0
     assert result["total_assertions"] == 0
     assert len(result["items"]) == 0
+
+
+def test_aggregate_by_capability_groups_tasks():
+    """aggregate_by_capability groups classifications by primary intent."""
+    classifications = [
+        TaskClassification(
+            task_id="0", split="train", status="supported",
+            tools_used=["get_order_details", "cancel_pending_order"],
+        ),
+        TaskClassification(
+            task_id="1", split="train", status="supported",
+            tools_used=["get_order_details", "return_delivered_order_items"],
+        ),
+        TaskClassification(
+            task_id="2", split="test", status="partial",
+            subcategory="partial_missing_tool",
+            tools_used=["get_order_details", "calculate", "cancel_pending_order"],
+        ),
+    ]
+    result = aggregate_by_capability(classifications)
+    # "cancel" capability should group tasks using cancel_pending_order
+    assert "cancel" in result
+    assert result["cancel"]["total"] == 2  # task 0 and 2
+    assert result["cancel"]["supported"] == 1
+    assert result["cancel"]["partial"] == 1
+    # "return" capability
+    assert "return" in result
+    assert result["return"]["total"] == 1
+    assert result["return"]["supported"] == 1
