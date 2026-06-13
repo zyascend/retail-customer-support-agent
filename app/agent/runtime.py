@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -12,16 +11,10 @@ from app.agent.graph import PHASE1_NODES, build_linear_graph
 from app.agent.models import (
     ConversationState,
     Message,
-    PendingAction,
-    PolicyDecision,
 )
 from app.agent.prompts import (
-    ACTION_PLANNER_SYSTEM,
     INTENT_SLOT_SYSTEM,
-    POLICY_SYSTEM,
-    RESPONSE_SYSTEM,
     prompt_metadata,
-    user_json_prompt,
 )
 from app.agent.providers import DisabledLLMProvider, LLMProvider, build_default_provider
 from app.config import AppConfig
@@ -29,8 +22,6 @@ from app.ops.tracing import TraceWriter, final_state_summary
 from app.tools.gateway import ToolGateway
 from app.tools.registry import ToolRegistry
 from app.agent.action_specs import (
-    WRITE_ACTION_BY_NAME,
-    WRITE_ACTION_NAMES,
     WRITE_INTENTS,
 )
 from app.agent.builders import (
@@ -47,13 +38,7 @@ from app.agent.llm_client import (
     llm_policy_decision,
 )
 from app.agent.parsers import (
-    EMAIL_RE,
-    ITEM_RE,
     NAME_ZIP_RE,
-    ORDER_RE,
-    PAYMENT_RE,
-    SUPPORTED_INTENTS,
-    ZIP_RE,
     clean_llm_list,
     clean_llm_scalar,
     code_missing_slots,
@@ -91,8 +76,6 @@ from app.agent.plan_handlers import (
     transfer_to_human,
 )
 from app.tools.retail_adapter import RetailAdapter, get_order_from_db
-
-SUPPORTED_PENDING_ACTIONS = WRITE_ACTION_NAMES
 
 GUARD_USER_MESSAGES = {
     "replacement_item_product_mismatch": "I can only replace an item with another available option from the same product.",
