@@ -259,3 +259,37 @@ def get_tau_smoke_cases(config: AppConfig) -> list[EvalCase]:
                     break
 
     return cases
+
+
+def get_tau_supported_cases(config: AppConfig) -> list[EvalCase]:
+    """Return all supported tau3 tasks as EvalCase list (69 tasks)."""
+    from app.analysis.tau_task_analyzer import (
+        _resolve_tau3_retail_dir, load_tasks, load_splits, classify_task,
+    )
+    retail_dir = _resolve_tau3_retail_dir(config)
+    tasks = load_tasks(retail_dir)
+    splits = load_splits(retail_dir)
+    cases: list[EvalCase] = []
+    for task in tasks:
+        c = classify_task(task, splits)
+        if c.status == "supported":
+            case = convert_task_to_eval_case(task, "tau_retail_supported")
+            if case is not None:
+                cases.append(case)
+    return cases
+
+
+def get_tau_train_cases(config: AppConfig) -> list[EvalCase]:
+    """Return train split supported tau3 tasks."""
+    from app.analysis.tau_task_analyzer import _resolve_tau3_retail_dir, load_splits
+    train_ids = set(load_splits(_resolve_tau3_retail_dir(config)).get("train", []))
+    cases = get_tau_supported_cases(config)
+    return [c for c in cases if c.case_id[4:] in train_ids]
+
+
+def get_tau_test_cases(config: AppConfig) -> list[EvalCase]:
+    """Return test split supported tau3 tasks."""
+    from app.analysis.tau_task_analyzer import _resolve_tau3_retail_dir, load_splits
+    test_ids = set(load_splits(_resolve_tau3_retail_dir(config)).get("test", []))
+    cases = get_tau_supported_cases(config)
+    return [c for c in cases if c.case_id[4:] in test_ids]

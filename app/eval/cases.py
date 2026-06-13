@@ -963,4 +963,19 @@ def get_cases(subset: str) -> List[EvalCase]:
         from app.eval.tau_loader import get_tau_smoke_cases
 
         return get_tau_smoke_cases(resolve_config())
+    if subset == "tau_retail_supported":
+        from app.config import resolve_config
+        from app.eval.tau_loader import get_tau_supported_cases
+
+        return get_tau_supported_cases(resolve_config())
+    if subset == "tau_retail_train":
+        from app.config import resolve_config
+        from app.eval.tau_loader import get_tau_train_cases
+
+        return get_tau_train_cases(resolve_config())
+    if subset == "tau_retail_test":
+        from app.config import resolve_config
+        from app.eval.tau_loader import get_tau_test_cases
+
+        return get_tau_test_cases(resolve_config())
     raise ValueError("unsupported subset: " + subset)
