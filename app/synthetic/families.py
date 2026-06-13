@@ -8,6 +8,7 @@ from typing import Dict, List
 
 from app.eval.cases import EvalCase
 from app.synthetic.generator import SyntheticDBGenerator
+from app.synthetic.language_variation import LanguageVariant, build_language_variants
 from app.synthetic.oracle import (
     derive_oracle,
     select_entity_for_variant,
@@ -139,15 +140,28 @@ class FamilyVariant:
 
         raise ValueError(f"Unknown variant_type: {variant_type}")
 
-    def to_eval_case(self) -> EvalCase:
+    def to_eval_case(
+        self,
+        *,
+        language_variant: LanguageVariant | None = None,
+        subset: str = "generalization",
+        scenario_family: str | None = None,
+    ) -> EvalCase:
         """Generate synthetic world, select entities, build messages, derive oracle -> EvalCase."""
         world = SyntheticDBGenerator.from_seed(self.seed)
         entities = select_entity_for_variant(world, self.variant_type)
-        messages = self.build_messages(entities)
+        base_messages = self.build_messages(entities)
+        language_variant = language_variant or LanguageVariant(
+            level="base",
+            suffix="",
+            messages=base_messages,
+            gate=True,
+        )
+        messages = language_variant.messages
         oracle = derive_oracle(world, entities, self.variant_type)
 
         return EvalCase(
-            case_id=self.variant_id,
+            case_id=f"{self.variant_id}{language_variant.suffix}",
             category=self.category,
             messages=messages,
             expected_user_id=oracle.expected_user_id,
@@ -162,11 +176,44 @@ class FamilyVariant:
             expected_tool_sequence=oracle.expected_tool_sequence,
             expected_db_assertions=oracle.expected_db_assertions,
             max_turns=self.max_turns,
-            subset="generalization",
+            subset=subset,
             capability=self.capability,
             policy_area=self.policy_area,
+            scenario_family=scenario_family,
+            variant_type=self.variant_type,
+            language_variation_level=language_variant.level,
             seed=self.seed,
         )
+
+    def to_language_eval_cases(
+        self,
+        *,
+        scenario_family: str,
+        gate_only: bool,
+    ) -> List[EvalCase]:
+        world = SyntheticDBGenerator.from_seed(self.seed)
+        entities = select_entity_for_variant(world, self.variant_type)
+        base_messages = self.build_messages(entities)
+        language_variants = build_language_variants(
+            base_messages,
+            self.variant_type,
+            entities,
+        )
+        cases: List[EvalCase] = []
+        for language_variant in language_variants:
+            if gate_only and not language_variant.gate:
+                continue
+            if not gate_only and language_variant.gate:
+                continue
+            subset = "generalization" if language_variant.gate else "generalization_exploratory"
+            cases.append(
+                self.to_eval_case(
+                    language_variant=language_variant,
+                    subset=subset,
+                    scenario_family=scenario_family,
+                )
+            )
+        return cases
 
 
 @dataclass
@@ -325,5 +372,24 @@ def build_generalization_cases() -> List[EvalCase]:
     cases: List[EvalCase] = []
     for family in ALL_FAMILIES:
         for variant in family.variants:
-            cases.append(variant.to_eval_case())
+            cases.extend(
+                variant.to_language_eval_cases(
+                    scenario_family=family.name,
+                    gate_only=True,
+                )
+            )
+    return cases
+
+
+def build_generalization_exploratory_cases() -> List[EvalCase]:
+    """Build non-blocking exploratory generated cases."""
+    cases: List[EvalCase] = []
+    for family in ALL_FAMILIES:
+        for variant in family.variants:
+            cases.extend(
+                variant.to_language_eval_cases(
+                    scenario_family=family.name,
+                    gate_only=False,
+                )
+            )
     return cases

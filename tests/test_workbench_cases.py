@@ -1,6 +1,11 @@
 import unittest
 
-from app.workbench.cases import DEMO_CASE_IDS, build_case_catalog, get_case_by_id
+from app.workbench.cases import (
+    DEMO_CASE_IDS,
+    GENERATED_DEMO_CASE_IDS,
+    build_case_catalog,
+    get_case_by_id,
+)
 
 
 class WorkbenchCaseCatalogTests(unittest.TestCase):
@@ -9,10 +14,13 @@ class WorkbenchCaseCatalogTests(unittest.TestCase):
         all_ids = {case["case_id"] for case in catalog["all_cases"]}
         demo_ids = [case["case_id"] for case in catalog["demo_cases"]]
 
-        self.assertEqual(demo_ids, [cid for cid in DEMO_CASE_IDS if cid in all_ids])
+        expected_demo_ids = [
+            cid for cid in [*DEMO_CASE_IDS, *GENERATED_DEMO_CASE_IDS] if cid in all_ids
+        ]
+        self.assertEqual(demo_ids, expected_demo_ids)
         self.assertTrue(set(demo_ids).issubset(all_ids))
-        self.assertEqual(catalog["subset"], "curated_mvp")
-        self.assertGreaterEqual(len(catalog["all_cases"]), 11)
+        self.assertEqual(catalog["subset"], "generalized_mvp")
+        self.assertGreaterEqual(len(catalog["all_cases"]), 45)
 
     def test_case_serialization_has_script_metadata(self):
         catalog = build_case_catalog()

@@ -12,6 +12,7 @@ from app.eval.cases import EvalCase, get_cases
 from app.eval.metrics import (
     apply_case_diagnostics,
     build_comparison_artifact,
+    build_failure_analysis,
     compute_metrics,
 )
 from app.eval.runner import CuratedEvalRunner, EvalCaseResult, classify_failure
@@ -182,6 +183,31 @@ class CuratedEvalTests(unittest.TestCase):
 
         self.assertEqual(metrics["tool_error_rate"], 0.0)
         self.assertEqual(metrics["guard_block_rate"], 1.0)
+
+    def test_failure_analysis_groups_by_language_variation_level(self):
+        base = _result("cancel_success_s100", 0)
+        base.scenario_family = "cancel"
+        base.variant_type = "cancel_success"
+        base.language_variation_level = "base"
+        l1 = _result(
+            "cancel_success_s100_l1",
+            0,
+            passed=False,
+            failure_label="wrong_intent",
+        )
+        l1.scenario_family = "cancel"
+        l1.variant_type = "cancel_success"
+        l1.language_variation_level = "L1"
+
+        analysis = build_failure_analysis([base, l1])
+
+        self.assertEqual(
+            analysis["language_variation_level_counts"],
+            {
+                "L1": {"wrong_intent": 1},
+                "base": {"passed": 1},
+            },
+        )
 
     def test_no_write_case_flags_unexpected_mutation(self):
         case = SimpleNamespace(

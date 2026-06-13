@@ -18,6 +18,12 @@ DEMO_CASE_IDS = [
     "transfer_to_human",
 ]
 
+GENERATED_DEMO_CASE_IDS = [
+    "cancel_success_s100_l1",
+    "shipping_express_s200_l2",
+    "coupon_transfer_s300_l1",
+]
+
 CASE_GROUPS = [
     {
         "key": "auth",
@@ -64,6 +70,12 @@ CASE_GROUPS = [
         "emoji": "🧪",
         "case_ids": ["synthetic_shipping_express_success"],
     },
+    {
+        "key": "generated",
+        "label": "生成场景",
+        "emoji": "🧬",
+        "case_ids": GENERATED_DEMO_CASE_IDS,
+    },
 ]
 
 CASE_TITLES = {
@@ -97,6 +109,9 @@ CASE_TITLES = {
     "changed_modify_items_confirmation": "变更商品修改确认",
     "deny_modify_address_confirmation": "拒绝地址修改确认",
     "synthetic_shipping_express_success": "Synthetic 世界：升级配送方式",
+    "cancel_success_s100_l1": "生成场景：取消订单 L1",
+    "shipping_express_s200_l2": "生成场景：配送升级 L2",
+    "coupon_transfer_s300_l1": "生成场景：折扣请求 L1",
 }
 
 
@@ -107,13 +122,20 @@ def build_case_catalog(subset: str = "generalized_mvp") -> Dict[str, Any]:
         synthetic_cases = get_cases("synthetic_seeded_v1")
     except Exception:
         synthetic_cases = []
-    all_cases_list = list(cases) + list(synthetic_cases)
+    try:
+        generalization_cases = get_cases("generalization")
+    except Exception:
+        generalization_cases = []
+    all_cases_list = list(cases) + list(synthetic_cases) + list(generalization_cases)
     serialized = [_serialize_case(case) for case in all_cases_list]
     by_id = {case["case_id"]: case for case in serialized}
-    demo_cases = [by_id[case_id] for case_id in DEMO_CASE_IDS if case_id in by_id]
+    demo_case_ids = list(DEMO_CASE_IDS) + [
+        case_id for case_id in GENERATED_DEMO_CASE_IDS if case_id in by_id
+    ]
+    demo_cases = [by_id[case_id] for case_id in demo_case_ids if case_id in by_id]
     return {
         "subset": subset,
-        "demo_case_ids": list(DEMO_CASE_IDS),
+        "demo_case_ids": demo_case_ids,
         "demo_cases": demo_cases,
         "all_cases": serialized,
         "groups": CASE_GROUPS,
@@ -125,13 +147,17 @@ def get_case_by_id(case_id: str, subset: str = "generalized_mvp") -> EvalCase:
     for case in get_cases(subset):
         if case.case_id == case_id:
             return case
-    # Fall back to synthetic subset
-    try:
-        for case in get_cases("synthetic_seeded_v1"):
-            if case.case_id == case_id:
-                return case
-    except Exception:
-        pass
+    for fallback_subset in (
+        "synthetic_seeded_v1",
+        "generalization",
+        "generalization_exploratory",
+    ):
+        try:
+            for case in get_cases(fallback_subset):
+                if case.case_id == case_id:
+                    return case
+        except Exception:
+            pass
     raise ValueError(f"unknown case: {case_id}")
 
 
@@ -153,6 +179,23 @@ def _serialize_case(case: EvalCase) -> Dict[str, Any]:
         "subset": case.subset,
         "capability": case.capability,
         "policy_area": case.policy_area,
+        "seed": case.seed,
+        "scenario_family": case.scenario_family,
+        "variant_type": case.variant_type,
+        "language_variation_level": case.language_variation_level,
+        "expected_oracle": {
+            "expected_user_id": case.expected_user_id,
+            "expected_intent": case.expected_intent,
+            "order_id": case.order_id,
+            "expected_write_lock": case.expected_write_lock,
+            "expected_order_status": case.expected_order_status,
+            "expected_confirmation_status": case.expected_confirmation_status,
+            "expected_guard_block_reason": case.expected_guard_block_reason,
+            "expected_no_write": case.expected_no_write,
+            "expected_tool_names": list(case.expected_tool_names),
+            "expected_db_assertions": dict(case.expected_db_assertions),
+            "expected_tool_sequence": list(case.expected_tool_sequence),
+        },
         "expected_db_assertions": dict(case.expected_db_assertions),
         "expected_tool_sequence": list(case.expected_tool_sequence),
     }

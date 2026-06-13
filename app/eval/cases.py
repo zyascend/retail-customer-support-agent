@@ -23,6 +23,9 @@ class EvalCase:
     subset: str = "curated_mvp"
     capability: Optional[str] = None
     policy_area: Optional[str] = None
+    scenario_family: Optional[str] = None
+    variant_type: Optional[str] = None
+    language_variation_level: Optional[str] = None
     expected_db_assertions: Dict[str, object] = field(default_factory=dict)
     expected_tool_sequence: List[str] = field(default_factory=list)
     seed: Optional[int] = None
@@ -278,6 +281,9 @@ def _case_for_subset(case: EvalCase, subset: str) -> EvalCase:
         subset=subset,
         capability=case.capability,
         policy_area=case.policy_area,
+        scenario_family=case.scenario_family,
+        variant_type=case.variant_type,
+        language_variation_level=case.language_variation_level,
         expected_db_assertions=dict(case.expected_db_assertions),
         expected_tool_sequence=list(case.expected_tool_sequence),
         seed=case.seed,
@@ -948,4 +954,8 @@ def get_cases(subset: str) -> List[EvalCase]:
         from app.synthetic.families import build_generalization_cases
 
         return build_generalization_cases()
+    if subset == "generalization_exploratory":
+        from app.synthetic.families import build_generalization_exploratory_cases
+
+        return build_generalization_exploratory_cases()
     raise ValueError("unsupported subset: " + subset)

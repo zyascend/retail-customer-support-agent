@@ -958,6 +958,19 @@ class ActionSpecsTests(unittest.TestCase):
 
 
 class ShippingIntentParserTests(unittest.TestCase):
+    def test_cancel_synonyms_infer_cancel_order(self):
+        from app.agent.parsers import infer_intent
+
+        self.assertEqual(infer_intent("void order #W1234567"), "cancel_order")
+        self.assertEqual(infer_intent("stop my order #W1234567"), "cancel_order")
+        self.assertEqual(
+            infer_intent("discontinue order #W1234567"), "cancel_order"
+        )
+        self.assertEqual(
+            infer_intent("for order #W1234567, I need it cancelled"),
+            "cancel_order",
+        )
+
     def test_detects_shipping_modification(self):
         from app.agent.parsers import infer_intent
 
@@ -993,6 +1006,14 @@ class ShippingIntentParserTests(unittest.TestCase):
             infer_intent("can I get express shipping instead"),
             "modify_shipping_method",
         )
+        self.assertEqual(
+            infer_intent("order #W1234567 needs drone delivery"),
+            "modify_shipping_method",
+        )
+        self.assertEqual(
+            infer_intent("order #W1234567 already uses standard; set it to standard"),
+            "modify_shipping_method",
+        )
 
     def test_coupon_request_is_transfer(self):
         from app.agent.parsers import infer_intent
@@ -1001,6 +1022,10 @@ class ShippingIntentParserTests(unittest.TestCase):
         self.assertEqual(infer_intent("can I get a discount code"), "transfer")
         self.assertEqual(
             infer_intent("I want a discount for my next order"), "transfer"
+        )
+        self.assertEqual(infer_intent("can you add a courtesy credit"), "transfer")
+        self.assertEqual(
+            infer_intent("give me a courtesy credit for my next order"), "transfer"
         )
 
     def test_compensation_request_is_transfer(self):
