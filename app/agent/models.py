@@ -155,38 +155,5 @@ class AgentTurnResult(BaseModel):
     turn: TurnContext
     pending_action_set: bool = False
 
-
-class ConversationState(BaseModel):
-    session_id: str
-    task_id: Optional[str] = None
-    authenticated_user_id: Optional[str] = None
-    auth_method: Optional[str] = None
-    active_user_identity: Dict[str, Any] = Field(default_factory=dict)
-    messages: List[Message] = Field(default_factory=list)
-    current_intent: str = "unknown"
-    slots: Dict[str, Any] = Field(default_factory=dict)
-    loaded_context: LoadedContext = Field(default_factory=LoadedContext)
-    pending_action: Optional[PendingAction] = None
-    confirmation_status: ConfirmationStatus = "not_required"
-    policy_decision: Optional[PolicyDecision] = None
-    risk_level: Literal["low", "medium", "high"] = "low"
-    tool_results: List[ToolCallRecord] = Field(default_factory=list)
-    write_locks: List[str] = Field(default_factory=list)
-    run_metrics: Dict[str, Any] = Field(default_factory=dict)
-    steps: List[AgentStep] = Field(default_factory=list)
-    audit_logs: List[Dict[str, Any]] = Field(default_factory=list)
-    termination_reason: Optional[str] = None
-
-    # ── Timing (Module 3) ──
-    step_durations: dict[str, float] = Field(default_factory=dict)
-    # {"identity_resolver": 45.2, "intent_and_slot_extractor": 210.8, ...}
-
-    llm_call_durations: list[dict] = Field(default_factory=list)
-    # [{"node": "policy_reasoner", "call_type": "json", "duration_ms": 185.2, "status": "ok"}, ...]
-
-    def add_step(self, node: str, **detail: Any) -> None:
-        self.steps.append(AgentStep(node=node, detail=detail))
-
-
 # ── Phase 7: backward-compatible alias ──
 ConversationState = SessionState

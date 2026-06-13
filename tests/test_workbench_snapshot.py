@@ -1,6 +1,6 @@
 import unittest
 
-from app.agent.models import SessionState, Message, PendingAction, ToolCallRecord
+from app.agent.models import Message, PendingAction, SessionState, ToolCallRecord
 from app.workbench.snapshot import build_timeline, redact_value, snapshot_from_state
 
 SNAPSHOT_KEYS = {
