@@ -18,6 +18,49 @@ class ToolSpec:
 
 
 class ToolRegistry:
+    _TOOL_DESCRIPTIONS: dict[str, str] = {
+        "get_order_details": "Look up order status, items, shipping address, and payment info by order ID. Use before any order modification. Returns order dict with status, items, address, payment fields.",
+        "get_user_details": "Look up user profile by user_id. Use after find_user_id_by_email or find_user_id_by_name_zip to get user info. Returns user dict with name, email, address, payment_methods.",
+        "get_item_details": "Look up item details including product ID and price by item_id. Returns item dict with item_id, product_id, price, name.",
+        "get_product_details": "Look up product info by product_id. Returns product dict with product_id, name, variants.",
+        "find_user_id_by_email": "Find a user's internal ID by email address. Use when the user provides their email. Returns user_id string.",
+        "find_user_id_by_name_zip": "Find a user's internal ID by first name, last name, and zip code. Use when user provides name+zip instead of email. Returns user_id string.",
+        "cancel_pending_order": "Cancel a pending order. Only works on orders with status 'pending'. Reason must be 'no longer needed' or 'ordered by mistake'. Requires explicit user confirmation.",
+        "modify_pending_order_address": "Change shipping address for a pending order. Requires full address (address1, city, state, country, zip). Requires user confirmation.",
+        "modify_pending_order_items": "Replace items in a pending order with different items. New items must be same product type as originals, available, and count must match. Requires user confirmation.",
+        "modify_pending_order_payment": "Change payment method for a pending order. New payment must differ from current, belong to the user. Gift cards must have sufficient balance. Requires user confirmation.",
+        "modify_pending_order_shipping_method": "Change shipping method for a pending order. Valid methods: standard, express, overnight. Upgrading from standard may require payment method. Requires user confirmation.",
+        "return_delivered_order_items": "Return items from a delivered order for refund. Items must belong to the order. Refund to specified payment method that belongs to user. Requires user confirmation.",
+        "exchange_delivered_order_items": "Exchange items from a delivered order for new items. Old and new counts must match. New items must be same product type and available. Any price difference processed via payment method. Requires user confirmation.",
+        "modify_user_address": "Change the default address for the authenticated user. Requires full address fields. Requires user confirmation.",
+        "calculate": "Evaluate a mathematical expression. For internal calculations only.",
+        "transfer_to_human_agents": "Transfer the conversation to a human support agent. Use when the request cannot be handled by available tools.",
+        "list_all_product_types": "List all available product categories in the catalog. Read-only. Returns list of product type names.",
+    }
+
+    _ARG_DESCRIPTIONS: dict[str, str] = {
+        "order_id": "Order ID starting with #W (e.g. #W5918442)",
+        "user_id": "Internal user ID returned by find_user_id_by_email or find_user_id_by_name_zip",
+        "email": "User's email address",
+        "first_name": "User's first name",
+        "last_name": "User's last name",
+        "zip": "5-digit ZIP code",
+        "item_id": "Item ID (numeric string from order items list)",
+        "item_ids": "List of item IDs to modify/return/exchange (numeric strings)",
+        "new_item_ids": "List of replacement item IDs, must be same count as item_ids",
+        "product_id": "Product ID from catalog",
+        "payment_method_id": "Payment method ID from user profile (e.g. credit_card_XXXX or gift_card_XXXX)",
+        "reason": "Cancellation reason: 'no longer needed' or 'ordered by mistake'",
+        "address1": "Street address line 1",
+        "address2": "Apartment/unit number (optional)",
+        "city": "City name",
+        "state": "2-letter state abbreviation (e.g. TX, CA)",
+        "country": "Country name (e.g. USA)",
+        "shipping_method": "Shipping method: 'standard', 'express', or 'overnight'",
+        "summary": "Brief summary of the conversation and reason for transfer",
+        "expression": "Mathematical expression to evaluate",
+    }
+
     def __init__(self, toolkit: Any) -> None:
         self.toolkit = toolkit
         self._tools = self._discover(toolkit)
@@ -118,6 +161,9 @@ class ToolRegistry:
         return schemas
 
     def _tool_description_for_llm(self, name: str) -> str:
+        desc = self._TOOL_DESCRIPTIONS.get(name)
+        if desc:
+            return desc
         constraints = self._tool_constraints_for_llm(name, self.kind(name))
         return f"{name}. {constraints}"
 
@@ -156,14 +202,29 @@ class ToolRegistry:
             if param.default is inspect.Parameter.empty
         ]
 
+    def _arg_description(self, arg_name: str) -> str:
+        return self._ARG_DESCRIPTIONS.get(arg_name, "")
+
     def _property_schema(self, tool_name: str, arg_name: str) -> dict[str, Any]:
+        desc = self._arg_description(arg_name)
         if arg_name in {"item_ids", "new_item_ids"}:
-            return {"type": "array", "items": {"type": "string"}}
+            result = {"type": "array", "items": {"type": "string"}}
+            if desc:
+                result["description"] = desc
+            return result
         if tool_name == "cancel_pending_order" and arg_name == "reason":
             return {
                 "type": "string",
                 "enum": ["no longer needed", "ordered by mistake"],
+                "description": desc,
             }
         if tool_name == "modify_pending_order_shipping_method" and arg_name == "shipping_method":
-            return {"type": "string", "enum": ["standard", "express", "overnight"]}
-        return {"type": "string"}
+            return {
+                "type": "string",
+                "enum": ["standard", "express", "overnight"],
+                "description": desc,
+            }
+        result: dict[str, Any] = {"type": "string"}
+        if desc:
+            result["description"] = desc
+        return result

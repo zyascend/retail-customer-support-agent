@@ -54,10 +54,12 @@ def test_item_array_schema_declares_string_items() -> None:
     assert params["properties"]["item_ids"] == {
         "type": "array",
         "items": {"type": "string"},
+        "description": "List of item IDs to modify/return/exchange (numeric strings)",
     }
     assert params["properties"]["new_item_ids"] == {
         "type": "array",
         "items": {"type": "string"},
+        "description": "List of replacement item IDs, must be same count as item_ids",
     }
 
 
@@ -72,5 +74,8 @@ def test_modify_order_payment_schema_has_required_fields() -> None:
     params = schema["function"]["parameters"]
 
     assert params["required"] == ["order_id", "payment_method_id"]
-    assert params["properties"]["payment_method_id"] == {"type": "string"}
+    assert params["properties"]["payment_method_id"] == {
+        "type": "string",
+        "description": "Payment method ID from user profile (e.g. credit_card_XXXX or gift_card_XXXX)",
+    }
     assert params["additionalProperties"] is False
