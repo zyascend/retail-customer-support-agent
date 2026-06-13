@@ -944,4 +944,8 @@ def get_cases(subset: str) -> List[EvalCase]:
         return list(GENERALIZED_MVP_CASES)
     if subset == "synthetic_seeded_v1":
         return list(SYNTHETIC_SEEDED_V1_CASES)
+    if subset == "generalization":
+        from app.synthetic.families import build_generalization_cases
+
+        return build_generalization_cases()
     raise ValueError("unsupported subset: " + subset)
