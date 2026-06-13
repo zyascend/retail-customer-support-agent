@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -820,6 +821,8 @@ class AgentRuntime:
     ) -> Dict[str, Any]:
         if self.provider is None:
             return {}
+        t0 = time.perf_counter()
+        status = "ok"
         try:
             result = self.provider.json(
                 [
@@ -832,12 +835,21 @@ class AgentRuntime:
                 schema,
             )
         except Exception as exc:
+            status = "error"
             state.add_step(
                 f"{node_name}_llm",
                 status="error",
                 error=str(exc),
             )
             return {}
+        finally:
+            elapsed = (time.perf_counter() - t0) * 1000
+            state.llm_call_durations.append({
+                "node": node_name,
+                "call_type": "json",
+                "duration_ms": round(elapsed, 1),
+                "status": status,
+            })
         if not isinstance(result, dict):
             state.add_step(
                 f"{node_name}_llm",
@@ -853,6 +865,8 @@ class AgentRuntime:
     ) -> str:
         if self.provider is None:
             return ""
+        t0 = time.perf_counter()
+        status = "ok"
         try:
             response = self.provider.chat(
                 [
@@ -861,12 +875,21 @@ class AgentRuntime:
                 ]
             )
         except Exception as exc:
+            status = "error"
             state.add_step(
                 f"{node_name}_llm",
                 status="error",
                 error=str(exc),
             )
             return ""
+        finally:
+            elapsed = (time.perf_counter() - t0) * 1000
+            state.llm_call_durations.append({
+                "node": node_name,
+                "call_type": "chat",
+                "duration_ms": round(elapsed, 1),
+                "status": status,
+            })
         response = response.strip()
         if response:
             state.add_step(f"{node_name}_llm", status="ok")
