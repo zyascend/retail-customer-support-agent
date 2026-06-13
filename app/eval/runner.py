@@ -337,6 +337,19 @@ class CuratedEvalRunner:
             user_simulator_callback=user_simulator_callback,
         )
         duration_seconds = round(time.perf_counter() - started_at, 3)
+
+        # Phase 5: extract LLM metrics from turn contexts
+        total_tokens = None
+        total_loop_iterations = 0
+        for turn_ctx in run_result.turn_contexts:
+            total_loop_iterations += turn_ctx.loop_iterations
+            if turn_ctx.llm_token_usage:
+                if total_tokens is None:
+                    total_tokens = dict(turn_ctx.llm_token_usage)
+                else:
+                    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                        total_tokens[key] = total_tokens.get(key, 0) + turn_ctx.llm_token_usage.get(key, 0)
+
         state = run_result.state
         actual_order_status = self._order_status(runtime, case)
         guard_block_reasons = [
@@ -387,6 +400,9 @@ class CuratedEvalRunner:
             seed=getattr(case, "seed", None),
             passed=failure_label is None,
             failure_label=failure_label,
+            eval_backend="scripted",
+            llm_token_usage=total_tokens,
+            llm_loop_iterations=total_loop_iterations,
             trace_artifact_path=str(run_result.trace_artifact_path),
             authenticated_user_id=state.authenticated_user_id,
             final_intent=state.current_intent,

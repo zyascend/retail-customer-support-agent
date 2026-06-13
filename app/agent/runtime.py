@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional
 
 from app.agent.confirmation import ConfirmationResolver
 from app.agent.context_builder import ContextBuilder
 from app.agent.llm_agent import AgentLoop
-from app.agent.models import Message, SessionState
+from app.agent.models import Message, SessionState, TurnContext
 from app.agent.parsers import EMAIL_RE, NAME_ZIP_RE
 from app.agent.prompts import prompt_metadata
 from app.agent.providers import DisabledLLMProvider, LLMProvider, build_default_provider
@@ -64,6 +64,7 @@ class AgentRunResult:
     run_id: str
     state: SessionState
     trace_artifact_path: Path
+    turn_contexts: list = field(default_factory=list)
 
     def as_dict(self) -> Dict[str, Any]:
         return {
@@ -106,6 +107,7 @@ class AgentRuntime:
         policy_path = config.retail_policy_path
         policy_text = policy_path.read_text()[:500] if policy_path.exists() else ""
         self._context_builder = ContextBuilder(policy_text=policy_text)
+        self._turn_contexts: list = []
 
     def run_script(
         self,
@@ -116,6 +118,7 @@ class AgentRuntime:
         max_turns: int = 20,
         user_simulator_callback: Optional[Callable[[str], Optional[str]]] = None,
     ) -> AgentRunResult:
+        self._turn_contexts = []
         run_id = session_id or f"agent-{uuid.uuid4().hex[:12]}"
         session = SessionState(session_id=run_id, task_id=task_id)
         initial_db_hash = self.retail_runtime.db_hash()
@@ -156,6 +159,7 @@ class AgentRuntime:
             run_id=run_id,
             state=session,
             trace_artifact_path=trace_path,
+            turn_contexts=list(self._turn_contexts),
         )
 
     def handle_user_message(self, session: SessionState, content: str) -> str:
@@ -189,6 +193,9 @@ class AgentRuntime:
             context_builder=self._context_builder,
         )
         result = loop.run_turn(session, content)
+
+        # Phase 5: capture TurnContext for eval metrics
+        self._turn_contexts.append(result.turn)
 
         # 4. Post-process
         session.messages.append(Message(role="assistant", content=result.assistant_message))
