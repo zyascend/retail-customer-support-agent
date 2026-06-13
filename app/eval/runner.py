@@ -56,6 +56,9 @@ class EvalCaseResult:
     db_changed: bool = False
     order_status_before: Optional[str] = None
     order_status_after: Optional[str] = None
+    scenario_family: Optional[str] = None
+    variant_type: Optional[str] = None
+    seed: Optional[int] = None
     duration_seconds: float = 0.0
     tool_protocol_violations: int = 0
     tool_errors: int = 0
@@ -252,10 +255,11 @@ class CuratedEvalRunner:
         )
         provider = None if self.require_llm else DisabledLLMProvider()
         # Synthetic subset: use synthetic runtime
-        if case.subset == "synthetic_seeded_v1":
+        if case.subset in ("synthetic_seeded_v1", "generalization"):
             from app.synthetic.adapter import SyntheticRetailAdapter
 
-            seed = getattr(self, "_seed", 42)
+            # generalization cases carry their own seed; synthetic_seeded_v1 uses global _seed
+            seed = getattr(case, "seed", None) or getattr(self, "_seed", 42)
             synthetic_adapter = SyntheticRetailAdapter(seed=seed)
             synthetic_runtime = synthetic_adapter.create_runtime()
         else:
@@ -320,6 +324,9 @@ class CuratedEvalRunner:
             case_id=case.case_id,
             category=case.category,
             trial=trial,
+            scenario_family=case.capability,
+            variant_type=case.case_id,
+            seed=getattr(case, "seed", None),
             passed=failure_label is None,
             failure_label=failure_label,
             trace_artifact_path=str(run_result.trace_artifact_path),
