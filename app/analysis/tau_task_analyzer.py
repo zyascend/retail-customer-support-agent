@@ -441,3 +441,346 @@ def compute_task_space_stats(tasks: list[dict], splits: dict) -> TaskSpaceStats:
             sorted(tool_freq.items(), key=lambda x: x[1], reverse=True)
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Report rendering
+# ---------------------------------------------------------------------------
+
+
+def render_report(
+    stats: TaskSpaceStats,
+    classifications: list[TaskClassification],
+    nl_analysis: dict,
+    cap_agg: dict,
+    data_source_path: str,
+    unsupported_tool_info: dict,
+    missing_tool_info: dict,
+) -> str:
+    """Render the complete Markdown analysis report."""
+    lines: list[str] = []
+    _section_1_overview(lines, stats, data_source_path)
+    _section_2_task_space(lines, stats)
+    _section_3_tool_coverage(lines, classifications, unsupported_tool_info, missing_tool_info)
+    _section_4_classification(lines, classifications, stats)
+    _section_5_nl_assertions(lines, nl_analysis, classifications)
+    _section_6_capability(lines, cap_agg)
+    _section_7_known_issues(lines)
+    _section_8_recommendations(lines, classifications, stats)
+    return "\n".join(lines)
+
+
+def _section_1_overview(lines: list[str], stats: TaskSpaceStats, data_source: str) -> None:
+    lines.append("# Tau Retail Task Space Analysis")
+    lines.append("")
+    lines.append("## 1. 概述")
+    lines.append("")
+    lines.append(f"**分析日期**: 2026-06-13")
+    lines.append(f"**数据来源**: `{data_source}`")
+    lines.append(f"**Task 总数**: {stats.total_tasks}")
+    lines.append(f"**Split 分布**: train {stats.train_count} / test {stats.test_count}")
+    lines.append("")
+
+
+def _section_2_task_space(lines: list[str], stats: TaskSpaceStats) -> None:
+    lines.append("## 2. Task 空间统计")
+    lines.append("")
+    lines.append("### 2.1 Split 分布")
+    lines.append("")
+    lines.append(f"| Split | Task 数量 |")
+    lines.append(f"|-------|----------|")
+    lines.append(f"| train | {stats.train_count} |")
+    lines.append(f"| test  | {stats.test_count} |")
+    lines.append(f"| **合计** | **{stats.total_tasks}** |")
+    lines.append("")
+
+    lines.append("### 2.2 Reward Basis 分布")
+    lines.append("")
+    lines.append(f"| Reward Basis | 数量 |")
+    lines.append(f"|-------------|------|")
+    for basis, count in sorted(stats.reward_basis_distribution.items()):
+        lines.append(f"| {basis} | {count} |")
+    lines.append("")
+
+    lines.append("### 2.3 Action 数量分布")
+    lines.append("")
+    lines.append(f"- **最小**: {stats.action_count_min}")
+    lines.append(f"- **最大**: {stats.action_count_max}")
+    lines.append(f"- **平均**: {stats.action_count_avg:.1f}")
+    lines.append("")
+
+    lines.append("### 2.4 工具使用频率 (Top 15)")
+    lines.append("")
+    lines.append(f"| 工具 | 出现次数 |")
+    lines.append(f"|------|---------|")
+    for tool, count in list(stats.tool_frequencies.items())[:15]:
+        lines.append(f"| {tool} | {count} |")
+    lines.append("")
+
+
+def _section_3_tool_coverage(
+    lines: list[str],
+    classifications: list[TaskClassification],
+    unsupported_info: dict,
+    missing_info: dict,
+) -> None:
+    lines.append("## 3. 工具覆盖分析")
+    lines.append("")
+    lines.append("### 3.1 Agent 已支持工具 vs tau3 要求工具")
+    lines.append("")
+    lines.append(f"| 工具 | 状态 | 出现次数 |")
+    lines.append(f"|------|------|---------|")
+    tau_tools = set()
+    for c in classifications:
+        tau_tools.update(c.tools_used)
+    for tool in sorted(tau_tools):
+        if tool in SUPPORTED_TOOLS:
+            status = "✅ 已支持"
+        elif tool in AUXILIARY_TOOLS:
+            status = "⚠️ 辅助工具（partial）"
+        else:
+            status = "❌ 不支持"
+        count = sum(1 for c in classifications if tool in c.tools_used)
+        lines.append(f"| {tool} | {status} | {count} |")
+
+    lines.append("")
+    lines.append("### 3.2 缺失工具详情")
+    lines.append("")
+    for tool_name, info in sorted(unsupported_info.items()):
+        lines.append(f"#### `{tool_name}`")
+        lines.append(f"- 出现次数: {info['count']}")
+        lines.append(f"- 影响 task: {', '.join(info['task_ids'])}")
+        lines.append("")
+    for tool_name, info in sorted(missing_info.items()):
+        lines.append(f"#### `{tool_name}` (辅助工具)")
+        lines.append(f"- 出现次数: {info['count']}")
+        lines.append(f"- 影响 task: {', '.join(info['task_ids'])}")
+        lines.append(f"- 评估: 辅助计算/查询，Agent 主流程不受阻，标记为 partial")
+        lines.append("")
+
+
+def _section_4_classification(
+    lines: list[str],
+    classifications: list[TaskClassification],
+    stats: TaskSpaceStats,
+) -> None:
+    lines.append("## 4. 分类结果")
+    lines.append("")
+
+    supported = [c for c in classifications if c.status == "supported"]
+    partial = [c for c in classifications if c.status == "partial"]
+    unsupported = [c for c in classifications if c.status == "unsupported"]
+
+    lines.append("### 4.1 总览")
+    lines.append("")
+    lines.append(f"| 分类 | 数量 | 占比 |")
+    lines.append(f"|------|------|------|")
+    lines.append(f"| supported | {len(supported)} | {len(supported)/stats.total_tasks*100:.1f}% |")
+    lines.append(f"| partial | {len(partial)} | {len(partial)/stats.total_tasks*100:.1f}% |")
+    lines.append(f"| unsupported | {len(unsupported)} | {len(unsupported)/stats.total_tasks*100:.1f}% |")
+
+    lines.append("")
+    lines.append("### 4.2 按 Split 分布")
+    lines.append("")
+    for split_name in ("train", "test"):
+        items = [c for c in classifications if c.split == split_name]
+        sup = sum(1 for c in items if c.status == "supported")
+        part = sum(1 for c in items if c.status == "partial")
+        unsup = sum(1 for c in items if c.status == "unsupported")
+        lines.append(f"- **{split_name}**: supported {sup}, partial {part}, unsupported {unsup}")
+
+    lines.append("")
+    lines.append("### 4.3 Partial 子类别")
+    lines.append("")
+    lines.append(f"| 子类别 | 数量 |")
+    lines.append(f"|--------|------|")
+    subcat_counts: dict[str, int] = {}
+    for c in partial:
+        key = c.subcategory or "unknown"
+        subcat_counts[key] = subcat_counts.get(key, 0) + 1
+    for subcat, count in sorted(subcat_counts.items()):
+        lines.append(f"| {subcat} | {count} |")
+
+    lines.append("")
+    lines.append("### 4.4 Unsupported 子类别")
+    lines.append("")
+    lines.append(f"| 子类别 | 数量 | Task IDs |")
+    lines.append(f"|--------|------|----------|")
+    usubcat: dict[str, list[str]] = {}
+    for c in unsupported:
+        key = c.subcategory or "unknown"
+        usubcat.setdefault(key, []).append(c.task_id)
+    for subcat, task_ids in sorted(usubcat.items()):
+        lines.append(f"| {subcat} | {len(task_ids)} | {', '.join(task_ids[:10])} |")
+
+    lines.append("")
+    lines.append("### 4.5 完整 Task 分类清单")
+    lines.append("")
+    lines.append(f"| Task ID | Split | 状态 | 子类别 | 工具数 | NL Assertion | 备注 |")
+    lines.append(f"|---------|-------|------|--------|--------|-------------|------|")
+    for c in sorted(classifications, key=lambda x: int(x.task_id)):
+        nl_mark = "✓" if c.has_nl_assertion else "-"
+        lines.append(
+            f"| {c.task_id} | {c.split} | {c.status} | {c.subcategory or '-'} "
+            f"| {c.action_count} | {nl_mark} | {c.notes[:80]} |"
+        )
+    lines.append("")
+
+
+def _section_5_nl_assertions(
+    lines: list[str],
+    nl_analysis: dict,
+    classifications: list[TaskClassification],
+) -> None:
+    lines.append("## 5. NL Assertion 分析")
+    lines.append("")
+    lines.append(f"- **含 NL assertion 的 task 数**: {nl_analysis['total_tasks_with_nl']}")
+    lines.append(f"- **NL assertion 总数**: {nl_analysis['total_assertions']}")
+    lines.append("")
+
+    lines.append("### 5.1 按类型分布")
+    lines.append("")
+    lines.append(f"| 类型 | 数量 | 说明 |")
+    lines.append(f"|------|------|------|")
+    lines.append(f"| must_say | {nl_analysis['by_category'].get('must_say', 0)} | Agent 必须说出特定信息 |")
+    lines.append(f"| must_not_say | {nl_analysis['by_category'].get('must_not_say', 0)} | Agent 不得提及特定内容 |")
+    lines.append(f"| must_convey | {nl_analysis['by_category'].get('must_convey', 0)} | Agent 必须传达概念（措辞不限） |")
+    lines.append("")
+
+    lines.append("### 5.2 代表性示例")
+    lines.append("")
+    for category in ("must_say", "must_not_say", "must_convey"):
+        samples = nl_analysis.get("sample_by_category", {}).get(category, [])
+        if samples:
+            lines.append(f"**{category}**:")
+            for sample in samples:
+                lines.append(f"- {sample}")
+            lines.append("")
+
+    lines.append("### 5.3 与现有 eval 能力的映射")
+    lines.append("")
+    lines.append("- `must_say` 类型可部分映射到 `expected_assistant_contains`，但 tau3 的 assertion 往往要求精确数值（如退款金额），当前 agent 的响应文本可能措辞不同但语义正确。")
+    lines.append("- `must_not_say` 类型当前无直接对应的 eval 断言机制。")
+    lines.append("- `must_convey` 类型最适合 `expected_assistant_contains`，但仍需人工判断。")
+    lines.append("- **建议**: Phase 9 首批 ingestion 中将 NL assertion 标记为 `partial`，不作为 gate；后续可引入 LLM-based NL assertion evaluator。")
+    lines.append("")
+
+    nl_task_ids = sorted(set(
+        item.task_id for item in nl_analysis["items"]
+    ), key=int)
+    lines.append("### 5.4 含 NL Assertion 的 Task 列表")
+    lines.append("")
+    lines.append(f"共 {len(nl_task_ids)} 个 task: {', '.join(nl_task_ids)}")
+    lines.append("")
+
+
+def _section_6_capability(lines: list[str], cap_agg: dict) -> None:
+    lines.append("## 6. 按 Capability 维度聚合")
+    lines.append("")
+    lines.append(f"| Capability | 总数 | Supported | Partial | Unsupported | Train | Test |")
+    lines.append(f"|-----------|------|-----------|---------|-------------|-------|------|")
+    for cap in sorted(cap_agg.keys()):
+        d = cap_agg[cap]
+        lines.append(
+            f"| {cap} | {d['total']} | {d['supported']} | {d['partial']} "
+            f"| {d['unsupported']} | {d['train']} | {d['test']} |"
+        )
+    lines.append("")
+
+    lines.append("### 6.2 与现有 Capability Matrix 对照")
+    lines.append("")
+    lines.append("现有 capability matrix（`docs/phase5-capability-matrix.md`）覆盖的能力：")
+    lines.append("")
+    lines.append("| Capability | 现有 Eval 覆盖 | tau3 Task 数 | 差距 |")
+    lines.append("|-----------|---------------|-------------|------|")
+    existing_caps = {
+        "cancel": "generalized_mvp",
+        "return": "generalized_mvp",
+        "exchange": "generalized_mvp",
+        "modify_address": "generalized_mvp",
+        "modify_items": "generalized_mvp",
+        "modify_payment": "generalized_mvp",
+        "modify_user_address": "generalized_mvp",
+        "transfer": "generalized_mvp",
+        "lookup": "curated_mvp + generalized_mvp",
+    }
+    for cap, existing in sorted(existing_caps.items()):
+        tau_count = cap_agg.get(cap, {}).get("total", 0)
+        lines.append(f"| {cap} | {existing} | {tau_count} | {'⚠️ 需扩展' if tau_count > 5 else '✅ 接近'} |")
+    lines.append("")
+
+
+def _section_7_known_issues(lines: list[str]) -> None:
+    lines.append("## 7. 已知问题 Task")
+    lines.append("")
+    lines.append("`task_issues/` 目录包含 3 个历史执行问题记录：")
+    lines.append("")
+    lines.append("- `task_4_issue_2b74ee61.json`")
+    lines.append("- `task_5_issue_770466c1.json`")
+    lines.append("- `task_7_issue_9a37c151.json`")
+    lines.append("")
+    lines.append("这些文件是 tau3 benchmark 的执行日志（包含 termination_reason、reward_info 等），")
+    lines.append("而非 task 定义本身的问题。它们记录了 agent 在 tau3 原生环境中执行时的失败案例，")
+    lines.append("可作为 Phase 9 smoke test 的参考——优先验证 task 4/5/7 在我们的 Agent 中能否通过。")
+    lines.append("")
+
+
+def _section_8_recommendations(
+    lines: list[str],
+    classifications: list[TaskClassification],
+    stats: TaskSpaceStats,
+) -> None:
+    supported = [c for c in classifications if c.status == "supported"]
+    partial = [c for c in classifications if c.status == "partial"]
+    unsupported = [c for c in classifications if c.status == "unsupported"]
+
+    sup_train = [c for c in supported if c.split == "train"]
+    sup_test = [c for c in supported if c.split == "test"]
+
+    lines.append("## 8. Phase 9 首批 Ingestion 建议")
+    lines.append("")
+
+    lines.append("### 8.1 推荐接入范围")
+    lines.append("")
+    lines.append(f"- **全量 supported task**: {len(supported)} 个（train {len(sup_train)} + test {len(sup_test)}）")
+    lines.append(f"- **可考虑接入的 partial task**: {len(partial)} 个")
+    partial_nl = sum(1 for c in partial if c.subcategory == "partial_nl_assertion")
+    partial_tool = sum(1 for c in partial if c.subcategory == "partial_missing_tool")
+    lines.append(f"  - 其中 `partial_nl_assertion` 子类: {partial_nl} 个（仅 NL assertion 差距，core workflow 完整）")
+    lines.append(f"  - 其中 `partial_missing_tool` 子类: {partial_tool} 个")
+    lines.append(f"- **建议排除的 unsupported task**: {len(unsupported)} 个")
+    lines.append("")
+
+    lines.append("### 8.2 分阶段接入策略")
+    lines.append("")
+    lines.append("**第一步: Smoke Test**")
+    smoke_count = min(5, len(supported))
+    lines.append(f"- 选取 {smoke_count} 个 supported task 验证 task → EvalCase 转换和 reward evaluation 流程")
+    lines.append("- 优先选择 task_issues 中已知有问题的 task（4/5/7），验证我们的 Agent 能否改善")
+    lines.append("")
+    lines.append("**第二步: Supported 全量接入**")
+    lines.append(f"- 接入全部 {len(supported)} 个 supported task")
+    lines.append(f"- 新增 subset: `tau_retail_supported`")
+    lines.append(f"- 作为 Phase 9 的 gate")
+    lines.append("")
+    lines.append("**第三步: Partial 接入**")
+    lines.append(f"- 接入 {len(partial)} 个 partial task，NL assertion 作为非 gate 参考维度")
+    lines.append(f"- 新增 subset: `tau_retail_partial`")
+    lines.append("")
+
+    lines.append("### 8.3 风险提示")
+    lines.append("")
+    lines.append("1. **NL Assertion 验证**: 40 个 task 有 NL assertion，当前无法自动验证。Phase 9 首批应将其作为非 gate 指标。")
+    calc_tasks = sum(1 for c in partial if "calculate" in c.missing_tools)
+    lines.append(f"2. **`calculate` 工具**: {calc_tasks} 个 task 依赖此工具。Agent 可在 response 中包含退款金额而不显式调用 `calculate`，但 reward evaluation 可能期望此 tool call。")
+    lines.append("3. **DB State**: 所有 114 个 task 的 `initial_state` 为 null，tau3 使用完整 DB。Phase 9 需要确保每次 eval run 的 DB 初始状态一致。")
+    lines.append("4. **User Simulation**: tau3 task 的 `user_scenario.instructions` 定义了用户行为脚本。Phase 9 需要实现 user simulator adapter 来驱动多轮对话。")
+    lines.append("5. **Policy 差异**: tau3 的 `policy.md` 与我们的 guard rules 可能存在细微差异，需要在 smoke test 中逐条对照。")
+    lines.append("")
+
+    lines.append("### 8.4 排除项")
+    lines.append("")
+    lines.append(f"- {len(unsupported)} 个 unsupported task（原因: 无 action 或包含完全不支持的工具）")
+    lines.append("- 短期内不考虑 `get_item_details` 工具实现（仅 3 个 task 使用）")
+    lines.append("- 不引入 `calculate` 工具（Agent 的 LLM 推理可替代简单数学计算）")
+    lines.append("")

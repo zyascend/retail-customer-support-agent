@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from app.analysis.tau_task_analyzer import (
+    NLAssertionItem,
     TaskClassification,
+    TaskSpaceStats,
     _resolve_tau3_retail_dir,
     aggregate_by_capability,
     analyze_nl_assertions,
@@ -15,6 +17,7 @@ from app.analysis.tau_task_analyzer import (
     compute_task_space_stats,
     load_splits,
     load_tasks,
+    render_report,
 )
 from app.config import AppConfig
 
@@ -269,3 +272,74 @@ def test_aggregate_by_capability_groups_tasks():
     assert "return" in result
     assert result["return"]["total"] == 1
     assert result["return"]["supported"] == 1
+
+
+def test_render_report_produces_markdown_with_all_sections():
+    """render_report produces Markdown with all 8 required sections."""
+    stats = TaskSpaceStats(
+        total_tasks=2,
+        train_count=1,
+        test_count=1,
+        reward_basis_distribution={"DB + NL_ASSERTION": 2},
+        action_count_min=1,
+        action_count_max=3,
+        action_count_avg=2.0,
+        tool_frequencies={"get_order_details": 2, "cancel_pending_order": 1},
+    )
+    classifications = [
+        TaskClassification(
+            task_id="0", split="train", status="supported",
+            tools_used=["get_order_details", "cancel_pending_order"],
+            action_count=2, reward_basis=["DB", "NL_ASSERTION"],
+            notes="All good.",
+        ),
+        TaskClassification(
+            task_id="1", split="test", status="partial",
+            subcategory="partial_nl_assertion",
+            tools_used=["get_order_details"], missing_tools=[],
+            has_nl_assertion=True, action_count=1,
+            reward_basis=["DB", "NL_ASSERTION"],
+            notes="has NL assertions",
+        ),
+    ]
+    nl_analysis = {
+        "total_tasks_with_nl": 1,
+        "total_assertions": 1,
+        "by_category": {"must_say": 1},
+        "sample_by_category": {"must_say": ["Agent should tell the user something."]},
+        "items": [
+            NLAssertionItem(
+                task_id="1", text="Agent should tell the user something.",
+                category="must_say",
+            ),
+        ],
+    }
+    cap_agg = {
+        "cancel": {"total": 1, "supported": 1, "partial": 0, "unsupported": 0, "train": 1, "test": 0},
+        "lookup": {"total": 1, "supported": 0, "partial": 1, "unsupported": 0, "train": 0, "test": 1},
+    }
+
+    report = render_report(
+        stats=stats,
+        classifications=classifications,
+        nl_analysis=nl_analysis,
+        cap_agg=cap_agg,
+        data_source_path="/fake/path",
+        unsupported_tool_info={"calculate": {"count": 0, "task_ids": []}},
+        missing_tool_info={},
+    )
+
+    # Check all 8 required section headers
+    assert "## 1. 概述" in report
+    assert "## 2. Task 空间统计" in report
+    assert "## 3. 工具覆盖分析" in report
+    assert "## 4. 分类结果" in report
+    assert "## 5. NL Assertion 分析" in report
+    assert "## 6. 按 Capability 维度聚合" in report
+    assert "## 7. 已知问题 Task" in report
+    assert "## 8. Phase 9 首批 Ingestion 建议" in report
+
+    # Check key data points appear
+    assert "2" in report  # total tasks
+    assert "supported" in report
+    assert "partial_nl_assertion" in report
