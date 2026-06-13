@@ -201,7 +201,7 @@ class CuratedEvalRunner:
             created_at=created_at,
             agent_strategy="guarded_workflow_agent",
             model=self.config.default_agent_model,
-            llm_required=self.require_llm,
+            llm_required=self.require_llm or self.live,
             llm_timeout_seconds=self.config.agent_llm_timeout_seconds,
             llm_max_retries=self.config.agent_llm_max_retries,
             case_count=len(results),

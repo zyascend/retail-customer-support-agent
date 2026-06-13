@@ -539,7 +539,7 @@ class CuratedEvalTests(unittest.TestCase):
         self.assertIsNone(label)
 
     def test_live_flag_passes_provider_none_to_runtime(self):
-        """Verify --live does not inject DisabledLLMProvider."""
+        """Verify live=False produces scripted eval_backend and runs all cases."""
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
