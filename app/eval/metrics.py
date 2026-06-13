@@ -153,11 +153,16 @@ def build_failure_analysis(results: Iterable[MetricResult]) -> Dict[str, Any]:
     # ── Generalization-specific aggregations ──
     family_counts: Dict[str, Counter[str]] = defaultdict(Counter)
     variant_type_counts: Dict[str, Counter[str]] = defaultdict(Counter)
+    language_level_counts: Dict[str, Counter[str]] = defaultdict(Counter)
     for result in result_list:
         family = getattr(result, "scenario_family", None) or "unknown"
         variant = getattr(result, "variant_type", None) or "unknown"
+        language_level = (
+            getattr(result, "language_variation_level", None) or "unknown"
+        )
         family_counts[family][result.failure_label or "passed"] += 1
         variant_type_counts[variant][result.failure_label or "passed"] += 1
+        language_level_counts[language_level][result.failure_label or "passed"] += 1
 
     # failure_source classification
     failure_source_map = {
@@ -207,6 +212,10 @@ def build_failure_analysis(results: Iterable[MetricResult]) -> Dict[str, Any]:
         "variant_type_counts": {
             variant: dict(sorted(counts.items()))
             for variant, counts in sorted(variant_type_counts.items())
+        },
+        "language_variation_level_counts": {
+            language_level: dict(sorted(counts.items()))
+            for language_level, counts in sorted(language_level_counts.items())
         },
         "failure_source_counts": dict(sorted(source_counts.items())),
     }

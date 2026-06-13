@@ -41,7 +41,7 @@ def infer_intent(lowered: str) -> str:
         return "lookup"
 
     # Coupon / discount / compensation → transfer (unsupported, no write)
-    if re.search(r"\b(coupon|discount|compensation)\b", lowered):
+    if re.search(r"\b(coupon|discount|compensation|courtesy\s+credit)\b", lowered):
         return "transfer"
     if re.search(r"\brefund\b", lowered) and not re.search(r"\breturn\b", lowered):
         return "transfer"
@@ -67,7 +67,7 @@ def infer_intent(lowered: str) -> str:
         return "transfer"
 
     # Cancel — must mention order
-    if re.search(r"\bcancel\b", lowered):
+    if re.search(r"\b(cancel|cancelled|void|stop|discontinue)\b", lowered):
         if re.search(r"\border\b", lowered) or ORDER_RE.search(lowered):
             return "cancel_order"
         return "cancel_order"
@@ -94,14 +94,16 @@ def infer_intent(lowered: str) -> str:
     if re.search(r"\b(upgrade|expedite)\b.*\bshipping\b", lowered):
         return "modify_shipping_method"
     if re.search(r"\b(overnight|express|standard)\b", lowered) and (
-        "shipping" in lowered or "delivery" in lowered
+        "shipping" in lowered
+        or "delivery" in lowered
+        or re.search(r"\b(set|use|uses)\b", lowered)
     ):
         return "modify_shipping_method"
     # Catch delivery/shipping requests with non-standard method names
     # e.g., "drone delivery", "need helicopter shipping"
     # Avoid false positives on "delivery status/tracking/info"
     if re.search(r"\b(delivery|shipping)\b", lowered) and re.search(
-        r"\b(need|want|get|use|change|modify|update)\b", lowered
+        r"\b(needs?|want|get|use|change|modify|update|set)\b", lowered
     ):
         if not re.search(
             r"\b(delivery|shipping)\s+(status|update|info|tracking|date|time)\b",

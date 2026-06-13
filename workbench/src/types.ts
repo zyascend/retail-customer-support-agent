@@ -14,6 +14,14 @@ export interface WorkbenchCase {
   expected_no_write: boolean;
   expected_tool_names: string[];
   expected_assistant_contains: string | null;
+  subset?: string;
+  capability?: string | null;
+  policy_area?: string | null;
+  seed?: number | null;
+  scenario_family?: string | null;
+  variant_type?: string | null;
+  language_variation_level?: string | null;
+  expected_oracle?: Record<string, unknown>;
 }
 
 export interface CaseGroup {

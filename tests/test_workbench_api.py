@@ -22,8 +22,29 @@ class WorkbenchAPITests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["default_mode"], "deterministic")
         self.assertFalse(payload["llm_available"])
-        self.assertEqual(payload["case_catalog"]["subset"], "curated_mvp")
+        self.assertEqual(payload["case_catalog"]["subset"], "generalized_mvp")
         self.assertGreaterEqual(len(payload["case_catalog"]["demo_cases"]), 5)
+
+    def test_config_includes_generated_scenario_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = create_app(config=resolve_config(artifact_dir=tmp))
+            client = TestClient(app)
+
+            response = client.get("/api/workbench/config")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        generated = [
+            case
+            for case in payload["case_catalog"]["all_cases"]
+            if case["subset"] == "generalization"
+        ]
+        self.assertTrue(generated)
+        self.assertIn("seed", generated[0])
+        self.assertIn("scenario_family", generated[0])
+        self.assertIn("variant_type", generated[0])
+        self.assertIn("language_variation_level", generated[0])
+        self.assertIn("expected_oracle", generated[0])
 
     def test_session_step_and_run_all(self):
         with tempfile.TemporaryDirectory() as tmp:

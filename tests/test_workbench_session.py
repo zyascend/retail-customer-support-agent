@@ -32,6 +32,20 @@ class WorkbenchSessionTests(unittest.TestCase):
             self.assertIn("order:#W5918442:cancel", second["business"]["write_locks"])
             self.assertTrue(Path(second["trace_artifact_path"]).exists())
 
+    def test_generated_generalization_case_replays_with_seeded_runtime(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
+            session = manager.create_session(
+                mode="deterministic",
+                case_id="cancel_success_s100_l1",
+            )
+
+            snapshot = session.run_all()
+
+            self.assertEqual(snapshot["selected_case_id"], "cancel_success_s100_l1")
+            self.assertEqual(snapshot["business"]["confirmation_status"], "confirmed")
+            self.assertTrue(Path(snapshot["trace_artifact_path"]).exists())
+
     def test_concurrent_steps_serialize_script_cursor(self):
         with tempfile.TemporaryDirectory() as tmp:
             manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))

@@ -168,9 +168,14 @@ class WorkbenchSession:
 
         # If this is a synthetic case, use SyntheticRetailAdapter
         runtime_kwargs = {}
-        if selected_case is not None and selected_case.subset == "synthetic_seeded_v1":
+        if selected_case is not None and selected_case.subset in (
+            "synthetic_seeded_v1",
+            "generalization",
+            "generalization_exploratory",
+        ):
             from app.synthetic.adapter import SyntheticRetailAdapter
-            synthetic_adapter = SyntheticRetailAdapter(seed=42)
+
+            synthetic_adapter = SyntheticRetailAdapter(seed=selected_case.seed or 42)
             runtime_kwargs["runtime"] = synthetic_adapter.create_runtime()
 
         runtime = AgentRuntime(
