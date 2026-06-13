@@ -60,6 +60,7 @@ def _derive_cancel_block_wrong_user(world: dict, entities: dict) -> Deterministi
         expected_user_id=user["user_id"],
         expected_intent="cancel_order",
         order_id=order["order_id"],
+        expected_confirmation_status="",
         expected_no_write=True,
         expected_tool_names=[],
     )
@@ -128,6 +129,7 @@ def _derive_coupon_transfer(world: dict, entities: dict) -> DeterministicOracle:
         expected_user_id=user["user_id"],
         expected_intent="transfer",
         order_id=order["order_id"] if order else None,
+        expected_confirmation_status="",
         expected_no_write=True,
         expected_tool_names=["transfer_to_human_agents"],
     )
