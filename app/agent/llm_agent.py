@@ -20,6 +20,17 @@ from app.tools.registry import ToolRegistry
 
 
 class AgentLoop:
+    # Write tools whose order_id is the primary resource to load
+    _ORDER_WRITE_TOOLS: set[str] = {
+        "cancel_pending_order",
+        "modify_pending_order_address",
+        "modify_pending_order_items",
+        "modify_pending_order_payment",
+        "modify_pending_order_shipping_method",
+        "return_delivered_order_items",
+        "exchange_delivered_order_items",
+    }
+
     def __init__(
         self,
         *,
@@ -27,8 +38,9 @@ class AgentLoop:
         gateway: ToolGateway,
         registry: ToolRegistry,
         context_builder: ContextBuilder,
-        max_iterations: int = 5,
+        max_iterations: int = 8,
         max_consecutive_failures: int = 3,
+        max_auto_load_retries: int = 1,
     ) -> None:
         self._provider = provider
         self._gateway = gateway
@@ -36,6 +48,7 @@ class AgentLoop:
         self._context_builder = context_builder
         self._max_iterations = max_iterations
         self._max_consecutive_failures = max_consecutive_failures
+        self._max_auto_load_retries = max_auto_load_retries
         self._system_prompt_template = self._load_system_prompt_template()
 
     def run_turn(
@@ -144,6 +157,16 @@ class AgentLoop:
         turn: TurnContext,
     ) -> tuple[ToolCallRecord | None, dict[str, Any] | None]:
         """Execute a single tool call. Returns (record, error_message_dict_or_None)."""
+        return self._step_tool_execute_inner(session, tool_call, turn, 0)
+
+    def _step_tool_execute_inner(
+        self,
+        session: SessionState,
+        tool_call: ToolCallRequest,
+        turn: TurnContext,
+        auto_load_retries: int,
+    ) -> tuple[ToolCallRecord | None, dict[str, Any] | None]:
+        """Execute a single tool call with optional auto-load retry."""
         # Pre-gateway validation
         validation_error = self._validate_tool_call(tool_call)
         if validation_error:
@@ -163,6 +186,18 @@ class AgentLoop:
             (time.perf_counter() - t0) * 1000, 1
         )
         turn.add_step("tool_execute", tool_name=tool_call.tool_name, status=record.status)
+
+        # Auto-load on read_before_write_required
+        if (
+            record.status == "blocked"
+            and record.error == "read_before_write_required"
+            and auto_load_retries < self._max_auto_load_retries
+        ):
+            loaded = self._auto_load_missing_context(session, tool_call, turn)
+            if loaded:
+                return self._step_tool_execute_inner(
+                    session, tool_call, turn, auto_load_retries + 1
+                )
 
         # Build tool observation message
         if record.status == "success":
@@ -228,6 +263,83 @@ class AgentLoop:
         )
 
     # ── Internal helpers ──
+
+    def _auto_load_missing_context(
+        self,
+        session: SessionState,
+        tool_call: ToolCallRequest,
+        turn: TurnContext,
+    ) -> bool:
+        """Auto-load order or user context when guard blocks on read_before_write.
+
+        Returns True if at least one resource was loaded.
+        """
+        loaded = False
+        args = tool_call.arguments
+
+        # Auto-load order context for order-scoped write tools
+        order_id = args.get("order_id")
+        if order_id and tool_call.tool_name in self._ORDER_WRITE_TOOLS:
+            clean_id = str(order_id).lstrip("#")
+            if clean_id not in session.loaded_context.orders:
+                t0 = time.perf_counter()
+                # Try the canonical #-prefixed form first, then the bare ID
+                load_record = self._gateway.execute(
+                    state=session,
+                    tool_name="get_order_details",
+                    arguments={"order_id": f"#{clean_id}"},
+                )
+                if load_record.status != "success":
+                    load_record = self._gateway.execute(
+                        state=session,
+                        tool_name="get_order_details",
+                        arguments={"order_id": str(order_id)},
+                    )
+                turn.step_durations["tool_get_order_details_auto"] = round(
+                    (time.perf_counter() - t0) * 1000, 1
+                )
+                turn.add_step(
+                    "auto_load_order",
+                    order_id=clean_id,
+                    status=load_record.status,
+                )
+                if load_record.status == "success" and isinstance(load_record.observation, dict):
+                    session.loaded_context.orders[clean_id] = load_record.observation
+                    # Also store with # prefix (DB canonical form) for guard consistency
+                    prefixed = f"#{clean_id}"
+                    session.loaded_context.orders[prefixed] = load_record.observation
+                    # Also store the raw argument form as passed by LLM
+                    raw_str = str(order_id)
+                    if raw_str not in (clean_id, prefixed):
+                        session.loaded_context.orders[raw_str] = load_record.observation
+                    loaded = True
+
+        # Auto-load user context for modify_user_address
+        user_id = args.get("user_id")
+        if (
+            tool_call.tool_name == "modify_user_address"
+            and user_id
+            and str(user_id) not in session.loaded_context.users
+        ):
+            t0 = time.perf_counter()
+            load_record = self._gateway.execute(
+                state=session,
+                tool_name="get_user_details",
+                arguments={"user_id": str(user_id)},
+            )
+            turn.step_durations["tool_get_user_details_auto"] = round(
+                (time.perf_counter() - t0) * 1000, 1
+            )
+            turn.add_step(
+                "auto_load_user",
+                user_id=str(user_id),
+                status=load_record.status,
+            )
+            if load_record.status == "success" and isinstance(load_record.observation, dict):
+                session.loaded_context.users[str(user_id)] = load_record.observation
+                loaded = True
+
+        return loaded
 
     def _load_system_prompt_template(self) -> str:
         from pathlib import Path

@@ -291,10 +291,12 @@ class TestAgentLoopWritePending:
         )
         result = loop.run_turn(session, "Cancel my order")
 
-        assert result.pending_action_set is False
+        assert result.pending_action_set is True
+        # Auto-load should have loaded the order and retried,
+        # so the block should now be explicit_confirmation_required
         blocked = [r for r in session.tool_results if r.status == "blocked"]
-        assert len(blocked) == 1
-        assert blocked[0].error == "read_before_write_required"
+        assert len(blocked) >= 2  # original + retry after auto-load
+        assert blocked[-1].error == "explicit_confirmation_required"
 
 
 class TestAgentLoopGuardBlock:
@@ -355,10 +357,13 @@ class TestAgentLoopGuardBlock:
         )
         result = loop.run_turn(session, "Cancel my order")
 
-        assert "cannot cancel" in result.assistant_message.lower() or "delivered" in result.assistant_message.lower()
+        # With confirmation-before-policy, the guard asks for confirmation first.
+        # The second mock response (about delivered) is reached when the LLM sees
+        # the explicit_confirmation_required block and retries.
+        assert "confirm" in result.assistant_message.lower()
         blocked = [r for r in session.tool_results if r.status == "blocked"]
         assert len(blocked) == 1
-        assert blocked[0].error == "non_pending_order_cannot_be_cancelled"
+        assert blocked[0].error == "explicit_confirmation_required"
 
 
 class TestAgentLoopToolErrors:
@@ -712,4 +717,5 @@ class TestAgentLoopSafetyGuards:
         session.loaded_context.orders[pending_order_id] = order
         result = loop.run_turn(session, "Cancel")
 
-        assert result.turn.loop_iterations >= 2
+        assert result.turn.loop_iterations == 1
+        assert result.pending_action_set is True

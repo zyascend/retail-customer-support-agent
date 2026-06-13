@@ -260,7 +260,8 @@ CURATED_MVP_CASES: List[EvalCase] = [
         order_id="#W5918442",
         expected_order_status="pending",
         expected_no_write=True,
-        expected_assistant_contains="another account",
+        expected_guard_block_reason="ownership_violation",
+        expected_tool_names=["cancel_pending_order"],
     ),
 ]
 

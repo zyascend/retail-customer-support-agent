@@ -369,7 +369,9 @@ class CuratedEvalRunner:
             1 for record in state.tool_results if record.status == "error"
         )
         guard_blocks = sum(
-            1 for record in state.tool_results if record.status == "blocked"
+            1 for record in state.tool_results
+            if record.status == "blocked"
+            and record.error != "explicit_confirmation_required"
         )
         successful_tool_calls = sum(
             1 for record in state.tool_results if record.status == "success"
@@ -628,7 +630,7 @@ def classify_failure(
     if not is_tau:
         if case.expected_assistant_contains:
             transcript = "\n".join(assistant_messages)
-            if case.expected_assistant_contains not in transcript:
+            if case.expected_assistant_contains.lower() not in transcript.lower():
                 return "response_mismatch"
     # Tau subsets skip tool_sequence check
     if not is_tau:

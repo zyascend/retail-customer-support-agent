@@ -135,14 +135,14 @@ class ConfirmationResolverTests(unittest.TestCase):
         self.resolver = ConfirmationResolver()
 
     def test_resolves_exact_match_confirm(self):
-        self.assertEqual(self.resolver.resolve("yes"), "confirm")
-        self.assertEqual(self.resolver.resolve("confirm"), "confirm")
-        self.assertEqual(self.resolver.resolve("确认"), "confirm")
+        self.assertEqual(self.resolver.resolve("yes"), "confirmed")
+        self.assertEqual(self.resolver.resolve("confirm"), "confirmed")
+        self.assertEqual(self.resolver.resolve("确认"), "confirmed")
 
     def test_resolves_exact_match_deny(self):
-        self.assertEqual(self.resolver.resolve("no"), "deny")
-        self.assertEqual(self.resolver.resolve("cancel"), "deny")
-        self.assertEqual(self.resolver.resolve("取消"), "deny")
+        self.assertEqual(self.resolver.resolve("no"), "denied")
+        self.assertEqual(self.resolver.resolve("cancel"), "denied")
+        self.assertEqual(self.resolver.resolve("取消"), "denied")
 
     def test_resolves_exact_match_changed(self):
         self.assertEqual(
@@ -154,33 +154,33 @@ class ConfirmationResolverTests(unittest.TestCase):
         self.assertEqual(self.resolver.resolve("hello"), "unknown")
 
     def test_weak_confirm_with_extra_words(self):
-        self.assertEqual(self.resolver.resolve("yes please"), "confirm")
-        self.assertEqual(self.resolver.resolve("yeah sure"), "confirm")
-        self.assertEqual(self.resolver.resolve("ok go ahead"), "confirm")
-        self.assertEqual(self.resolver.resolve("yes, please proceed"), "confirm")
+        self.assertEqual(self.resolver.resolve("yes please"), "confirmed")
+        self.assertEqual(self.resolver.resolve("yeah sure"), "confirmed")
+        self.assertEqual(self.resolver.resolve("ok go ahead"), "confirmed")
+        self.assertEqual(self.resolver.resolve("yes, please proceed"), "confirmed")
 
     def test_negated_change_returns_deny(self):
-        self.assertEqual(self.resolver.resolve("don't change anything"), "deny")
-        self.assertEqual(self.resolver.resolve("do not change the address"), "deny")
-        self.assertEqual(self.resolver.resolve("never mind, don't switch"), "deny")
+        self.assertEqual(self.resolver.resolve("don't change anything"), "denied")
+        self.assertEqual(self.resolver.resolve("do not change the address"), "denied")
+        self.assertEqual(self.resolver.resolve("never mind, don't switch"), "denied")
 
     def test_change_with_denial_word_returns_changed(self):
         self.assertEqual(self.resolver.resolve("no, change the address"), "changed")
         self.assertEqual(self.resolver.resolve("no I want to replace items"), "changed")
 
     def test_chinese_confirm_terms(self):
-        self.assertEqual(self.resolver.resolve("好"), "confirm")
-        self.assertEqual(self.resolver.resolve("可以"), "confirm")
-        self.assertEqual(self.resolver.resolve("行"), "confirm")
+        self.assertEqual(self.resolver.resolve("好"), "confirmed")
+        self.assertEqual(self.resolver.resolve("可以"), "confirmed")
+        self.assertEqual(self.resolver.resolve("行"), "confirmed")
 
     def test_chinese_deny_terms(self):
-        self.assertEqual(self.resolver.resolve("不"), "deny")
-        self.assertEqual(self.resolver.resolve("不用"), "deny")
-        self.assertEqual(self.resolver.resolve("算了"), "deny")
+        self.assertEqual(self.resolver.resolve("不"), "denied")
+        self.assertEqual(self.resolver.resolve("不用"), "denied")
+        self.assertEqual(self.resolver.resolve("算了"), "denied")
 
     def test_chinese_negated_change(self):
-        self.assertEqual(self.resolver.resolve("不要改"), "deny")
-        self.assertEqual(self.resolver.resolve("别改了"), "deny")
+        self.assertEqual(self.resolver.resolve("不要改"), "denied")
+        self.assertEqual(self.resolver.resolve("别改了"), "denied")
 
     def test_chinese_change_request(self):
         self.assertEqual(self.resolver.resolve("换成另外一个"), "changed")
