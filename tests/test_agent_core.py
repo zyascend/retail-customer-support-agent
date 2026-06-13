@@ -231,13 +231,75 @@ class RetailAdapterTests(unittest.TestCase):
 
 
 class ConfirmationResolverTests(unittest.TestCase):
-    def test_resolves_confirmation_intents(self):
-        resolver = ConfirmationResolver()
+    def setUp(self):
+        self.resolver = ConfirmationResolver()
 
-        self.assertEqual(resolver.resolve("yes"), "confirm")
-        self.assertEqual(resolver.resolve("cancel"), "deny")
-        self.assertEqual(resolver.resolve("use item 1234567890 instead"), "changed")
-        self.assertEqual(resolver.resolve("maybe later today"), "unknown")
+    def test_resolves_exact_match_confirm(self):
+        self.assertEqual(self.resolver.resolve("yes"), "confirm")
+        self.assertEqual(self.resolver.resolve("confirm"), "confirm")
+        self.assertEqual(self.resolver.resolve("确认"), "confirm")
+
+    def test_resolves_exact_match_deny(self):
+        self.assertEqual(self.resolver.resolve("no"), "deny")
+        self.assertEqual(self.resolver.resolve("cancel"), "deny")
+        self.assertEqual(self.resolver.resolve("取消"), "deny")
+
+    def test_resolves_exact_match_changed(self):
+        self.assertEqual(
+            self.resolver.resolve("use item 1234567890 instead"), "changed"
+        )
+
+    def test_resolves_unknown_for_gibberish(self):
+        self.assertEqual(self.resolver.resolve("maybe later today"), "unknown")
+        self.assertEqual(self.resolver.resolve("hello"), "unknown")
+
+    def test_weak_confirm_with_extra_words(self):
+        self.assertEqual(self.resolver.resolve("yes please"), "confirm")
+        self.assertEqual(self.resolver.resolve("yeah sure"), "confirm")
+        self.assertEqual(self.resolver.resolve("ok go ahead"), "confirm")
+        self.assertEqual(self.resolver.resolve("yes, please proceed"), "confirm")
+
+    def test_negated_change_returns_deny(self):
+        self.assertEqual(
+            self.resolver.resolve("don't change anything"), "deny"
+        )
+        self.assertEqual(
+            self.resolver.resolve("do not change the address"), "deny"
+        )
+        self.assertEqual(
+            self.resolver.resolve("never mind, don't switch"), "deny"
+        )
+
+    def test_change_with_denial_word_returns_changed(self):
+        self.assertEqual(
+            self.resolver.resolve("no, change the address"), "changed"
+        )
+        self.assertEqual(
+            self.resolver.resolve("no I want to replace items"), "changed"
+        )
+
+    def test_chinese_confirm_terms(self):
+        self.assertEqual(self.resolver.resolve("好"), "confirm")
+        self.assertEqual(self.resolver.resolve("可以"), "confirm")
+        self.assertEqual(self.resolver.resolve("行"), "confirm")
+
+    def test_chinese_deny_terms(self):
+        self.assertEqual(self.resolver.resolve("不"), "deny")
+        self.assertEqual(self.resolver.resolve("不用"), "deny")
+        self.assertEqual(self.resolver.resolve("算了"), "deny")
+
+    def test_chinese_negated_change(self):
+        self.assertEqual(
+            self.resolver.resolve("不要改"), "deny"
+        )
+        self.assertEqual(
+            self.resolver.resolve("别改了"), "deny"
+        )
+
+    def test_chinese_change_request(self):
+        self.assertEqual(
+            self.resolver.resolve("换成另外一个"), "changed"
+        )
 
 
 class WriteGuardTests(unittest.TestCase):
