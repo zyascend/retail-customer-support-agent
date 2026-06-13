@@ -262,6 +262,17 @@ class FakeFailingProvider:
 class DisabledLLMProvider:
     """Sentinel used by tests and offline eval to force deterministic fallback."""
 
+    def chat_with_tools(
+        self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]
+    ) -> ToolCallResponse:
+        return ToolCallResponse(
+            assistant_content=(
+                "I'm sorry, the agent is running in offline mode. "
+                "Please configure an LLM provider to handle your request."
+            ),
+            finish_reason="stop",
+        )
+
 
 def build_default_provider(
     *,

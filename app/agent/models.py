@@ -118,6 +118,14 @@ class SessionState(BaseModel):
     audit_logs: List[Dict[str, Any]] = Field(default_factory=list)
     pending_action: Optional[PendingAction] = None
     termination_reason: Optional[str] = None
+
+    # ── Phase 4 temporary compat (Phase 5 removes these) ──
+    current_intent: str = "unknown"
+    slots: Dict[str, Any] = Field(default_factory=dict)
+    confirmation_status: str = "not_required"
+    policy_decision: Optional[PolicyDecision] = None
+    risk_level: str = "low"
+
     steps: List[AgentStep] = Field(default_factory=list)
 
     def add_step(self, node: str, **detail: Any) -> None:
