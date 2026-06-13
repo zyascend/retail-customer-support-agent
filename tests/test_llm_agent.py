@@ -359,3 +359,153 @@ class TestAgentLoopGuardBlock:
         blocked = [r for r in session.tool_results if r.status == "blocked"]
         assert len(blocked) == 1
         assert blocked[0].error == "non_pending_order_cannot_be_cancelled"
+
+
+class TestAgentLoopToolErrors:
+    """Tests: unknown tool, malformed args, missing args self-correction."""
+
+    def test_unknown_tool_self_correction(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+        from app.agent.models import ToolCallRequest
+
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_1",
+                            tool_name="hallucinated_tool",
+                            arguments={},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_2",
+                            tool_name="get_order_details",
+                            arguments={"order_id": "#W5918442"},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                ToolCallResponse(
+                    assistant_content="Found your order #W5918442.",
+                    finish_reason="stop",
+                ),
+            ]
+        )
+        loop = AgentLoop(
+            provider=provider,
+            gateway=_gateway(),
+            registry=_registry(),
+            context_builder=_context_builder(),
+        )
+        result = loop.run_turn(_session(), "Check order")
+
+        assert "W5918442" in result.assistant_message
+        assert result.turn.loop_iterations == 3
+
+    def test_malformed_arguments_self_correction(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+        from app.agent.models import ToolCallRequest
+
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_1",
+                            tool_name="get_order_details",
+                            arguments={},
+                            raw_arguments="{not-json",
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_2",
+                            tool_name="get_order_details",
+                            arguments={"order_id": "#W5918442"},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                ToolCallResponse(
+                    assistant_content="Found your order #W5918442.",
+                    finish_reason="stop",
+                ),
+            ]
+        )
+        loop = AgentLoop(
+            provider=provider,
+            gateway=_gateway(),
+            registry=_registry(),
+            context_builder=_context_builder(),
+        )
+        result = loop.run_turn(_session(), "Check order")
+
+        assert "W5918442" in result.assistant_message
+        assert result.turn.loop_iterations == 3
+
+    def test_missing_required_args_self_correction(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+        from app.agent.models import ToolCallRequest
+        from app.tools.retail_adapter import get_order_from_db
+
+        gateway = _gateway()
+        db = gateway.runtime.db
+        db_orders = db.get("orders", {})
+        pending_order_id = next(
+            (oid for oid, o in db_orders.items() if o.get("status") == "pending"),
+            None,
+        )
+        assert pending_order_id is not None, "Need a pending order in test DB"
+
+        order = get_order_from_db(db, pending_order_id)
+        user_id = order["user_id"]
+
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_1",
+                            tool_name="cancel_pending_order",
+                            arguments={},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_2",
+                            tool_name="cancel_pending_order",
+                            arguments={
+                                "order_id": pending_order_id,
+                                "reason": "no longer needed",
+                            },
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+            ]
+        )
+        loop = AgentLoop(
+            provider=provider,
+            gateway=gateway,
+            registry=_registry(),
+            context_builder=_context_builder(),
+        )
+        session = _session(
+            authenticated_user_id=user_id,
+            active_user_identity={"user_id": user_id, "name": "Test User"},
+        )
+        session.loaded_context.orders[pending_order_id] = order
+        result = loop.run_turn(session, "Cancel")
+
+        assert result.turn.loop_iterations >= 2
