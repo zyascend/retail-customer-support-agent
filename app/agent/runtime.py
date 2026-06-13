@@ -153,6 +153,11 @@ class AgentRuntime:
                 "tau3_retail_root": str(self.config.tau3_retail_root),
                 "retail_db_path": str(self.config.retail_db_path),
                 "prompts": prompt_metadata(),
+                "llm_responses": [
+                    resp
+                    for turn_ctx in self._turn_contexts
+                    for resp in turn_ctx.llm_responses
+                ],
             },
         )
         return AgentRunResult(
