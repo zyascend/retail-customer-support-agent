@@ -8,8 +8,10 @@ import pytest
 
 from app.analysis.tau_task_analyzer import (
     _resolve_tau3_retail_dir,
+    compute_task_space_stats,
     load_splits,
     load_tasks,
+    TaskSpaceStats,
 )
 
 
@@ -84,3 +86,38 @@ def test_resolve_tau3_retail_dir_raises_when_missing(tmp_path: Path):
     )
     with pytest.raises(FileNotFoundError, match="tau3 retail domain directory not found"):
         _resolve_tau3_retail_dir(config)
+
+
+def test_compute_task_space_stats_counts_correctly():
+    """compute_task_space_stats computes correct aggregate statistics."""
+    tasks = [
+        {
+            "id": 0,
+            "evaluation_criteria": {
+                "actions": [
+                    {"name": "get_order_details", "action_id": "0_0", "arguments": {}, "info": None},
+                    {"name": "cancel_pending_order", "action_id": "0_1", "arguments": {}, "info": None},
+                ],
+                "reward_basis": ["DB", "NL_ASSERTION"],
+            },
+        },
+        {
+            "id": 1,
+            "evaluation_criteria": {
+                "actions": [
+                    {"name": "get_order_details", "action_id": "1_0", "arguments": {}, "info": None},
+                ],
+                "reward_basis": ["DB"],
+            },
+        },
+    ]
+    splits = {"train": ["0"], "test": ["1"], "base": ["0", "1"]}
+    stats = compute_task_space_stats(tasks, splits)
+    assert stats.total_tasks == 2
+    assert stats.train_count == 1
+    assert stats.test_count == 1
+    assert stats.action_count_min == 1
+    assert stats.action_count_max == 2
+    assert stats.action_count_avg == 1.5
+    assert stats.tool_frequencies["get_order_details"] == 2
+    assert stats.tool_frequencies["cancel_pending_order"] == 1

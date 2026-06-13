@@ -88,3 +88,43 @@ def load_splits(retail_dir: Path) -> dict:
     splits_path = retail_dir / "split_tasks.json"
     with open(splits_path, encoding="utf-8") as f:
         return json.load(f)
+
+
+# ---------------------------------------------------------------------------
+# Statistics
+# ---------------------------------------------------------------------------
+
+
+def compute_task_space_stats(tasks: list[dict], splits: dict) -> TaskSpaceStats:
+    """Compute aggregate statistics across all tasks."""
+    total = len(tasks)
+    train_ids = set(splits.get("train", []))
+    test_ids = set(splits.get("test", []))
+
+    action_counts = []
+    tool_freq: dict[str, int] = {}
+    reward_basis_dist: dict[str, int] = {}
+
+    for t in tasks:
+        ec = t.get("evaluation_criteria", {})
+        actions = ec.get("actions", [])
+        action_counts.append(len(actions))
+        for action in actions:
+            name = action.get("name", "unknown")
+            tool_freq[name] = tool_freq.get(name, 0) + 1
+        rb = tuple(sorted(ec.get("reward_basis", [])))
+        key = " + ".join(rb) if rb else "none"
+        reward_basis_dist[key] = reward_basis_dist.get(key, 0) + 1
+
+    return TaskSpaceStats(
+        total_tasks=total,
+        train_count=sum(1 for t in tasks if str(t["id"]) in train_ids),
+        test_count=sum(1 for t in tasks if str(t["id"]) in test_ids),
+        reward_basis_distribution=reward_basis_dist,
+        action_count_min=min(action_counts) if action_counts else 0,
+        action_count_max=max(action_counts) if action_counts else 0,
+        action_count_avg=sum(action_counts) / len(action_counts) if action_counts else 0.0,
+        tool_frequencies=dict(
+            sorted(tool_freq.items(), key=lambda x: x[1], reverse=True)
+        ),
+    )
