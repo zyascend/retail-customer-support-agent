@@ -451,6 +451,88 @@ class TestAgentLoopToolErrors:
         assert "W5918442" in result.assistant_message
         assert result.turn.loop_iterations == 3
 
+class TestAgentLoopSafetyGuards:
+    """Tests: max iterations, consecutive failures, provider timeout."""
+
+    def test_max_iterations_exceeded(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+        from app.agent.models import ToolCallRequest
+
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id=f"call_{i}",
+                            tool_name="get_order_details",
+                            arguments={"order_id": "#W5918442"},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                )
+                for i in range(10)
+            ]
+        )
+        loop = AgentLoop(
+            provider=provider,
+            gateway=_gateway(),
+            registry=_registry(),
+            context_builder=_context_builder(),
+            max_iterations=3,
+        )
+        result = loop.run_turn(_session(), "Check order")
+
+        assert result.turn.loop_iterations == 3
+        assert result.turn.termination == "max_iterations"
+        assert "transfer" in result.assistant_message.lower() or "human" in result.assistant_message.lower()
+
+    def test_consecutive_failures_transfer(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+        from app.agent.models import ToolCallRequest
+
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id=f"call_{i}",
+                            tool_name="unknown_tool",
+                            arguments={},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                )
+                for i in range(5)
+            ]
+        )
+        loop = AgentLoop(
+            provider=provider,
+            gateway=_gateway(),
+            registry=_registry(),
+            context_builder=_context_builder(),
+            max_consecutive_failures=3,
+        )
+        result = loop.run_turn(_session(), "Help")
+
+        assert result.turn.termination == "consecutive_failures"
+        assert result.turn.consecutive_tool_failures >= 3
+
+    def test_provider_timeout_safe_failure(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+        from app.agent.providers import FakeFailingProvider
+
+        provider = FakeFailingProvider(error_type="timeout")
+        loop = AgentLoop(
+            provider=provider,
+            gateway=_gateway(),
+            registry=_registry(),
+            context_builder=_context_builder(),
+        )
+        result = loop.run_turn(_session(), "Hello")
+
+        assert result.turn.termination == "provider_timeout"
+        assert len(result.assistant_message) > 0
+
     def test_missing_required_args_self_correction(self) -> None:
         from app.agent.llm_agent import AgentLoop
         from app.agent.models import ToolCallRequest

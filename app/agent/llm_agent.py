@@ -48,7 +48,18 @@ class AgentLoop:
             turn.loop_iterations += 1
             t0 = time.perf_counter()
 
-            response = self._step_llm_reason(messages, tool_schemas)
+            try:
+                response = self._step_llm_reason(messages, tool_schemas)
+            except TimeoutError:
+                turn.termination = "provider_timeout"
+                turn.add_step("provider_timeout")
+                return AgentTurnResult(
+                    assistant_message=(
+                        "I'm having trouble processing your request right now. "
+                        "Please try again in a moment."
+                    ),
+                    turn=turn,
+                )
             turn.step_durations["llm_reason"] = round(
                 (time.perf_counter() - t0) * 1000, 1
             )
