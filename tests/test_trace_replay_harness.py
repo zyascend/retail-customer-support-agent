@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import MagicMock
 
 from app.agent.models import (
+    AgentTurnResult,
+    SessionState,
     ToolCallRecord,
     ToolCallRequest,
     ToolCallResponse,
@@ -122,3 +128,84 @@ class ScriptedToolGatewayTests(unittest.TestCase):
         self.assertEqual(len(gateway.calls), 1)
         self.assertEqual(gateway.calls[0]["tool_name"], "find_user_id_by_email")
         self.assertEqual(gateway.calls[0]["arguments"], {"email": "test@test.com"})
+
+
+class TraceReplayHarnessTests(unittest.TestCase):
+    def _make_trace(self, tmp: str, llm_responses: list[dict], tool_calls: list[dict]) -> Path:
+        trace = {
+            "run_id": "test-replay",
+            "llm_responses": llm_responses,
+            "tool_calls": tool_calls,
+            "messages": [],
+            "steps": [],
+        }
+        path = Path(tmp) / "trace.json"
+        path.write_text(json.dumps(trace))
+        return path
+
+    def _make_registry(self):
+        from app.tools.registry import ToolRegistry
+        registry = MagicMock(spec=ToolRegistry)
+        registry.tools = {"get_order_details", "find_user_id_by_email", "cancel_pending_order"}
+        registry.tool_schemas_for_llm.return_value = []
+        registry.tool_catalog_for_llm.return_value = ""
+        registry.required_args_for_tool.return_value = []
+        return registry
+
+    def _make_context_builder(self):
+        from app.agent.context_builder import ContextBuilder
+        builder = MagicMock(spec=ContextBuilder)
+        builder.build.return_value = "state_summary_placeholder"
+        builder.policy_text = ""
+        return builder
+
+    def test_replay_harness_loads_trace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            trace_path = self._make_trace(tmp, [], [])
+            registry = self._make_registry()
+            from app.agent.replay import TraceReplayHarness
+            harness = TraceReplayHarness(trace_path, registry)
+            self.assertIsNotNone(harness)
+
+    def test_replay_read_turn_smoke(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            responses = [
+                ToolCallResponse(
+                    assistant_content="I'll look up that order for you.",
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_1",
+                            tool_name="get_order_details",
+                            arguments={"order_id": "W123"},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ).model_dump(),
+                ToolCallResponse(
+                    assistant_content="Your order #W123 is pending.",
+                    finish_reason="stop",
+                ).model_dump(),
+            ]
+            tool_calls = [
+                ToolCallRecord(
+                    tool_name="get_order_details",
+                    arguments={"order_id": "W123"},
+                    tool_kind="read",
+                    status="success",
+                    observation={"order_id": "W123", "status": "pending"},
+                ).model_dump(),
+            ]
+            trace_path = self._make_trace(tmp, responses, tool_calls)
+            registry = self._make_registry()
+            context_builder = self._make_context_builder()
+
+            from app.agent.replay import TraceReplayHarness
+            harness = TraceReplayHarness(trace_path, registry)
+            session = SessionState(session_id="replay-test")
+            result = harness.replay(
+                session,
+                "What is the status of order #W123?",
+                context_builder=context_builder,
+            )
+            self.assertIsInstance(result, AgentTurnResult)
+            self.assertIn("pending", result.assistant_message)
