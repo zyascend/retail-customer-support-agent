@@ -21,4 +21,3 @@ def stable_json(value: Any) -> str:
 
 def stable_hash(value: Any) -> str:
     return sha256(stable_json(value).encode("utf-8")).hexdigest()
-

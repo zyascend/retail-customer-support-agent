@@ -12,6 +12,7 @@ class WriteActionSpec:
     WRITE_ACTION_REGISTRY below — no more hardcoded lists in guard, runtime,
     registry, or prompt files.
     """
+
     name: str
     display: str
     tool_name: str
@@ -123,8 +124,11 @@ def build_action_catalog_for_prompt() -> str:
         args_fmt = ", ".join(spec.required_args)
         lines.append(
             f"- {spec.name}: {args_fmt}"
-            + (f" (requires {spec.order_status_check} order)"
-               if spec.order_status_check else "")
+            + (
+                f" (requires {spec.order_status_check} order)"
+                if spec.order_status_check
+                else ""
+            )
         )
     return "\n".join(lines)
 

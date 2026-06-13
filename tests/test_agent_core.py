@@ -154,15 +154,14 @@ class AppConfigTests(unittest.TestCase):
             worktree.mkdir(parents=True)
             common_git.mkdir(parents=True)
             worktree_git.mkdir()
-            (worktree_git / "commondir").write_text(
-                str(common_git), encoding="utf-8"
-            )
+            (worktree_git / "commondir").write_text(str(common_git), encoding="utf-8")
             (Path(tmp) / "repo" / ".env").write_text(
                 "DEEPSEEK_API_KEY=from-main-env\n", encoding="utf-8"
             )
 
-            with patch.dict(os.environ, {}, clear=True), patch(
-                "app.config.Path.cwd", return_value=worktree
+            with (
+                patch.dict(os.environ, {}, clear=True),
+                patch("app.config.Path.cwd", return_value=worktree),
             ):
                 config = resolve_config()
 
@@ -260,23 +259,13 @@ class ConfirmationResolverTests(unittest.TestCase):
         self.assertEqual(self.resolver.resolve("yes, please proceed"), "confirm")
 
     def test_negated_change_returns_deny(self):
-        self.assertEqual(
-            self.resolver.resolve("don't change anything"), "deny"
-        )
-        self.assertEqual(
-            self.resolver.resolve("do not change the address"), "deny"
-        )
-        self.assertEqual(
-            self.resolver.resolve("never mind, don't switch"), "deny"
-        )
+        self.assertEqual(self.resolver.resolve("don't change anything"), "deny")
+        self.assertEqual(self.resolver.resolve("do not change the address"), "deny")
+        self.assertEqual(self.resolver.resolve("never mind, don't switch"), "deny")
 
     def test_change_with_denial_word_returns_changed(self):
-        self.assertEqual(
-            self.resolver.resolve("no, change the address"), "changed"
-        )
-        self.assertEqual(
-            self.resolver.resolve("no I want to replace items"), "changed"
-        )
+        self.assertEqual(self.resolver.resolve("no, change the address"), "changed")
+        self.assertEqual(self.resolver.resolve("no I want to replace items"), "changed")
 
     def test_chinese_confirm_terms(self):
         self.assertEqual(self.resolver.resolve("好"), "confirm")
@@ -289,17 +278,11 @@ class ConfirmationResolverTests(unittest.TestCase):
         self.assertEqual(self.resolver.resolve("算了"), "deny")
 
     def test_chinese_negated_change(self):
-        self.assertEqual(
-            self.resolver.resolve("不要改"), "deny"
-        )
-        self.assertEqual(
-            self.resolver.resolve("别改了"), "deny"
-        )
+        self.assertEqual(self.resolver.resolve("不要改"), "deny")
+        self.assertEqual(self.resolver.resolve("别改了"), "deny")
 
     def test_chinese_change_request(self):
-        self.assertEqual(
-            self.resolver.resolve("换成另外一个"), "changed"
-        )
+        self.assertEqual(self.resolver.resolve("换成另外一个"), "changed")
 
 
 class WriteGuardTests(unittest.TestCase):
@@ -452,7 +435,9 @@ class WriteGuardTests(unittest.TestCase):
         self.assertEqual(result.block_reason, "payment_method_not_owned")
 
     def test_blocks_exchange_across_products(self):
-        state = ConversationState(session_id="test", authenticated_user_id=DELIVERED_USER)
+        state = ConversationState(
+            session_id="test", authenticated_user_id=DELIVERED_USER
+        )
         state.loaded_context.orders[DELIVERED_ORDER] = {"order_id": DELIVERED_ORDER}
 
         result = self.guard.check(
@@ -747,7 +732,9 @@ class AgentRuntimePhase5Tests(unittest.TestCase):
 
             self.assertIn("confirm", response.lower())
             self.assertEqual(state.current_intent, "modify_order_items")
-            self.assertEqual(state.pending_action.action_name, "modify_pending_order_items")
+            self.assertEqual(
+                state.pending_action.action_name, "modify_pending_order_items"
+            )
 
     def test_plans_modify_order_payment(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -764,7 +751,9 @@ class AgentRuntimePhase5Tests(unittest.TestCase):
 
             self.assertIn("confirm", response.lower())
             self.assertEqual(state.current_intent, "modify_order_payment")
-            self.assertEqual(state.pending_action.action_name, "modify_pending_order_payment")
+            self.assertEqual(
+                state.pending_action.action_name, "modify_pending_order_payment"
+            )
 
     def test_plans_modify_user_default_address(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -832,13 +821,15 @@ class DualTrackMergeTests(unittest.TestCase):
     def test_any_ask_returns_ask(self):
         self.assertEqual(
             self.runtime._merge_policy_decisions(
-                code_decision="allow", llm_decision="ask_clarification",
+                code_decision="allow",
+                llm_decision="ask_clarification",
             ),
             "ask_clarification",
         )
         self.assertEqual(
             self.runtime._merge_policy_decisions(
-                code_decision="ask_clarification", llm_decision="allow",
+                code_decision="ask_clarification",
+                llm_decision="allow",
             ),
             "ask_clarification",
         )
@@ -846,20 +837,23 @@ class DualTrackMergeTests(unittest.TestCase):
     def test_transfer_requires_both_agree(self):
         self.assertEqual(
             self.runtime._merge_policy_decisions(
-                code_decision="transfer", llm_decision="transfer",
+                code_decision="transfer",
+                llm_decision="transfer",
             ),
             "transfer",
         )
         self.assertEqual(
             self.runtime._merge_policy_decisions(
-                code_decision="transfer", llm_decision="allow",
+                code_decision="transfer",
+                llm_decision="allow",
             ),
             "ask_clarification",
         )
         # Code transfer (unsupported request) overrides LLM deny
         self.assertEqual(
             self.runtime._merge_policy_decisions(
-                code_decision="transfer", llm_decision="deny",
+                code_decision="transfer",
+                llm_decision="deny",
             ),
             "transfer",
         )
@@ -873,6 +867,7 @@ class DualTrackMergeTests(unittest.TestCase):
 
     def test_code_missing_slots_detects_gaps(self):
         from app.agent.models import ConversationState
+
         state = ConversationState(session_id="test")
         state.current_intent = "return_items"
         state.slots = {"order_id": "#W1234567"}
@@ -884,46 +879,60 @@ class DualTrackMergeTests(unittest.TestCase):
 class ActionSpecsTests(unittest.TestCase):
     def test_registry_has_seven_actions(self):
         from app.agent.action_specs import WRITE_ACTION_REGISTRY
+
         self.assertEqual(len(WRITE_ACTION_REGISTRY), 7)
 
     def test_every_spec_has_valid_tool_name(self):
         from app.agent.action_specs import WRITE_ACTION_REGISTRY
+        from app.config import resolve_config
         from app.tools.registry import ToolRegistry
         from app.tools.retail_adapter import RetailAdapter
-        from app.config import resolve_config
+
         runtime = RetailAdapter(resolve_config()).create_runtime()
         registry = ToolRegistry(runtime.tools)
         tool_names = set(registry.tools.keys())
         for spec in WRITE_ACTION_REGISTRY:
-            self.assertIn(spec.tool_name, tool_names,
-                          f"{spec.tool_name} not found in tool registry")
+            self.assertIn(
+                spec.tool_name,
+                tool_names,
+                f"{spec.tool_name} not found in tool registry",
+            )
 
     def test_lookups_cover_all_specs(self):
         from app.agent.action_specs import (
-            WRITE_ACTION_BY_NAME,
             WRITE_ACTION_BY_INTENT,
+            WRITE_ACTION_BY_NAME,
             WRITE_ACTION_REGISTRY,
         )
+
         self.assertEqual(len(WRITE_ACTION_BY_NAME), len(WRITE_ACTION_REGISTRY))
         self.assertEqual(len(WRITE_ACTION_BY_INTENT), len(WRITE_ACTION_REGISTRY))
 
     def test_intent_to_name_mapping_is_consistent(self):
         from app.agent.action_specs import WRITE_ACTION_BY_INTENT, WRITE_ACTION_REGISTRY
+
         for spec in WRITE_ACTION_REGISTRY:
             mapped = WRITE_ACTION_BY_INTENT[spec.intent]
             self.assertEqual(mapped.name, spec.name)
 
     def test_required_slots_subset_of_known_slot_keys(self):
         from app.agent.action_specs import WRITE_ACTION_REGISTRY
-        known_slots = {"order_id", "address", "item_ids", "new_item_ids",
-                       "payment_method_id", "reason"}
+
+        known_slots = {
+            "order_id",
+            "address",
+            "item_ids",
+            "new_item_ids",
+            "payment_method_id",
+            "reason",
+        }
         for spec in WRITE_ACTION_REGISTRY:
             for slot in spec.required_slots:
-                self.assertIn(slot, known_slots,
-                              f"{spec.name}: unknown slot '{slot}'")
+                self.assertIn(slot, known_slots, f"{spec.name}: unknown slot '{slot}'")
 
     def test_catalog_for_prompt_includes_all_actions(self):
         from app.agent.action_specs import build_action_catalog_for_prompt
+
         catalog = build_action_catalog_for_prompt()
         self.assertIn("cancel_pending_order", catalog)
         self.assertIn("exchange_delivered_order_items", catalog)
@@ -931,12 +940,14 @@ class ActionSpecsTests(unittest.TestCase):
 
     def test_params_for_llm_returns_args_for_write_tools(self):
         from app.agent.action_specs import tool_params_for_llm
+
         result = tool_params_for_llm("cancel_pending_order")
         self.assertIn("order_id", result)
         self.assertIn("reason", result)
 
     def test_params_for_llm_falls_back_for_unknown_tool(self):
         from app.agent.action_specs import tool_params_for_llm
+
         result = tool_params_for_llm("get_order_details")
         self.assertEqual(result, "(see function signature)")
 

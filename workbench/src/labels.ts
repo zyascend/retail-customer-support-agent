@@ -146,3 +146,19 @@ export function errorLabel(code: string | null | undefined): string {
   }
   return ERROR_LABELS[code] || code;
 }
+
+const GROUP_LABELS: Record<string, string> = {
+  auth: "身份认证",
+  success: "成功写操作",
+  blocked: "写保护阻止",
+  confirmation: "用户确认流程",
+  transfer: "边界能力",
+};
+
+export function groupLabel(key: string): string {
+  return GROUP_LABELS[key] || key;
+}
+
+export function weightLabel(weight: "primary" | "secondary"): string {
+  return weight === "primary" ? "关键" : "辅助";
+}

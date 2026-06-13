@@ -96,4 +96,3 @@ def _resolve_output_dir(raw_output_dir: Optional[str], report: dict) -> Path:
 
 if __name__ == "__main__":
     raise SystemExit(dashboard_main())
-

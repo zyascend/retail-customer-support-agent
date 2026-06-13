@@ -159,7 +159,7 @@ export function App() {
       <header className="topbar">
         <div>
           <h1>零售客服工作台</h1>
-          <p>Phase 4 单会话运营演示面板</p>
+          <p>零售客服 Agent 演示面板</p>
         </div>
         <div className="topbar-status">
           <span className="case-label">{selectedCase?.title || "正在加载案例"}</span>

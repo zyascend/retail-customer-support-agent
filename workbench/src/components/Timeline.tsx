@@ -31,7 +31,11 @@ export function Timeline({
               <li key={event.id}>
                 <button
                   aria-current={isSelected ? "true" : undefined}
-                  className={isSelected ? "timeline-row selected" : "timeline-row"}
+                  className={
+                    "timeline-row" +
+                    (isSelected ? " selected" : "") +
+                    (event.weight === "secondary" ? " weight-secondary" : "")
+                  }
                   onClick={() => onSelectEvent(event.id)}
                   type="button"
                 >

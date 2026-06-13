@@ -60,4 +60,3 @@ def _wrap(
 def _pairs(items: Iterable[str]) -> Iterable[tuple[str, str]]:
     sequence = list(items)
     return zip(sequence, sequence[1:])
-

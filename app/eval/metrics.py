@@ -83,9 +83,7 @@ def compute_metrics(results: Iterable[MetricResult]) -> Dict[str, Any]:
         result for result in result_list if result.db_accuracy_passed is not None
     ]
     total_tool_calls = sum(result.tool_call_count for result in result_list)
-    successful_tool_calls = sum(
-        result.successful_tool_calls for result in result_list
-    )
+    successful_tool_calls = sum(result.successful_tool_calls for result in result_list)
     failed_tool_calls = sum(result.failed_tool_calls for result in result_list)
     blocked_tool_calls = sum(result.blocked_tool_calls for result in result_list)
     guard_blocks = sum(result.guard_blocks for result in result_list)
@@ -110,9 +108,7 @@ def compute_metrics(results: Iterable[MetricResult]) -> Dict[str, Any]:
         "mutation_error_rate": _rate(mutation_errors, total),
         "db_changed_rate": _rate(db_changed_count, total),
         "average_turns": _average_turns(result_list),
-        "average_latency_seconds": round(sum(durations) / total, 3)
-        if total
-        else 0.0,
+        "average_latency_seconds": round(sum(durations) / total, 3) if total else 0.0,
         "result_count": total,
         "passed_count": passed,
         "tool_call_count": total_tool_calls,
@@ -126,10 +122,7 @@ def compute_metrics(results: Iterable[MetricResult]) -> Dict[str, Any]:
 
 def build_failure_analysis(results: Iterable[MetricResult]) -> Dict[str, Any]:
     result_list = list(results)
-    labels = Counter(
-        result.failure_label or "passed"
-        for result in result_list
-    )
+    labels = Counter(result.failure_label or "passed" for result in result_list)
     category_counts: Dict[str, Counter[str]] = defaultdict(Counter)
     for result in result_list:
         category_counts[result.category][result.failure_label or "passed"] += 1
@@ -313,7 +306,9 @@ def _pass_k(results: List[MetricResult]) -> float:
     for result in results:
         by_case[result.case_id].append(result)
     passing_cases = sum(
-        1 for case_results in by_case.values() if all(result.passed for result in case_results)
+        1
+        for case_results in by_case.values()
+        if all(result.passed for result in case_results)
     )
     return _rate(passing_cases, len(by_case))
 
@@ -332,6 +327,8 @@ def _rate(numerator: int, denominator: int) -> float:
 
 
 def _numeric_delta(baseline: Any, candidate: Any) -> Optional[float]:
-    if not isinstance(baseline, (int, float)) or not isinstance(candidate, (int, float)):
+    if not isinstance(baseline, (int, float)) or not isinstance(
+        candidate, (int, float)
+    ):
         return None
     return candidate - baseline

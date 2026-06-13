@@ -13,9 +13,7 @@ except ModuleNotFoundError:
 
 def _extract_json_block(text: str) -> str:
     """Extract JSON from LLM output, tolerating markdown fences."""
-    match = _re.search(
-        r'```(?:json)?\s*\n?(.*?)\n?```', text, _re.DOTALL
-    )
+    match = _re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, _re.DOTALL)
     if match:
         return match.group(1).strip()
     return text.strip()
@@ -24,11 +22,9 @@ def _extract_json_block(text: str) -> str:
 class LLMProvider(Protocol):
     def json(
         self, messages: List[Dict[str, str]], schema: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        ...
+    ) -> Dict[str, Any]: ...
 
-    def chat(self, messages: List[Dict[str, str]]) -> str:
-        ...
+    def chat(self, messages: List[Dict[str, str]]) -> str: ...
 
 
 @dataclass

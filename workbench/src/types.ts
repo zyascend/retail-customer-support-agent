@@ -16,11 +16,19 @@ export interface WorkbenchCase {
   expected_assistant_contains: string | null;
 }
 
+export interface CaseGroup {
+  key: string;
+  label: string;
+  emoji: string;
+  case_ids: string[];
+}
+
 export interface CaseCatalog {
   subset: string;
   demo_case_ids: string[];
   demo_cases: WorkbenchCase[];
   all_cases: WorkbenchCase[];
+  groups: CaseGroup[];
 }
 
 export interface WorkbenchConfig {
@@ -39,6 +47,7 @@ export interface TimelineEvent {
   summary: string | null;
   detail: unknown;
   source_index: number;
+  weight: "primary" | "secondary";
 }
 
 export interface WorkbenchError {

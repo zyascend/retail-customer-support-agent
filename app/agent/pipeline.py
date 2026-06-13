@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict
 
 from app.agent.models import ConversationState, PolicyDecision
 
@@ -59,8 +59,7 @@ def conversation_gate(
         else:
             assistant_fn(
                 state,
-                "Please confirm yes or no: "
-                f"{state.pending_action.user_facing_summary}",
+                f"Please confirm yes or no: {state.pending_action.user_facing_summary}",
             )
         return
     state.add_step(
@@ -133,8 +132,19 @@ def intent_and_slot_extractor(
     lowered = content.lower()
     # Preserve existing intent when message is a bare confirmation/denial
     bare_response = lowered.strip() in {
-        "yes", "no", "confirm", "ok", "y", "n", "go ahead",
-        "proceed", "sure", "yeah", "yep", "nope", "cancel",
+        "yes",
+        "no",
+        "confirm",
+        "ok",
+        "y",
+        "n",
+        "go ahead",
+        "proceed",
+        "sure",
+        "yeah",
+        "yep",
+        "nope",
+        "cancel",
     }
     if bare_response and state.current_intent and state.current_intent != "unknown":
         pass  # keep prior intent rather than resetting to unknown
@@ -205,8 +215,7 @@ def intent_and_slot_extractor(
         code_slots["new_item_ids"] = [new_item_id]
         if "item_ids" in code_slots:
             code_slots["item_ids"] = [
-                iid for iid in code_slots["item_ids"]
-                if iid != new_item_id
+                iid for iid in code_slots["item_ids"] if iid != new_item_id
             ]
 
     state.slots = merge_slots_fn(
@@ -295,9 +304,7 @@ def policy_reasoner(
 
     explanation = ""
     if llm_payload and final_decision == "deny":
-        explanation = clean_llm_scalar_fn(
-            llm_payload.get("explanation_for_user")
-        ) or ""
+        explanation = clean_llm_scalar_fn(llm_payload.get("explanation_for_user")) or ""
 
     state.policy_decision = PolicyDecision(
         decision=final_decision,
@@ -318,9 +325,7 @@ def policy_reasoner(
         ),
         explanation_for_user=explanation,
         internal_reasoning_summary=(
-            llm_payload.get("internal_reasoning_summary", "")
-            if llm_payload
-            else ""
+            llm_payload.get("internal_reasoning_summary", "") if llm_payload else ""
         ),
     )
     state.add_step(
@@ -412,9 +417,7 @@ def tool_executor(state: ConversationState, content: str) -> None:
 
 
 def observation_reducer(state: ConversationState, content: str) -> None:
-    state.add_step(
-        "observation_reducer", tool_result_count=len(state.tool_results)
-    )
+    state.add_step("observation_reducer", tool_result_count=len(state.tool_results))
 
 
 def response_generator(

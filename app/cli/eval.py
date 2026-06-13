@@ -117,10 +117,7 @@ def _print_summary(summary: object) -> None:
     print(f"pass^1: {summary.metrics['pass_1']:.4f}")
     print(f"pass^k: {summary.metrics['pass_k']:.4f}")
     print(f"db_accuracy: {summary.metrics['db_accuracy']:.4f}")
-    print(
-        f"tool_call_success_rate: "
-        f"{summary.metrics['tool_call_success_rate']:.4f}"
-    )
+    print(f"tool_call_success_rate: {summary.metrics['tool_call_success_rate']:.4f}")
     print(f"mutation_error_rate: {summary.metrics['mutation_error_rate']:.4f}")
     labels = summary.failure_analysis["failure_label_counts"]
     if labels:

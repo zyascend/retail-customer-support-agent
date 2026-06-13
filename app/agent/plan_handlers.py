@@ -55,8 +55,7 @@ def plan_address_change(
         state,
         "modify_pending_order_address",
         args,
-        f"Modify the shipping address for order {order_id}. "
-        "Please confirm yes or no.",
+        f"Modify the shipping address for order {order_id}. Please confirm yes or no.",
     )
 
 

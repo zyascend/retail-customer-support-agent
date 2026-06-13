@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from app.agent.action_specs import WRITE_ACTION_NAMES
 from app.agent.models import ConversationState, ToolCall
 from app.ops.serialization import stable_hash
 from app.tools.retail_adapter import (
@@ -11,8 +12,6 @@ from app.tools.retail_adapter import (
     get_order_from_db,
     get_user_from_db,
 )
-
-from app.agent.action_specs import WRITE_ACTION_NAMES
 
 WRITE_ACTIONS = WRITE_ACTION_NAMES
 DEFERRED_WRITE_ACTIONS: set[str] = set()
@@ -214,7 +213,9 @@ class WriteActionGuard:
         if payment_method_id == current_payment_method_id:
             return "same_payment_method"
         if payment_method.get("source") == "gift_card":
-            amount = sum(float(item.get("price", 0.0)) for item in order.get("items", []))
+            amount = sum(
+                float(item.get("price", 0.0)) for item in order.get("items", [])
+            )
             if float(payment_method.get("balance", 0.0)) < amount:
                 return "gift_card_balance_insufficient"
         return None
@@ -268,21 +269,16 @@ class WriteActionGuard:
             )
         if action.tool_name == "modify_pending_order_address":
             return (
-                "Modify shipping address for order "
-                f"{action.arguments.get('order_id')}."
+                f"Modify shipping address for order {action.arguments.get('order_id')}."
             )
         if action.tool_name == "return_delivered_order_items":
             return f"Request return for order {action.arguments.get('order_id')}."
         if action.tool_name == "exchange_delivered_order_items":
             return f"Request exchange for order {action.arguments.get('order_id')}."
         if action.tool_name == "modify_pending_order_items":
-            return (
-                f"Modify items for order {action.arguments.get('order_id')}."
-            )
+            return f"Modify items for order {action.arguments.get('order_id')}."
         if action.tool_name == "modify_pending_order_payment":
-            return (
-                f"Modify payment for order {action.arguments.get('order_id')}."
-            )
+            return f"Modify payment for order {action.arguments.get('order_id')}."
         if action.tool_name == "modify_user_address":
             return f"Modify default address for user {action.arguments.get('user_id')}."
         return action.tool_name

@@ -139,8 +139,7 @@ CURATED_MVP_CASES: List[EvalCase] = [
             {
                 "role": "user",
                 "content": (
-                    "My email is sofia.rossi2645@example.com. "
-                    "I want a human agent."
+                    "My email is sofia.rossi2645@example.com. I want a human agent."
                 ),
             }
         ],

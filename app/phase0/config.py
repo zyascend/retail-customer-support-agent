@@ -50,9 +50,7 @@ def resolve_config(
     historical_result: Optional[str] = None,
 ) -> Phase0Config:
     root = Path(
-        tau2_bench_root
-        or os.getenv("TAU2_BENCH_ROOT")
-        or str(DEFAULT_TAU2_BENCH_ROOT)
+        tau2_bench_root or os.getenv("TAU2_BENCH_ROOT") or str(DEFAULT_TAU2_BENCH_ROOT)
     ).expanduser()
     data_dir = Path(
         tau2_data_dir or os.getenv("TAU2_DATA_DIR") or str(root / "data" / "tau2")

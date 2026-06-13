@@ -78,6 +78,13 @@ def snapshot_from_state(
     }
 
 
+_PRIMARY_STEPS = {"intent_and_slot_extractor", "policy_reasoner", "write_action_guard"}
+
+
+def _step_weight(node: str) -> str:
+    return "primary" if node in _PRIMARY_STEPS else "secondary"
+
+
 def build_timeline(state: ConversationState) -> List[Dict[str, Any]]:
     timeline: List[tuple[tuple[int, int, int], Dict[str, Any]]] = []
 
@@ -115,6 +122,7 @@ def build_timeline(state: ConversationState) -> List[Dict[str, Any]]:
                     summary=_summarize_detail(detail),
                     detail=detail,
                     source_index=index,
+                    weight=_step_weight(step.node),
                 ),
             )
         )
@@ -122,13 +130,10 @@ def build_timeline(state: ConversationState) -> List[Dict[str, Any]]:
             state.tool_results
         ):
             record = state.tool_results[tool_index]
-            if (
-                (step.node == "write_action_guard" and record.status == "blocked")
-                or (
-                    step.node == "tool_executor"
-                    and record.status != "blocked"
-                    and "tool_name" in detail
-                )
+            if (step.node == "write_action_guard" and record.status == "blocked") or (
+                step.node == "tool_executor"
+                and record.status != "blocked"
+                and "tool_name" in detail
             ):
                 timeline.append(
                     (
@@ -167,6 +172,7 @@ def build_timeline(state: ConversationState) -> List[Dict[str, Any]]:
                     summary=_summarize_detail(detail),
                     detail=detail,
                     source_index=index,
+                    weight="primary",
                 ),
             )
         )
@@ -240,6 +246,7 @@ def _timeline_event(
     summary: Optional[str],
     detail: Any,
     source_index: int,
+    weight: str = "secondary",
 ) -> Dict[str, Any]:
     return {
         "id": event_id,
@@ -250,6 +257,7 @@ def _timeline_event(
         "summary": summary,
         "detail": detail,
         "source_index": source_index,
+        "weight": weight,
     }
 
 
@@ -265,10 +273,13 @@ def _tool_timeline_event(record: Any, index: int) -> Dict[str, Any]:
         or _summarize_detail(detail.get("observation")),
         detail=detail,
         source_index=index,
+        weight="primary",
     )
 
 
-def _message_sort_key(messages_so_far: List[Any], role: str, index: int) -> tuple[int, int, int]:
+def _message_sort_key(
+    messages_so_far: List[Any], role: str, index: int
+) -> tuple[int, int, int]:
     turn_index = sum(1 for message in messages_so_far if message.role == "user") - 1
     if turn_index < 0:
         turn_index = 0

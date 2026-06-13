@@ -53,15 +53,9 @@ def pending_prompt(action_name: str, arguments: Dict[str, Any]) -> str:
             "Please confirm yes or no."
         )
     if action_name == "modify_pending_order_items":
-        return (
-            f"Replace items in order {order_id}. "
-            "Please confirm yes or no."
-        )
+        return f"Replace items in order {order_id}. Please confirm yes or no."
     if action_name == "modify_pending_order_payment":
-        return (
-            f"Change payment for order {order_id}. "
-            "Please confirm yes or no."
-        )
+        return f"Change payment for order {order_id}. Please confirm yes or no."
     if action_name == "modify_user_address":
         return "Modify your default address. Please confirm yes or no."
     if action_name == "return_delivered_order_items":
@@ -94,8 +88,7 @@ def merge_slots(
         if key == "address" and isinstance(value, dict):
             cleaned_address = {
                 k: clean_llm_scalar_fn(value.get(k)) or ""
-                for k in ("address1", "address2", "city", "state",
-                          "country", "zip")
+                for k in ("address1", "address2", "city", "state", "country", "zip")
             }
             if cleaned_address.get("address1") and cleaned_address.get("zip"):
                 merged["address"] = cleaned_address

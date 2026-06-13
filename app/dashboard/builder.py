@@ -190,7 +190,9 @@ class DashboardBuilder:
                 {
                     "index": len(timeline),
                     "source": "write_audit",
-                    "label": entry.get("action_name") or entry.get("action") or "write_audit",
+                    "label": entry.get("action_name")
+                    or entry.get("action")
+                    or "write_audit",
                     "status": "ok",
                     "detail": entry,
                     "write_audit_index": index,
@@ -231,7 +233,7 @@ def render_dashboard_html(data: Dict[str, Any]) -> str:
     return DashboardBuilder().render_html(data)
 
 
-DASHBOARD_TEMPLATE = r'''<!doctype html>
+DASHBOARD_TEMPLATE = r"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -579,4 +581,4 @@ DASHBOARD_TEMPLATE = r'''<!doctype html>
   </script>
 </body>
 </html>
-'''
+"""

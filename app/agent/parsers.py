@@ -33,24 +33,25 @@ SUPPORTED_INTENTS = {
 
 # ── Pure parser / utility functions ──
 
+
 def infer_intent(lowered: str) -> str:
     # Policy questions are lookups, not operations
-    if re.search(r'\b(return|exchange|cancel|refund)\s+policy\b', lowered):
+    if re.search(r"\b(return|exchange|cancel|refund)\s+policy\b", lowered):
         return "lookup"
 
     # Explicit human transfer request — multiple patterns
     # Pattern 1: verb + human/agent/representative
     if re.search(
-        r'\b(?:talk|speak|connect|transfer|want|need|get|like|'
-        r'speak)\s+(?:to|with|a|an)?\s*'
-        r'(?:human|agent|representative|person)\b',
+        r"\b(?:talk|speak|connect|transfer|want|need|get|like|"
+        r"speak)\s+(?:to|with|a|an)?\s*"
+        r"(?:human|agent|representative|person)\b",
         lowered,
     ):
         return "transfer"
     # Pattern 2: standalone unambiguous transfer signals
     if re.search(
-        r'\b(?:customer\s+service|support\s+agent|real\s+person'
-        r'|human\s+agent|human\s+representative)\b',
+        r"\b(?:customer\s+service|support\s+agent|real\s+person"
+        r"|human\s+agent|human\s+representative)\b",
         lowered,
     ):
         return "transfer"
@@ -59,44 +60,45 @@ def infer_intent(lowered: str) -> str:
         return "transfer"
 
     # Cancel — must mention order
-    if re.search(r'\bcancel\b', lowered):
-        if re.search(r'\border\b', lowered) or ORDER_RE.search(lowered):
+    if re.search(r"\bcancel\b", lowered):
+        if re.search(r"\border\b", lowered) or ORDER_RE.search(lowered):
             return "cancel_order"
         return "cancel_order"
 
     # Exchange — exclude "exchange rate" and "exchange policy"
-    if re.search(r'\bexchange\b', lowered):
-        if not re.search(r'\bexchange\s+(?:rate|policy)\b', lowered):
-            if re.search(r'\bitems?\b', lowered) or ITEM_RE.search(lowered):
+    if re.search(r"\bexchange\b", lowered):
+        if not re.search(r"\bexchange\s+(?:rate|policy)\b", lowered):
+            if re.search(r"\bitems?\b", lowered) or ITEM_RE.search(lowered):
                 return "exchange_items"
             return "exchange_items"
 
     # Return — must mention item or order, not "return policy"
-    if re.search(r'\breturn\b', lowered):
-        if re.search(r'\breturn\s+policy\b', lowered):
+    if re.search(r"\breturn\b", lowered):
+        if re.search(r"\breturn\s+policy\b", lowered):
             pass
-        elif re.search(r'\bitems?\b', lowered) or ORDER_RE.search(lowered):
+        elif re.search(r"\bitems?\b", lowered) or ORDER_RE.search(lowered):
             return "return_items"
 
     # Payment modification
-    if "payment" in lowered and re.search(r'\b(change|modify|update|switch)\b',
-                                           lowered):
+    if "payment" in lowered and re.search(
+        r"\b(change|modify|update|switch)\b", lowered
+    ):
         return "modify_order_payment"
 
     # Item modification (pending order)
-    if re.search(r'\b(items?|products?)\b', lowered) and re.search(
-        r'\b(change|modify|replace|switch|swap)\b', lowered):
+    if re.search(r"\b(items?|products?)\b", lowered) and re.search(
+        r"\b(change|modify|replace|switch|swap)\b", lowered
+    ):
         return "modify_order_items"
 
     # User default address
-    if re.search(r'\bmy\b.*\bdefault\b.*\baddress\b', lowered):
+    if re.search(r"\bmy\b.*\bdefault\b.*\baddress\b", lowered):
         return "modify_user_address"
     if "default address" in lowered:
         return "modify_user_address"
 
     # Order address modification
-    if "address" in lowered and re.search(r'\b(change|modify|update)\b',
-                                           lowered):
+    if "address" in lowered and re.search(r"\b(change|modify|update)\b", lowered):
         if "my" in lowered and "default" in lowered:
             return "modify_user_address"
         return "modify_order_address"
@@ -112,10 +114,7 @@ def parse_address(content: str) -> Optional[Dict[str, str]]:
     marker = re.search(r"(?:default )?address to\s+(.+)$", content, re.IGNORECASE)
     if not marker:
         return None
-    parts = [
-        part.strip().rstrip(".")
-        for part in marker.group(1).split(",")
-    ]
+    parts = [part.strip().rstrip(".") for part in marker.group(1).split(",")]
     if len(parts) == 5:
         address1, city, state, country, zip_code = parts
         address2 = ""

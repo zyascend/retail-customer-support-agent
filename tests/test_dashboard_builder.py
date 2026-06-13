@@ -25,7 +25,9 @@ class DashboardBuilderTests(unittest.TestCase):
                                 "created_at": "2026-01-01T00:00:00Z",
                             }
                         ],
-                        "steps": [{"node": "receive_message", "status": "ok", "detail": {}}],
+                        "steps": [
+                            {"node": "receive_message", "status": "ok", "detail": {}}
+                        ],
                         "tool_calls": [
                             {
                                 "tool_name": "modify_address",
@@ -52,7 +54,10 @@ class DashboardBuilderTests(unittest.TestCase):
         self.assertEqual(data["report"]["case_count"], 1)
         self.assertEqual(len(data["cases"][0]["trace"]["timeline"]), 5)
         self.assertEqual(data["cases"][0]["trace"]["timeline"][0]["source"], "message")
-        self.assertEqual(data["cases"][0]["trace"]["messages"][0]["content"], "Email is [redacted-email] and phone [redacted-phone].")
+        self.assertEqual(
+            data["cases"][0]["trace"]["messages"][0]["content"],
+            "Email is [redacted-email] and phone [redacted-phone].",
+        )
         self.assertEqual(
             data["cases"][0]["trace"]["tool_calls"][0]["arguments"]["address"],
             "[redacted-address]",
@@ -66,7 +71,9 @@ class DashboardBuilderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             trace_path = tmp_path / "trace.json"
-            trace_path.write_text(json.dumps({"messages": [], "steps": []}), encoding="utf-8")
+            trace_path.write_text(
+                json.dumps({"messages": [], "steps": []}), encoding="utf-8"
+            )
             report_path = tmp_path / "report.json"
             report_path.write_text(json.dumps(_report(trace_path)), encoding="utf-8")
             output_dir = tmp_path / "dashboard"
@@ -76,7 +83,9 @@ class DashboardBuilderTests(unittest.TestCase):
                     [str(report_path), "--output-dir", str(output_dir)]
                 )
 
-            data = json.loads((output_dir / "dashboard-data.json").read_text(encoding="utf-8"))
+            data = json.loads(
+                (output_dir / "dashboard-data.json").read_text(encoding="utf-8")
+            )
             html = (output_dir / "index.html").read_text(encoding="utf-8")
 
         self.assertEqual(exit_code, 0)

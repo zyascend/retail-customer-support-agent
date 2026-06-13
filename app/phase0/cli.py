@@ -60,7 +60,9 @@ def report_main(argv: Optional[list[str]] = None) -> int:
 
 
 def smoke_main(argv: Optional[list[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="Run an optional tau2 live smoke test.")
+    parser = argparse.ArgumentParser(
+        description="Run an optional tau2 live smoke test."
+    )
     _add_common_args(parser)
     parser.add_argument("--domain", default="retail")
     parser.add_argument("--num-tasks", type=int, default=1)
@@ -155,7 +157,9 @@ def _print_report(output: Dict[str, Any]) -> None:
     print(f"avg_agent_cost: {_format_optional(output['average_agent_cost'])}")
     print(f"avg_user_cost: {_format_optional(output['average_user_cost'])}")
     print(f"avg_total_cost: {_format_optional(output['average_total_cost'])}")
-    print(f"avg_duration_seconds: {_format_optional(output['average_duration_seconds'])}")
+    print(
+        f"avg_duration_seconds: {_format_optional(output['average_duration_seconds'])}"
+    )
     print(f"infra_errors: {output['infra_error_count']}")
     print(f"termination_counts: {output['termination_counts']}")
     print(f"reward_basis_counts: {output['reward_basis_counts']}")
