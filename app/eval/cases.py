@@ -759,9 +759,184 @@ GENERALIZED_MVP_CASES: List[EvalCase] = [
 ]
 
 
+SYNTHETIC_SEEDED_V1_CASES: List[EvalCase] = [
+    EvalCase(
+        case_id="synthetic_shipping_express_success",
+        category="modify_shipping",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is ruth.williams2@example.com. "
+                    "I want to upgrade the shipping on my order "
+                    "#W1004 to express."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="U2",
+        expected_intent="modify_shipping_method",
+        order_id="#W1004",
+        expected_write_lock="order:#W1004:modify_shipping_method",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["modify_pending_order_shipping_method"],
+        subset="synthetic_seeded_v1",
+        capability="modify_shipping_method",
+        policy_area="shipping",
+    ),
+    EvalCase(
+        case_id="synthetic_shipping_overnight_gift_card_insufficient",
+        category="modify_shipping",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My name is Ruth Williams and my zip is 80855. "
+                    "I want overnight shipping for my order #W1004. "
+                    "Use my gift card to pay."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="U2",
+        expected_intent="modify_shipping_method",
+        order_id="#W1004",
+        expected_guard_block_reason="gift_card_balance_insufficient",
+        expected_no_write=True,
+        expected_confirmation_status="denied",
+        subset="synthetic_seeded_v1",
+        capability="modify_shipping_method",
+        policy_area="shipping",
+    ),
+    EvalCase(
+        case_id="synthetic_shipping_processed_order_block",
+        category="modify_shipping",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is ruth.williams2@example.com. "
+                    "Change shipping on order #W1028 to express."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="U2",
+        expected_intent="modify_shipping_method",
+        order_id="#W1028",
+        expected_guard_block_reason="non_pending_order_cannot_be_modified",
+        expected_no_write=True,
+        expected_confirmation_status="denied",
+        subset="synthetic_seeded_v1",
+        capability="modify_shipping_method",
+        policy_area="shipping",
+    ),
+    EvalCase(
+        case_id="synthetic_shipping_same_method_block",
+        category="modify_shipping",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is ruth.williams2@example.com. "
+                    "Change shipping on #W1004 to standard."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="U2",
+        expected_intent="modify_shipping_method",
+        order_id="#W1004",
+        expected_guard_block_reason="same_shipping_method",
+        expected_no_write=True,
+        expected_confirmation_status="denied",
+        subset="synthetic_seeded_v1",
+        capability="modify_shipping_method",
+        policy_area="shipping",
+    ),
+    EvalCase(
+        case_id="synthetic_shipping_unknown_method_block",
+        category="modify_shipping",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is ruth.williams2@example.com. "
+                    "I need drone delivery for order #W1004."
+                ),
+            },
+            {"role": "user", "content": "confirm"},
+        ],
+        expected_user_id="U2",
+        expected_intent="modify_shipping_method",
+        order_id="#W1004",
+        expected_guard_block_reason="unknown_shipping_method",
+        expected_no_write=True,
+        expected_confirmation_status="denied",
+        subset="synthetic_seeded_v1",
+        capability="modify_shipping_method",
+        policy_area="shipping",
+    ),
+    EvalCase(
+        case_id="synthetic_coupon_refusal_no_write",
+        category="transfer",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is ruth.williams2@example.com. "
+                    "Can you give me a discount coupon for my next order?"
+                ),
+            },
+        ],
+        expected_user_id="U2",
+        expected_intent="transfer",
+        expected_no_write=True,
+        expected_tool_names=["transfer_to_human_agents"],
+        subset="synthetic_seeded_v1",
+        capability="transfer",
+        policy_area="coupon",
+    ),
+    EvalCase(
+        case_id="synthetic_compensation_then_shipping_success",
+        category="modify_shipping",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "My email is ruth.williams2@example.com. "
+                    "My order #W1004 arrived damaged. "
+                    "I want compensation for this."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Fine, then at least upgrade my shipping on #W1004 "
+                    "to express so the replacement comes faster."
+                ),
+            },
+            {"role": "user", "content": "yes"},
+        ],
+        expected_user_id="U2",
+        expected_intent="modify_shipping_method",
+        order_id="#W1004",
+        expected_write_lock="order:#W1004:modify_shipping_method",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["transfer_to_human_agents", "modify_pending_order_shipping_method"],
+        subset="synthetic_seeded_v1",
+        capability="modify_shipping_method",
+        policy_area="shipping",
+        max_turns=12,
+    ),
+]
+
+
 def get_cases(subset: str) -> List[EvalCase]:
     if subset == "curated_mvp":
         return list(CURATED_MVP_CASES)
     if subset == "generalized_mvp":
         return list(GENERALIZED_MVP_CASES)
+    if subset == "synthetic_seeded_v1":
+        return list(SYNTHETIC_SEEDED_V1_CASES)
     raise ValueError("unsupported subset: " + subset)
