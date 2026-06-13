@@ -42,6 +42,7 @@
 - Phase 3：✅ 完成 — AgentLoop 类 + 4 个 step 方法、SessionState/Gateway/Guard 迁移、16 测试覆盖 read/write pending/guard block/tool error/safety guards/integration、278 测试通过、ruff 全部通过（2026-06-13）。
 - Phase 4：✅ 完成 — runtime 切换 pre-flight + AgentLoop + post-process、删除 pipeline/plan_handlers/graph（784 行）、精简 parsers（-196 行）、删除 builders.py、240 测试通过、ruff 通过、eval smoke 不崩溃（2026-06-14）。
 - Phase 5：✅ 完成 — required_tools/forbidden_tools、eval_backend 分层（scripted/live）、LLM token/loop 指标采集、--live flag、SessionState Phase 4 compat 字段清理、tracing 更新、28 eval 测试通过（+9 新增）、254 全量测试通过、ruff 通过（2026-06-14）。
+- Phase 6：✅ 完成 — TurnContext.llm_responses 记录、ScriptedToolGateway、TraceReplayHarness、11 回放测试通过（+11 新增）、265 全量测试通过、ruff 通过（2026-06-14）。
 
 ---
 
