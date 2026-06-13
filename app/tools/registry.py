@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from typing import Any, Callable, Dict
 
@@ -100,3 +101,69 @@ class ToolRegistry:
         if name in WRITE_TOOL_NAMES:
             return _spec_constraints(name)
         return "requires user confirmation"
+
+    def tool_schemas_for_llm(self) -> list[dict[str, Any]]:
+        schemas: list[dict[str, Any]] = []
+        for name in sorted(self._tools):
+            schemas.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": self._tool_description_for_llm(name),
+                        "parameters": self._json_schema_for_tool(name),
+                    },
+                }
+            )
+        return schemas
+
+    def _tool_description_for_llm(self, name: str) -> str:
+        constraints = self._tool_constraints_for_llm(name, self.kind(name))
+        return f"{name}. {constraints}"
+
+    def _json_schema_for_tool(self, name: str) -> dict[str, Any]:
+        required = self._required_args_for_tool(name)
+        properties = {arg: self._property_schema(name, arg) for arg in required}
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": False,
+        }
+
+    def _required_args_for_tool(self, name: str) -> list[str]:
+        explicit: dict[str, list[str]] = {
+            "find_user_id_by_email": ["email"],
+            "find_user_id_by_name_zip": ["first_name", "last_name", "zip"],
+            "get_user_details": ["user_id"],
+            "get_order_details": ["order_id"],
+            "get_product_details": ["product_id"],
+            "get_item_details": ["item_id"],
+            "calculate": ["expression"],
+            "transfer_to_human_agents": ["summary"],
+        }
+        if name in explicit:
+            return explicit[name]
+        params_text = self._tool_params_for_llm(name)
+        if params_text == "(none)":
+            return []
+        if params_text != "(see function signature)":
+            return [part.strip().split(" ")[0] for part in params_text.split(",")]
+        signature = inspect.signature(self.get(name).func)
+        return [
+            param_name
+            for param_name, param in signature.parameters.items()
+            if param.default is inspect.Parameter.empty
+        ]
+
+    def _property_schema(self, tool_name: str, arg_name: str) -> dict[str, Any]:
+        if arg_name in {"item_ids", "new_item_ids"}:
+            return {"type": "array", "items": {"type": "string"}}
+        if tool_name == "cancel_pending_order" and arg_name == "reason":
+            return {
+                "type": "string",
+                "enum": ["no longer needed", "ordered by mistake"],
+            }
+        if tool_name == "modify_pending_order_shipping_method" and arg_name == "shipping_method":
+            return {"type": "string", "enum": ["standard", "express", "overnight"]}
+        return {"type": "string"}
