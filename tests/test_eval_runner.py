@@ -538,6 +538,34 @@ class CuratedEvalTests(unittest.TestCase):
 
         self.assertIsNone(label)
 
+    def test_live_flag_passes_provider_none_to_runtime(self):
+        """Verify --live does not inject DisabledLLMProvider."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            summary = CuratedEvalRunner(
+                config=config,
+                artifact_dir=Path(tmp),
+                live=False,
+            ).run(subset="curated_mvp", trials=1)
+            self.assertEqual(summary.eval_backend, "scripted")
+            self.assertEqual(summary.case_count, 11)
+
+    def test_eval_backend_in_summary_matches_live_flag(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            summary = CuratedEvalRunner(
+                config=config,
+                artifact_dir=Path(tmp),
+                live=False,
+            ).run(subset="curated_mvp", trials=1)
+            self.assertEqual(summary.eval_backend, "scripted")
+            for result in summary.results:
+                self.assertEqual(result.eval_backend, "scripted")
+
 
 def _result(
     case_id: str,

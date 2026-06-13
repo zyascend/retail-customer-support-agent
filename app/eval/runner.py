@@ -149,11 +149,13 @@ class CuratedEvalRunner:
         config: AppConfig,
         artifact_dir: Path = DEFAULT_EVAL_ARTIFACT_DIR,
         require_llm: bool = False,
+        live: bool = False,
         progress_callback: Optional[Callable[[str, EvalCaseResult], None]] = None,
     ) -> None:
         self.config = config
         self.artifact_dir = artifact_dir
         self.require_llm = require_llm
+        self.live = live
         self.progress_callback = progress_callback
 
     def run(
@@ -222,7 +224,7 @@ class CuratedEvalRunner:
             generalization_variant_count=len(results)
             if subset == "generalization"
             else 0,
-            eval_backend="scripted",
+            eval_backend="live" if self.live else "scripted",
         )
         self._write_summary(summary)
         self._write_report(summary)
@@ -291,7 +293,13 @@ class CuratedEvalRunner:
             agent_llm_timeout_seconds=self.config.agent_llm_timeout_seconds,
             agent_llm_max_retries=self.config.agent_llm_max_retries,
         )
-        provider = None if self.require_llm else DisabledLLMProvider()
+        # Phase 5: live mode uses real LLM provider, scripted uses disabled
+        if self.live:
+            provider = None  # let AgentRuntime build real DeepSeekProvider
+        elif self.require_llm:
+            provider = None
+        else:
+            provider = DisabledLLMProvider()
         # Synthetic subset: use synthetic runtime
         if case.subset in (
             "synthetic_seeded_v1",
@@ -457,7 +465,7 @@ class CuratedEvalRunner:
             final_intent="",
             termination_reason=None,
             expected_write_lock=case.expected_write_lock,
-            eval_backend="scripted",
+            eval_backend="live" if self.live else "scripted",
         )
 
     def _order_status(self, runtime: AgentRuntime, case: EvalCase) -> Optional[str]:
