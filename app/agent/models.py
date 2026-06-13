@@ -142,6 +142,9 @@ class TurnContext(BaseModel):
     consecutive_tool_failures: int = 0
     termination: Optional[str] = None
 
+    # ── Phase 6: replay harness ──
+    llm_responses: list[dict] = Field(default_factory=list)
+
     def add_step(self, node: str, **detail: Any) -> None:
         self.steps.append(AgentStep(node=node, detail=detail))
 

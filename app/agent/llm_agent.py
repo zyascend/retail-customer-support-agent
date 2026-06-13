@@ -61,6 +61,10 @@ class AgentLoop:
                     ),
                     turn=turn,
                 )
+
+            # Phase 6: record LLM response for trace replay
+            turn.llm_responses.append(response.model_dump())
+
             turn.step_durations["llm_reason"] = round(
                 (time.perf_counter() - t0) * 1000, 1
             )
