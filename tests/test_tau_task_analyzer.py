@@ -13,6 +13,9 @@ from app.analysis.tau_task_analyzer import (
 )
 
 
+from app.config import AppConfig
+
+
 def test_load_splits_parses_split_tasks_json():
     """load_splits returns dict with train, test, base keys."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -21,8 +24,6 @@ def test_load_splits_parses_split_tasks_json():
         (retail_dir / "split_tasks.json").write_text(json.dumps(splits))
         result = load_splits(retail_dir)
         assert result == splits
-        assert result["train"] == ["0", "1"]
-        assert result["test"] == ["5", "9"]
 
 
 def test_load_tasks_parses_tasks_json():
@@ -49,10 +50,37 @@ def test_load_tasks_parses_tasks_json():
         assert result[0]["id"] == 0
 
 
-def test_resolve_tau3_retail_dir_returns_path():
-    """_resolve_tau3_retail_dir returns a Path that exists or raises."""
-    from app.config import AppConfig, resolve_config
-
-    config = resolve_config()
+def test_resolve_tau3_retail_dir_success(tmp_path: Path):
+    """_resolve_tau3_retail_dir returns the retail dir path when it exists."""
+    retail_dir = tmp_path / "domains" / "retail"
+    retail_dir.mkdir(parents=True)
+    (retail_dir / "tasks.json").write_text("[]")
+    config = AppConfig(
+        tau3_retail_root=tmp_path,
+        tau2_bench_root=tmp_path,
+        artifact_dir=tmp_path,
+        deepseek_api_key="",
+        deepseek_base_url="",
+        default_agent_model="test",
+        agent_llm_timeout_seconds=1.0,
+        agent_llm_max_retries=0,
+    )
     result = _resolve_tau3_retail_dir(config)
     assert isinstance(result, Path)
+    assert result == config.retail_domain_dir
+
+
+def test_resolve_tau3_retail_dir_raises_when_missing(tmp_path: Path):
+    """_resolve_tau3_retail_dir raises FileNotFoundError when dir is missing."""
+    config = AppConfig(
+        tau3_retail_root=tmp_path,
+        tau2_bench_root=tmp_path,
+        artifact_dir=tmp_path,
+        deepseek_api_key="",
+        deepseek_base_url="",
+        default_agent_model="test",
+        agent_llm_timeout_seconds=1.0,
+        agent_llm_max_retries=0,
+    )
+    with pytest.raises(FileNotFoundError, match="tau3 retail domain directory not found"):
+        _resolve_tau3_retail_dir(config)
