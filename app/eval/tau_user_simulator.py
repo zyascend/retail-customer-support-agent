@@ -18,7 +18,7 @@ _NAME_KEYWORDS = ("name", "who are you", "identify", "zip", "tell me who")
 def _extract_name(instructions: dict) -> Optional[str]:
     """Extract user's full name from tau3 instructions."""
     known = instructions.get("known_info", "") or ""
-    m = re.search(r"You (?:are|name is) ([\w\s]+?)(?: in| with| \(|\.|$)", known)
+    m = re.search(r"You (?:are|name is) ([\w\s]+?)(?: in| with| \(| living| residing|\.|$)", known)
     if m:
         return m.group(1).strip().rstrip(".")
     m = re.search(r"Your name is ([\w\s]+?)(?:,| and|\.|$)", known)
@@ -42,7 +42,7 @@ def _extract_email(instructions: dict) -> Optional[str]:
 def _extract_zip(instructions: dict) -> Optional[str]:
     """Extract zip code from tau3 instructions."""
     known = instructions.get("known_info", "") or ""
-    m = re.search(r"zip(?: code)? (\d{5})", known)
+    m = re.search(r"zip(?:[ -]?code)? (\d{5})", known)
     if m:
         return m.group(1)
     return None
@@ -53,7 +53,7 @@ def _to_first_person(text: str | None) -> str:
     if not text:
         return ""
     text = re.sub(
-        r"\bYou are ([\w\s]+?) in zip(?: code)? (\d{5})\b",
+        r"\bYou are ([\w\s]+?) (?:living |residing )?in zip(?:[ -]?code)? (\d{5})\b",
         r"My name is \1 and my zip code is \2", text,
     )
     text = re.sub(

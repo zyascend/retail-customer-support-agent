@@ -95,7 +95,7 @@ def _to_first_person(text: str | None) -> str:
     if not text:
         return ""
     text = re.sub(
-        r"\bYou are ([\w\s]+?) in zip(?: code)? (\d{5})\b",
+        r"\bYou are ([\w\s]+?) (?:living |residing )?in zip(?:[ -]?code)? (\d{5})\b",
         r"My name is \1 and my zip code is \2", text,
     )
     text = re.sub(
@@ -264,7 +264,10 @@ def get_tau_smoke_cases(config: AppConfig) -> list[EvalCase]:
 def get_tau_supported_cases(config: AppConfig) -> list[EvalCase]:
     """Return all supported tau3 tasks as EvalCase list (69 tasks)."""
     from app.analysis.tau_task_analyzer import (
-        _resolve_tau3_retail_dir, load_tasks, load_splits, classify_task,
+        _resolve_tau3_retail_dir,
+        classify_task,
+        load_splits,
+        load_tasks,
     )
     retail_dir = _resolve_tau3_retail_dir(config)
     tasks = load_tasks(retail_dir)
