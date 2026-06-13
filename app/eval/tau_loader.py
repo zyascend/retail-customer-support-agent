@@ -9,6 +9,7 @@ Phase 9.1 (smoke test): script-based single-turn user message.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -79,48 +80,42 @@ def _build_user_message(task: dict) -> str:
     return " ".join(parts)
 
 
-def _to_first_person(text: Optional[str]) -> str:
+def _to_first_person(text: str | None) -> str:
     """Convert tau3 second-person instructions to first-person user message.
 
     Common patterns in tau3 instructions:
-      "You are X in zip Y" → "My name is X and I live in zip Y"
-      "Your email is X"    → "My email is X"
+      "You are X in zip Y"   → "My name is X and my zip code is Y"
+      "You are X (email)"    → "My name is X and my email is email"
+      "You are X with email" → "My name is X and my email is email"
+      "Your email is X"      → "My email is X"
       "You do not remember X" → "I don't remember X"
-      "You received..."    → "I received..."
-      "You want to..."     → "I want to..."
+      "You received..."      → "I received..."
+      "You want to..."       → "I want to..."
     """
-    import re
-
     if not text:
         return ""
-
-    # "You are First Last in zip 12345." or "...in zip code 12345."
-    # → "My name is First Last and my zip code is 12345."
-    # (matches NAME_ZIP_RE: "my name is First Last ... zip code is 12345")
     text = re.sub(
         r"\bYou are ([\w\s]+?) in zip(?: code)? (\d{5})\b",
-        r"My name is \1 and my zip code is \2",
-        text,
+        r"My name is \1 and my zip code is \2", text,
     )
-    # "Your email is X" → "My email is X"
+    text = re.sub(
+        r"\bYou are ([\w]+)\s*\(([\w.+-]+@[\w.-]+\.[A-Za-z]{2,})\)",
+        r"My name is \1 and my email is \2", text,
+    )
+    text = re.sub(
+        r"\bYou are ([\w]+) with email ([\w.+-]+@[\w.-]+\.[A-Za-z]{2,})",
+        r"My name is \1 and my email is \2", text,
+    )
     text = re.sub(r"\bYour email is\b", "My email is", text)
-    # "You do not remember X" → "I don't remember X"
     text = re.sub(r"\bYou do not remember\b", "I don't remember", text)
-    # "You received" → "I received"
     text = re.sub(r"\bYou received\b", "I received", text)
-    # "You wish to" → "I want to"
     text = re.sub(r"\bYou wish to\b", "I want to", text)
-    # "You want to" → "I want to"
     text = re.sub(r"\bYou want to\b", "I want to", text)
-    # "your order" → "my order"
     text = re.sub(r"\byour order\b", "my order", text)
-    # "you'd" → "I'd"
+    text = re.sub(r"\bYour name is\b", "My name is", text)
     text = re.sub(r"\byou'd\b", "I'd", text)
-    # "you" at sentence start → "I" (catch-all)
     text = re.sub(r"\bYou\b", "I", text)
-    # "your" → "my" (catch-all)
     text = re.sub(r"\byour\b", "my", text)
-
     return text
 
 
