@@ -1,10 +1,9 @@
-"""Tau retail task space analyzer.
+"""Tau 零售任务空间分析器。
 
-Reads tau3 retail tasks.json and split_tasks.json, classifies every task
-as supported / partial / unsupported, analyzes NL assertions, and renders
-a comprehensive Markdown report.
+读取 tau3 零售任务的 tasks.json 和 split_tasks.json，将每个任务分类为
+supported / partial / unsupported，分析 NL 断言，并生成综合性的 Markdown 报告。
 
-Usage:
+用法：
     uv run python -m app.analysis.tau_task_analyzer
     uv run python -m app.analysis.tau_task_analyzer --json
 """
