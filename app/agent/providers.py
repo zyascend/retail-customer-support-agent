@@ -5,6 +5,8 @@ import re as _re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol
 
+from app.agent.models import ToolCallRequest, ToolCallResponse
+
 try:
     from openai import OpenAI
 except ModuleNotFoundError:
@@ -19,12 +21,54 @@ def _extract_json_block(text: str) -> str:
     return text.strip()
 
 
+def normalize_tool_calling_message(
+    *,
+    message: Dict[str, Any],
+    finish_reason: Optional[str],
+    token_usage: Optional[Dict[str, Any]],
+    raw: Optional[Dict[str, Any]],
+) -> ToolCallResponse:
+    tool_calls: List[ToolCallRequest] = []
+    for index, raw_call in enumerate(message.get("tool_calls") or []):
+        function = raw_call.get("function") or {}
+        raw_arguments = function.get("arguments")
+        arguments: Dict[str, Any] = {}
+        if isinstance(raw_arguments, str) and raw_arguments.strip():
+            try:
+                parsed = json.loads(raw_arguments)
+                if isinstance(parsed, dict):
+                    arguments = parsed
+            except json.JSONDecodeError:
+                arguments = {}
+        elif isinstance(raw_arguments, dict):
+            arguments = raw_arguments
+        tool_calls.append(
+            ToolCallRequest(
+                id=str(raw_call.get("id") or f"call_{index}"),
+                tool_name=str(function.get("name") or ""),
+                arguments=arguments,
+                raw_arguments=raw_arguments if isinstance(raw_arguments, str) else None,
+            )
+        )
+    return ToolCallResponse(
+        assistant_content=message.get("content"),
+        tool_calls=tool_calls,
+        finish_reason=finish_reason,
+        token_usage=token_usage,
+        raw=raw,
+    )
+
+
 class LLMProvider(Protocol):
     def json(
         self, messages: List[Dict[str, str]], schema: Dict[str, Any]
     ) -> Dict[str, Any]: ...
 
     def chat(self, messages: List[Dict[str, str]]) -> str: ...
+
+    def chat_with_tools(
+        self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]
+    ) -> ToolCallResponse: ...
 
 
 @dataclass
@@ -74,6 +118,46 @@ class DeepSeekProvider:
         )
         return response.choices[0].message.content or ""
 
+    def chat_with_tools(
+        self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]
+    ) -> ToolCallResponse:
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            tools=tools,
+        )
+        choice = response.choices[0]
+        message = choice.message
+        message_dict = {
+            "content": getattr(message, "content", None),
+            "tool_calls": [],
+        }
+        for tool_call in getattr(message, "tool_calls", None) or []:
+            function = getattr(tool_call, "function", None)
+            message_dict["tool_calls"].append(
+                {
+                    "id": getattr(tool_call, "id", ""),
+                    "function": {
+                        "name": getattr(function, "name", ""),
+                        "arguments": getattr(function, "arguments", ""),
+                    },
+                }
+            )
+        usage = getattr(response, "usage", None)
+        token_usage = None
+        if usage is not None:
+            token_usage = {
+                "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                "completion_tokens": getattr(usage, "completion_tokens", 0),
+                "total_tokens": getattr(usage, "total_tokens", 0),
+            }
+        return normalize_tool_calling_message(
+            message=message_dict,
+            finish_reason=getattr(choice, "finish_reason", None),
+            token_usage=token_usage,
+            raw=None,
+        )
+
 
 class DeterministicProvider:
     def json(
@@ -85,6 +169,94 @@ class DeterministicProvider:
         if not messages:
             return ""
         return messages[-1].get("content", "")
+
+    def chat_with_tools(
+        self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]
+    ) -> ToolCallResponse:
+        return ToolCallResponse(
+            assistant_content=self.chat(messages), finish_reason="stop"
+        )
+
+
+class ScriptedToolCallingProvider:
+    def __init__(self, responses: List[ToolCallResponse]) -> None:
+        self._responses = list(responses)
+        self.calls: List[Dict[str, Any]] = []
+
+    def json(
+        self, messages: List[Dict[str, str]], schema: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        return {}
+
+    def chat(self, messages: List[Dict[str, str]]) -> str:
+        if not self._responses:
+            raise RuntimeError("No scripted tool-calling responses remain")
+        response = self._responses.pop(0)
+        return response.assistant_content or ""
+
+    def chat_with_tools(
+        self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]
+    ) -> ToolCallResponse:
+        self.calls.append({"messages": messages, "tools": tools})
+        if not self._responses:
+            raise RuntimeError("No scripted tool-calling responses remain")
+        return self._responses.pop(0)
+
+
+class FakeFailingProvider:
+    def __init__(self, error_type: str) -> None:
+        self.error_type = error_type
+
+    def json(
+        self, messages: List[Dict[str, str]], schema: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        return {}
+
+    def chat(self, messages: List[Dict[str, str]]) -> str:
+        if self.error_type == "timeout":
+            raise TimeoutError("simulated provider timeout")
+        return ""
+
+    def chat_with_tools(
+        self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]
+    ) -> ToolCallResponse:
+        if self.error_type == "timeout":
+            raise TimeoutError("simulated provider timeout")
+        if self.error_type == "unknown_tool":
+            return ToolCallResponse(
+                tool_calls=[
+                    ToolCallRequest(
+                        id="call_unknown",
+                        tool_name="hallucinated_tool",
+                        arguments={},
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        if self.error_type == "malformed_arguments":
+            return ToolCallResponse(
+                tool_calls=[
+                    ToolCallRequest(
+                        id="call_malformed",
+                        tool_name="get_order_details",
+                        arguments={},
+                        raw_arguments="{not-json",
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        if self.error_type == "missing_args":
+            return ToolCallResponse(
+                tool_calls=[
+                    ToolCallRequest(
+                        id="call_missing",
+                        tool_name="get_order_details",
+                        arguments={},
+                    )
+                ],
+                finish_reason="tool_calls",
+            )
+        raise RuntimeError(f"Unsupported fake failure type: {self.error_type}")
 
 
 class DisabledLLMProvider:

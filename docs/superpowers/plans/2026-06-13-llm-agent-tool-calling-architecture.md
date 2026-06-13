@@ -35,6 +35,11 @@
 
 下面只把 **Phase 1** 展开到可直接执行的粒度。开始 Phase 2 前，必须基于 Phase 1 完成后的代码状态重新生成阶段专用计划。
 
+## Phase Status
+
+- Phase 1：✅ 完成 — provider/harness/schema 测试（15 新增）、完整 pytest（243 existing + 15 new = 258 passed）、ruff 全部通过（2026-06-13）。
+- Phase 2：Phase 1 完成后可以开始单独规划。
+
 ---
 
 ## 文件结构

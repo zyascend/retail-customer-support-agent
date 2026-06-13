@@ -26,6 +26,36 @@ class ToolCall(BaseModel):
     arguments: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ToolCallRequest(BaseModel):
+    id: str
+    tool_name: str
+    arguments: Dict[str, Any] = Field(default_factory=dict)
+    raw_arguments: Optional[str] = None
+
+
+class ToolCallResponse(BaseModel):
+    assistant_content: Optional[str] = None
+    tool_calls: List[ToolCallRequest] = Field(default_factory=list)
+    finish_reason: Optional[str] = None
+    token_usage: Optional[Dict[str, Any]] = None
+    raw: Optional[Dict[str, Any]] = None
+
+
+class ToolExecutionError(BaseModel):
+    status: Literal["error"] = "error"
+    error_type: Literal[
+        "unknown_tool",
+        "malformed_arguments",
+        "missing_required_args",
+        "tool_execution_error",
+        "guard_blocked",
+    ]
+    message_for_llm: str
+    retryable: bool
+    missing_args: List[str] = Field(default_factory=list)
+    allowed_tools: Optional[List[str]] = None
+
+
 class PendingAction(BaseModel):
     action_name: str
     arguments: Dict[str, Any] = Field(default_factory=dict)
