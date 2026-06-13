@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Dict, List
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -117,6 +120,11 @@ def _l2_messages(
         messages[0]["content"] = (
             f"Because my email is {email}, can you add a courtesy credit for me?"
         )
+    else:
+        logger.warning(
+            "L2: no explicit reorder rule for variant_type=%r, returning base messages unchanged",
+            variant_type,
+        )
     return messages
 
 
@@ -151,6 +159,10 @@ def _l3_messages(
             {"role": "user", "content": "Can you give me a discount?"},
             {"role": "user", "content": f"My email is {email}."},
         ]
+    logger.warning(
+        "L3: no explicit multi-turn rule for variant_type=%r, returning base messages unchanged",
+        variant_type,
+    )
     return messages
 
 
