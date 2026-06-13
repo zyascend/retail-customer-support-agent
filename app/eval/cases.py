@@ -958,4 +958,9 @@ def get_cases(subset: str) -> List[EvalCase]:
         from app.synthetic.families import build_generalization_exploratory_cases
 
         return build_generalization_exploratory_cases()
+    if subset == "tau_retail_smoke":
+        from app.config import resolve_config
+        from app.eval.tau_loader import get_tau_smoke_cases
+
+        return get_tau_smoke_cases(resolve_config())
     raise ValueError("unsupported subset: " + subset)
