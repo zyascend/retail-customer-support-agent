@@ -118,6 +118,10 @@ class SessionState(BaseModel):
     audit_logs: List[Dict[str, Any]] = Field(default_factory=list)
     pending_action: Optional[PendingAction] = None
     termination_reason: Optional[str] = None
+    steps: List[AgentStep] = Field(default_factory=list)
+
+    def add_step(self, node: str, **detail: Any) -> None:
+        self.steps.append(AgentStep(node=node, detail=detail))
 
 
 class TurnContext(BaseModel):
@@ -133,6 +137,16 @@ class TurnContext(BaseModel):
     loop_iterations: int = 0
     consecutive_tool_failures: int = 0
     termination: Optional[str] = None
+
+    def add_step(self, node: str, **detail: Any) -> None:
+        self.steps.append(AgentStep(node=node, detail=detail))
+
+
+class AgentTurnResult(BaseModel):
+    """Return value from AgentLoop.run_turn()."""
+    assistant_message: str
+    turn: TurnContext
+    pending_action_set: bool = False
 
 
 class ConversationState(BaseModel):

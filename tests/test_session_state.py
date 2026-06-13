@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.agent.models import (
+    AgentTurnResult,
     LoadedContext,
     Message,
     PendingAction,
@@ -109,7 +110,40 @@ def test_session_and_turn_are_independent() -> None:
     """Two models do not contain each other's fields."""
     session = SessionState(session_id="sess-4")
     turn = TurnContext()
-    assert not hasattr(session, "steps")
+    # SessionState now has steps for duck-type compatibility with ConversationState
+    assert session.steps == []
     assert not hasattr(session, "loop_iterations")
     assert not hasattr(turn, "session_id")
     assert not hasattr(turn, "authenticated_user_id")
+
+
+def test_session_state_has_steps_and_add_step() -> None:
+    session = SessionState(session_id="sess-5")
+    assert session.steps == []
+    session.add_step("test_node", status="ok", key="val")
+    assert len(session.steps) == 1
+    assert session.steps[0].node == "test_node"
+    assert session.steps[0].status == "ok"
+    assert session.steps[0].detail == {"status": "ok", "key": "val"}
+
+
+def test_agent_turn_result_construction() -> None:
+    turn = TurnContext(loop_iterations=2, termination="final_response")
+    result = AgentTurnResult(
+        assistant_message="Hello",
+        turn=turn,
+        pending_action_set=False,
+    )
+    assert result.assistant_message == "Hello"
+    assert result.turn.loop_iterations == 2
+    assert result.turn.termination == "final_response"
+    assert result.pending_action_set is False
+
+
+def test_agent_turn_result_with_pending() -> None:
+    result = AgentTurnResult(
+        assistant_message="Should I cancel order O1?",
+        turn=TurnContext(),
+        pending_action_set=True,
+    )
+    assert result.pending_action_set is True
