@@ -11,7 +11,7 @@ from app.agent.models import ConversationState
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 ZIP_RE = re.compile(r"\b\d{5}(?:-\d{4})?\b")
 NAME_ZIP_RE = re.compile(
-    r"(?:my name is|i am|i'm)\s+([A-Za-z]+)\s+([A-Za-z]+).*?\bzip(?: code)? is\s+(\d{5}(?:-\d{4})?)",
+    r"(?:my name is|i am|i'm)\s+([A-Za-z]+)\s+([A-Za-z]+).*?\bzip(?:[ -]?code)? is\s+(\d{5}(?:-\d{4})?)",
     re.IGNORECASE,
 )
 ORDER_RE = re.compile(r"#W\d+")

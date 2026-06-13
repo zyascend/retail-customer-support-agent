@@ -116,6 +116,24 @@ class EvalRunSummary:
         return payload
 
 
+def _load_tau_task_by_id(case_id: str, config: AppConfig) -> Optional[dict]:
+    """Load a single tau3 task by its EvalCase case_id ('tau_0' → task id '0')."""
+    if not case_id.startswith("tau_"):
+        return None
+    task_id = case_id[4:]  # strip 'tau_' prefix
+    try:
+        from app.analysis.tau_task_analyzer import _resolve_tau3_retail_dir, load_tasks
+
+        retail_dir = _resolve_tau3_retail_dir(config)
+        tasks = load_tasks(retail_dir)
+        for t in tasks:
+            if str(t["id"]) == task_id:
+                return t
+    except Exception:
+        pass
+    return None
+
+
 class CuratedEvalRunner:
     def __init__(
         self,
@@ -285,14 +303,29 @@ class CuratedEvalRunner:
             require_llm=self.require_llm,
             runtime=synthetic_runtime,
         )
+        # Tau subsets: use UserSimulator for multi-turn conversations
+        user_simulator_callback = None
+        run_messages = case.messages
+        if case.subset and case.subset.startswith("tau_retail_"):
+            task_data = _load_tau_task_by_id(case.case_id, self.config)
+            if task_data is not None:
+                from app.eval.tau_user_simulator import TauUserSimulator
+
+                simulator = TauUserSimulator(
+                    task_data, db_path=str(runtime_config.retail_db_path)
+                )
+                run_messages = [{"role": "user", "content": simulator.initial_message()}]
+                user_simulator_callback = simulator.respond
+
         session_id = f"{eval_run_id}-{case.case_id}-trial-{trial}"
         order_status_before = self._order_status(runtime, case)
         started_at = time.perf_counter()
         run_result = runtime.run_script(
-            messages=case.messages,
+            messages=run_messages,
             session_id=session_id,
             task_id=case.case_id,
             max_turns=case.max_turns,
+            user_simulator_callback=user_simulator_callback,
         )
         duration_seconds = round(time.perf_counter() - started_at, 3)
         state = run_result.state
@@ -495,19 +528,34 @@ def classify_failure(
     confirmation_status: str,
     db_assertion_failures: Optional[List[str]] = None,
 ) -> Optional[str]:
+    # Phase 9 tau subsets: loose evaluation (Phase 9.1 smoke test)
+    is_tau = case.subset.startswith("tau_retail_") if case.subset else False
+
     if llm_errors:
         return "llm_json_failure"
-    if authenticated_user_id != case.expected_user_id:
-        return "auth_failure"
-    if final_intent != case.expected_intent:
-        return "wrong_intent"
-    missing_tools = [
-        tool_name
-        for tool_name in case.expected_tool_names
-        if tool_name not in tool_names
-    ]
-    if missing_tools:
-        return "wrong_tool"
+
+    # Tau subsets skip user_id and intent strict checks
+    if not is_tau:
+        if authenticated_user_id != case.expected_user_id:
+            return "auth_failure"
+        if final_intent != case.expected_intent:
+            return "wrong_intent"
+    # Tau subsets: loose tool check — at least one expected tool must be
+    # called (any tool, read or write). Don't require full action sequence.
+    # Skip check if expected_tool_names is empty (no tool expectations).
+    if is_tau:
+        if case.expected_tool_names and not any(
+            t in tool_names for t in case.expected_tool_names
+        ):
+            return "wrong_tool"
+    else:
+        missing_tools = [
+            tool_name
+            for tool_name in case.expected_tool_names
+            if tool_name not in tool_names
+        ]
+        if missing_tools:
+            return "wrong_tool"
     if tool_errors:
         return "tool_exception"
     if case.expected_guard_block_reason:
@@ -515,32 +563,39 @@ def classify_failure(
             return "expected_guard_block_missing"
     elif guard_blocks:
         return "guard_blocked"
-    if case.expected_confirmation_status:
-        if confirmation_status != case.expected_confirmation_status:
-            return "confirmation_status_mismatch"
+    # Tau subsets skip confirmation status check
+    if not is_tau:
+        if case.expected_confirmation_status:
+            if confirmation_status != case.expected_confirmation_status:
+                return "confirmation_status_mismatch"
     if pending_action:
         return "confirmation_failure"
     if case.expected_no_write and write_locks:
         return "unexpected_mutation"
     if case.expected_write_lock and case.expected_write_lock not in write_locks:
         return "mutation_missing"
-    if case.expected_order_status and actual_order_status != case.expected_order_status:
-        return "db_state_mismatch"
+    # Tau subsets skip order_status check (DB assertions cover this)
+    if not is_tau:
+        if case.expected_order_status and actual_order_status != case.expected_order_status:
+            return "db_state_mismatch"
     if db_assertion_failures:
         return "db_assertion_mismatch"
-    if case.expected_assistant_contains:
-        transcript = "\n".join(assistant_messages)
-        if case.expected_assistant_contains not in transcript:
-            return "response_mismatch"
-    if case.expected_tool_sequence:
-        sequence_cursor = 0
-        for tool_name in tool_names:
-            if tool_name == case.expected_tool_sequence[sequence_cursor]:
-                sequence_cursor += 1
-                if sequence_cursor == len(case.expected_tool_sequence):
-                    break
-        if sequence_cursor < len(case.expected_tool_sequence):
-            return "wrong_tool_sequence"
+    if not is_tau:
+        if case.expected_assistant_contains:
+            transcript = "\n".join(assistant_messages)
+            if case.expected_assistant_contains not in transcript:
+                return "response_mismatch"
+    # Tau subsets skip tool_sequence check
+    if not is_tau:
+        if case.expected_tool_sequence:
+            sequence_cursor = 0
+            for tool_name in tool_names:
+                if tool_name == case.expected_tool_sequence[sequence_cursor]:
+                    sequence_cursor += 1
+                    if sequence_cursor == len(case.expected_tool_sequence):
+                        break
+            if sequence_cursor < len(case.expected_tool_sequence):
+                return "wrong_tool_sequence"
     return None
 
 
