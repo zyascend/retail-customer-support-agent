@@ -8,13 +8,11 @@ import pytest
 
 from app.analysis.tau_task_analyzer import (
     _resolve_tau3_retail_dir,
+    classify_task,
     compute_task_space_stats,
     load_splits,
     load_tasks,
-    TaskSpaceStats,
 )
-
-
 from app.config import AppConfig
 
 
@@ -121,3 +119,75 @@ def test_compute_task_space_stats_counts_correctly():
     assert stats.action_count_avg == 1.5
     assert stats.tool_frequencies["get_order_details"] == 2
     assert stats.tool_frequencies["cancel_pending_order"] == 1
+
+
+def test_classify_task_all_supported_tools_returns_supported():
+    """Task with only supported tools classifies as supported."""
+    task = {
+        "id": 0,
+        "evaluation_criteria": {
+            "actions": [
+                {"name": "get_order_details", "action_id": "0_0", "arguments": {}, "info": None},
+                {"name": "cancel_pending_order", "action_id": "0_1", "arguments": {}, "info": None},
+            ],
+            "nl_assertions": None,
+            "reward_basis": ["DB"],
+        },
+    }
+    splits = {"train": ["0"], "test": [], "base": ["0"]}
+    result = classify_task(task, splits)
+    assert result.status == "supported"
+    assert result.split == "train"
+
+
+def test_classify_task_with_calculate_returns_partial_missing_tool():
+    """Task using 'calculate' classifies as partial_missing_tool."""
+    task = {
+        "id": 5,
+        "evaluation_criteria": {
+            "actions": [
+                {"name": "get_order_details", "action_id": "5_0", "arguments": {}, "info": None},
+                {"name": "calculate", "action_id": "5_1", "arguments": {}, "info": None},
+            ],
+            "nl_assertions": None,
+            "reward_basis": ["DB"],
+        },
+    }
+    splits = {"train": [], "test": ["5"], "base": ["5"]}
+    result = classify_task(task, splits)
+    assert result.status == "partial"
+    assert result.subcategory == "partial_missing_tool"
+    assert "calculate" in result.missing_tools
+
+
+def test_classify_task_with_nl_assertion_returns_partial():
+    """Task with NL assertion but all tools supported returns partial_nl_assertion."""
+    task = {
+        "id": 10,
+        "evaluation_criteria": {
+            "actions": [
+                {"name": "get_order_details", "action_id": "10_0", "arguments": {}, "info": None},
+            ],
+            "nl_assertions": ["Agent should tell the user something."],
+            "reward_basis": ["DB", "NL_ASSERTION"],
+        },
+    }
+    splits = {"train": ["10"], "test": [], "base": ["10"]}
+    result = classify_task(task, splits)
+    assert result.status == "partial"
+    assert result.subcategory == "partial_nl_assertion"
+
+
+def test_classify_task_no_actions_returns_unsupported():
+    """Task with zero actions classifies as unsupported_unknown."""
+    task = {
+        "id": 99,
+        "evaluation_criteria": {
+            "actions": [],
+            "nl_assertions": None,
+            "reward_basis": ["DB"],
+        },
+    }
+    splits = {"train": [], "test": ["99"], "base": ["99"]}
+    result = classify_task(task, splits)
+    assert result.status == "unsupported"

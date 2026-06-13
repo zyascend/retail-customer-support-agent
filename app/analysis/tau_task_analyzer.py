@@ -47,6 +47,168 @@ class TaskSpaceStats:
     tool_frequencies: dict = field(default_factory=dict)
 
 
+# ---------------------------------------------------------------------------
+# Tool coverage constants
+# ---------------------------------------------------------------------------
+
+SUPPORTED_READ_TOOLS: set[str] = {
+    "find_user_id_by_email",
+    "find_user_id_by_name_zip",
+    "get_user_details",
+    "get_order_details",
+    "get_product_details",
+    "lookup_payment_method",
+    "check_gift_card_balance",
+}
+
+SUPPORTED_WRITE_TOOLS: set[str] = {
+    "cancel_pending_order",
+    "modify_pending_order_address",
+    "modify_pending_order_items",
+    "modify_pending_order_payment",
+    "modify_user_address",
+    "return_delivered_order_items",
+    "exchange_delivered_order_items",
+    "transfer_to_human_agents",
+}
+
+SUPPORTED_TOOLS: set[str] = SUPPORTED_READ_TOOLS | SUPPORTED_WRITE_TOOLS
+
+# Tools tau3 uses that we have but are auxiliary (not core transaction tools).
+# Missing these does not block the main workflow.
+AUXILIARY_TOOLS: set[str] = {
+    "calculate",
+    "get_item_details",
+}
+
+# Keywords that suggest policy-sensitive scenarios
+POLICY_KEYWORDS: list[str] = [
+    "gift", "coupon", "discount", "compensation", "refund",
+    "price match", "loyalty", "warranty", "damage", "lost",
+    "missing", "wrong item",
+]
+
+
+# ---------------------------------------------------------------------------
+# Classification
+# ---------------------------------------------------------------------------
+
+
+def classify_task(task: dict, splits: dict) -> TaskClassification:
+    """Classify a single tau task as supported / partial / unsupported.
+
+    Classification order (first match wins):
+      1. unsupported: no actions, or uses tools we completely lack
+      2. partial: uses auxiliary tools, has NL assertions, or policy gaps
+      3. supported: everything else
+    """
+    task_id = str(task["id"])
+    ec = task.get("evaluation_criteria", {})
+    actions = ec.get("actions", [])
+    action_names = [a.get("name", "unknown") for a in actions]
+    action_set = set(action_names)
+    nl_assertions = ec.get("nl_assertions")
+
+    # Determine split
+    split = "unknown"
+    for split_name in ("train", "test", "base"):
+        if task_id in splits.get(split_name, []):
+            split = split_name
+            break
+
+    # Check unsupported: no actions at all
+    if len(actions) == 0:
+        return TaskClassification(
+            task_id=task_id,
+            split=split,
+            status="unsupported",
+            subcategory="unsupported_unknown",
+            tools_used=[],
+            missing_tools=[],
+            has_nl_assertion=nl_assertions is not None,
+            has_policy_keywords=False,
+            action_count=0,
+            reward_basis=list(ec.get("reward_basis", [])),
+            notes="Task has no expected actions.",
+        )
+
+    # Check unsupported: uses tools we completely lack
+    # (tools not in SUPPORTED_TOOLS and not in AUXILIARY_TOOLS)
+    completely_missing = action_set - SUPPORTED_TOOLS - AUXILIARY_TOOLS
+    if completely_missing:
+        return TaskClassification(
+            task_id=task_id,
+            split=split,
+            status="unsupported",
+            subcategory="unsupported_tool",
+            tools_used=sorted(action_set),
+            missing_tools=sorted(completely_missing),
+            has_nl_assertion=nl_assertions is not None,
+            has_policy_keywords=False,
+            action_count=len(actions),
+            reward_basis=list(ec.get("reward_basis", [])),
+            notes=f"Uses unsupported tools: {', '.join(sorted(completely_missing))}.",
+        )
+
+    # Check partial: uses auxiliary tools
+    auxiliary_used = action_set & AUXILIARY_TOOLS
+    has_nl = nl_assertions is not None
+
+    # Check policy keywords in task description
+    desc_str = json.dumps(task.get("description", {}))
+    has_policy = any(kw in desc_str.lower() for kw in POLICY_KEYWORDS)
+
+    partial_reasons = []
+    if auxiliary_used:
+        partial_reasons.append("partial_missing_tool")
+    if has_nl:
+        partial_reasons.append("partial_nl_assertion")
+    if has_policy:
+        partial_reasons.append("partial_policy_gap")
+
+    if partial_reasons:
+        subcategory = (
+            "partial_multi" if len(partial_reasons) > 1 else partial_reasons[0]
+        )
+        notes_parts = []
+        if auxiliary_used:
+            notes_parts.append(
+                f"uses auxiliary tools: {', '.join(sorted(auxiliary_used))}"
+            )
+        if has_nl:
+            notes_parts.append("has NL assertions")
+        if has_policy:
+            notes_parts.append("involves policy-sensitive keywords")
+        return TaskClassification(
+            task_id=task_id,
+            split=split,
+            status="partial",
+            subcategory=subcategory,
+            tools_used=sorted(action_set),
+            missing_tools=sorted(auxiliary_used),
+            has_nl_assertion=has_nl,
+            has_policy_keywords=has_policy,
+            action_count=len(actions),
+            reward_basis=list(ec.get("reward_basis", [])),
+            notes="; ".join(notes_parts),
+        )
+
+    # Default: supported
+    return TaskClassification(
+        task_id=task_id,
+        split=split,
+        status="supported",
+        subcategory=None,
+        tools_used=sorted(action_set),
+        missing_tools=[],
+        has_nl_assertion=False,
+        has_policy_keywords=False,
+        action_count=len(actions),
+        reward_basis=list(ec.get("reward_basis", [])),
+        notes="All tools supported, no NL assertions, no policy concerns.",
+    )
+
+
 @dataclass
 class NLAssertionItem:
     """A single NL assertion from a task."""
