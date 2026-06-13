@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 
 from app.agent.models import ToolCallRequest, ToolCallResponse, ToolExecutionError
-from app.agent.providers import FakeFailingProvider, ScriptedToolCallingProvider
+from app.agent.providers import (
+    FakeFailingProvider,
+    ScriptedToolCallingProvider,
+    normalize_tool_calling_message,
+)
 
 
 def test_tool_call_response_defaults_to_no_tool_calls() -> None:
@@ -102,3 +106,69 @@ def test_fake_failing_provider_malformed_arguments_response() -> None:
     assert response.tool_calls[0].tool_name == "get_order_details"
     assert response.tool_calls[0].arguments == {}
     assert response.tool_calls[0].raw_arguments == "{not-json"
+
+
+def test_normalize_openai_style_tool_call_message() -> None:
+    message = {
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "function": {
+                    "name": "get_order_details",
+                    "arguments": '{"order_id":"ORDER-1"}',
+                },
+            }
+        ],
+    }
+
+    response = normalize_tool_calling_message(
+        message=message,
+        finish_reason="tool_calls",
+        token_usage={"prompt_tokens": 10, "completion_tokens": 5},
+        raw={"id": "chatcmpl_1"},
+    )
+
+    assert response.tool_calls[0].id == "call_1"
+    assert response.tool_calls[0].tool_name == "get_order_details"
+    assert response.tool_calls[0].arguments == {"order_id": "ORDER-1"}
+    assert response.tool_calls[0].raw_arguments == '{"order_id":"ORDER-1"}'
+    assert response.finish_reason == "tool_calls"
+    assert response.token_usage == {"prompt_tokens": 10, "completion_tokens": 5}
+
+
+def test_normalize_malformed_tool_arguments_preserves_raw() -> None:
+    message = {
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "call_bad",
+                "function": {
+                    "name": "get_order_details",
+                    "arguments": "{not-json",
+                },
+            }
+        ],
+    }
+
+    response = normalize_tool_calling_message(
+        message=message,
+        finish_reason="tool_calls",
+        token_usage=None,
+        raw={},
+    )
+
+    assert response.tool_calls[0].arguments == {}
+    assert response.tool_calls[0].raw_arguments == "{not-json"
+
+
+def test_normalize_final_assistant_message() -> None:
+    response = normalize_tool_calling_message(
+        message={"content": "Done.", "tool_calls": []},
+        finish_reason="stop",
+        token_usage=None,
+        raw={},
+    )
+
+    assert response.assistant_content == "Done."
+    assert response.tool_calls == []

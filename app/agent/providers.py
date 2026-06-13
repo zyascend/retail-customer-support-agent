@@ -21,6 +21,44 @@ def _extract_json_block(text: str) -> str:
     return text.strip()
 
 
+def normalize_tool_calling_message(
+    *,
+    message: Dict[str, Any],
+    finish_reason: Optional[str],
+    token_usage: Optional[Dict[str, Any]],
+    raw: Optional[Dict[str, Any]],
+) -> ToolCallResponse:
+    tool_calls: List[ToolCallRequest] = []
+    for index, raw_call in enumerate(message.get("tool_calls") or []):
+        function = raw_call.get("function") or {}
+        raw_arguments = function.get("arguments")
+        arguments: Dict[str, Any] = {}
+        if isinstance(raw_arguments, str) and raw_arguments.strip():
+            try:
+                parsed = json.loads(raw_arguments)
+                if isinstance(parsed, dict):
+                    arguments = parsed
+            except json.JSONDecodeError:
+                arguments = {}
+        elif isinstance(raw_arguments, dict):
+            arguments = raw_arguments
+        tool_calls.append(
+            ToolCallRequest(
+                id=str(raw_call.get("id") or f"call_{index}"),
+                tool_name=str(function.get("name") or ""),
+                arguments=arguments,
+                raw_arguments=raw_arguments if isinstance(raw_arguments, str) else None,
+            )
+        )
+    return ToolCallResponse(
+        assistant_content=message.get("content"),
+        tool_calls=tool_calls,
+        finish_reason=finish_reason,
+        token_usage=token_usage,
+        raw=raw,
+    )
+
+
 class LLMProvider(Protocol):
     def json(
         self, messages: List[Dict[str, str]], schema: Dict[str, Any]
@@ -79,6 +117,46 @@ class DeepSeekProvider:
             messages=messages,
         )
         return response.choices[0].message.content or ""
+
+    def chat_with_tools(
+        self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]
+    ) -> ToolCallResponse:
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            tools=tools,
+        )
+        choice = response.choices[0]
+        message = choice.message
+        message_dict = {
+            "content": getattr(message, "content", None),
+            "tool_calls": [],
+        }
+        for tool_call in getattr(message, "tool_calls", None) or []:
+            function = getattr(tool_call, "function", None)
+            message_dict["tool_calls"].append(
+                {
+                    "id": getattr(tool_call, "id", ""),
+                    "function": {
+                        "name": getattr(function, "name", ""),
+                        "arguments": getattr(function, "arguments", ""),
+                    },
+                }
+            )
+        usage = getattr(response, "usage", None)
+        token_usage = None
+        if usage is not None:
+            token_usage = {
+                "prompt_tokens": getattr(usage, "prompt_tokens", 0),
+                "completion_tokens": getattr(usage, "completion_tokens", 0),
+                "total_tokens": getattr(usage, "total_tokens", 0),
+            }
+        return normalize_tool_calling_message(
+            message=message_dict,
+            finish_reason=getattr(choice, "finish_reason", None),
+            token_usage=token_usage,
+            raw=None,
+        )
 
 
 class DeterministicProvider:
