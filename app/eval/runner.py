@@ -188,8 +188,7 @@ class CuratedEvalRunner:
             failure_analysis=failure_analysis,
             results=results,
             generalization_families=sorted(
-                set(getattr(r, "scenario_family", "") for r in results)
-                - {""}
+                set(getattr(r, "scenario_family", "") for r in results) - {""}
             )
             if subset == "generalization"
             else [],

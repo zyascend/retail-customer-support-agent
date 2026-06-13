@@ -76,7 +76,10 @@ def test_derive_shipping_success_express_oracle():
     oracle = derive_oracle(world, entities, "shipping_success_express")
 
     assert oracle.expected_intent == "modify_shipping_method"
-    assert oracle.expected_write_lock == f"order:{pending_order['order_id']}:modify_shipping_method"
+    assert (
+        oracle.expected_write_lock
+        == f"order:{pending_order['order_id']}:modify_shipping_method"
+    )
     assert oracle.expected_no_write is False
 
 
@@ -89,6 +92,7 @@ def test_derive_unknown_variant_raises():
 def test_select_pending_order_for_cancel():
     world = SyntheticDBGenerator.from_seed(100)
     from app.synthetic.oracle import select_entity_for_variant
+
     entities = select_entity_for_variant(world, "cancel_success")
     assert entities["order"]["status"] == "pending"
     assert entities["user"]["user_id"] == entities["order"]["user_id"]
@@ -97,6 +101,7 @@ def test_select_pending_order_for_cancel():
 def test_select_non_pending_order():
     world = SyntheticDBGenerator.from_seed(103)
     from app.synthetic.oracle import select_entity_for_variant
+
     entities = select_entity_for_variant(world, "cancel_block_nonpending")
     assert entities["order"]["status"] != "pending"
 
@@ -104,6 +109,7 @@ def test_select_non_pending_order():
 def test_select_wrong_user_order():
     world = SyntheticDBGenerator.from_seed(104)
     from app.synthetic.oracle import select_entity_for_variant
+
     entities = select_entity_for_variant(world, "cancel_block_wrong_user")
     # user and order should belong to different people
     assert entities["user"]["user_id"] != entities["order"]["user_id"]
@@ -112,6 +118,7 @@ def test_select_wrong_user_order():
 def test_select_any_user_with_valid_email():
     world = SyntheticDBGenerator.from_seed(300)
     from app.synthetic.oracle import select_entity_for_variant
+
     entities = select_entity_for_variant(world, "coupon_transfer_no_write")
     assert "@" in entities["user"]["email"]
 
@@ -119,6 +126,7 @@ def test_select_any_user_with_valid_email():
 def test_select_pending_order_for_shipping():
     world = SyntheticDBGenerator.from_seed(200)
     from app.synthetic.oracle import select_entity_for_variant
+
     entities = select_entity_for_variant(world, "shipping_success_express")
     assert entities["order"]["status"] == "pending"
     assert entities["order"].get("shipping_method") != "express"
@@ -127,6 +135,7 @@ def test_select_pending_order_for_shipping():
 def test_select_shipping_block_nonpending():
     world = SyntheticDBGenerator.from_seed(203)
     from app.synthetic.oracle import select_entity_for_variant
+
     entities = select_entity_for_variant(world, "shipping_block_nonpending")
     assert entities["order"]["status"] != "pending"
 
@@ -136,6 +145,7 @@ def test_select_shipping_block_nonpending():
 
 def test_all_15_variants_generate_without_error():
     from app.synthetic.families import ALL_FAMILIES
+
     for family in ALL_FAMILIES:
         for variant in family.variants:
             case = variant.to_eval_case()
@@ -148,19 +158,23 @@ def test_all_15_variants_generate_without_error():
 
 def test_cancel_family_has_5_variants():
     from app.synthetic.families import CANCEL_FAMILY
+
     assert len(CANCEL_FAMILY.variants) == 5
 
 
 def test_all_families_total_15_variants():
     from app.synthetic.families import ALL_FAMILIES
+
     total = sum(len(f.variants) for f in ALL_FAMILIES)
     assert total == 15
 
 
 def test_generated_case_is_reproducible():
     from app.synthetic.families import FamilyVariant
-    v = FamilyVariant("test_s100", "cancel_success", 100,
-                       "cancel_order", "order_lifecycle", "cancel")
+
+    v = FamilyVariant(
+        "test_s100", "cancel_success", 100, "cancel_order", "order_lifecycle", "cancel"
+    )
     case1 = v.to_eval_case()
     case2 = v.to_eval_case()
     assert case1.messages == case2.messages
@@ -170,13 +184,17 @@ def test_generated_case_is_reproducible():
 
 def test_no_write_cases_have_no_write_flag():
     from app.synthetic.families import COUPON_REFUSAL_FAMILY
+
     for variant in COUPON_REFUSAL_FAMILY.variants:
         case = variant.to_eval_case()
-        assert case.expected_no_write is True, f"{variant.variant_id} should be no-write"
+        assert case.expected_no_write is True, (
+            f"{variant.variant_id} should be no-write"
+        )
 
 
 def test_cancel_success_cases_expect_cancelled():
     from app.synthetic.families import CANCEL_FAMILY
+
     for variant in CANCEL_FAMILY.variants:
         if "success" in variant.variant_type:
             case = variant.to_eval_case()

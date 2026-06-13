@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 @dataclass
 class DeterministicOracle:
     """从 variant 类型自动派生的标准答案（用于 eval 断言）"""
+
     expected_user_id: str
     expected_intent: str
     order_id: str | None = None
@@ -94,7 +95,9 @@ def _derive_shipping_block_same(world: dict, entities: dict) -> DeterministicOra
     )
 
 
-def _derive_shipping_block_nonpending(world: dict, entities: dict) -> DeterministicOracle:
+def _derive_shipping_block_nonpending(
+    world: dict, entities: dict
+) -> DeterministicOracle:
     order = entities["order"]
     user = entities["user"]
     return DeterministicOracle(
@@ -148,7 +151,9 @@ VARIANT_ORACLE_DERIVERS = {
 }
 
 
-def derive_oracle(world: dict, entities: dict, variant_type: str) -> DeterministicOracle:
+def derive_oracle(
+    world: dict, entities: dict, variant_type: str
+) -> DeterministicOracle:
     """根据 variant_type 自动派生标准答案 oracle。"""
     deriver = VARIANT_ORACLE_DERIVERS.get(variant_type)
     if deriver is None:
@@ -177,17 +182,24 @@ def select_entity_for_variant(world: dict, variant_type: str) -> dict:
 
     if variant_type == "cancel_block_wrong_user":
         if len(users) < 2 or len(orders) < 2:
-            raise ValueError("Need at least 2 users and 2 orders for wrong_user variant")
+            raise ValueError(
+                "Need at least 2 users and 2 orders for wrong_user variant"
+            )
         user = users[0]
         for order in orders:
             if order["user_id"] != user["user_id"]:
                 return {"user": user, "order": order}
-        raise ValueError("No order from different user found for cancel_block_wrong_user")
+        raise ValueError(
+            "No order from different user found for cancel_block_wrong_user"
+        )
 
     if variant_type.startswith("shipping_success_"):
         target_method = variant_type.replace("shipping_success_", "")
         for order in orders:
-            if order["status"] == "pending" and order.get("shipping_method") != target_method:
+            if (
+                order["status"] == "pending"
+                and order.get("shipping_method") != target_method
+            ):
                 user = world["users"][order["user_id"]]
                 return {"user": user, "order": order, "target_method": target_method}
         raise ValueError(f"No pending order found for shipping_success {target_method}")
