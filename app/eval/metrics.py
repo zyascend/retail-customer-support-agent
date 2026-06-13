@@ -150,6 +150,39 @@ def build_failure_analysis(results: Iterable[MetricResult]) -> Dict[str, Any]:
         if not result.passed
     ]
 
+    # ── Generalization-specific aggregations ──
+    family_counts: Dict[str, Counter[str]] = defaultdict(Counter)
+    variant_type_counts: Dict[str, Counter[str]] = defaultdict(Counter)
+    for result in result_list:
+        family = getattr(result, "scenario_family", None) or "unknown"
+        variant = getattr(result, "variant_type", None) or "unknown"
+        family_counts[family][result.failure_label or "passed"] += 1
+        variant_type_counts[variant][result.failure_label or "passed"] += 1
+
+    # failure_source classification
+    failure_source_map = {
+        "wrong_intent": "parsing",
+        "auth_failure": "parsing",
+        "wrong_tool": "planning",
+        "wrong_tool_sequence": "planning",
+        "llm_json_failure": "planning",
+        "expected_guard_block_missing": "guard",
+        "guard_blocked": "guard",
+        "tool_exception": "tool_mutation",
+        "unexpected_mutation": "tool_mutation",
+        "mutation_missing": "tool_mutation",
+        "db_state_mismatch": "tool_mutation",
+        "db_assertion_mismatch": "tool_mutation",
+        "confirmation_status_mismatch": "response",
+        "confirmation_failure": "response",
+        "response_mismatch": "response",
+    }
+    source_counts: Counter[str] = Counter()
+    for result in result_list:
+        if result.failure_label:
+            source = failure_source_map.get(result.failure_label, "unknown")
+            source_counts[source] += 1
+
     return {
         "failure_label_counts": dict(sorted(labels.items())),
         "failure_category_counts": dict(
@@ -166,6 +199,16 @@ def build_failure_analysis(results: Iterable[MetricResult]) -> Dict[str, Any]:
             for category, counts in sorted(category_counts.items())
         },
         "failed_cases": failed_cases,
+        # 🆕 Generalization dimensions
+        "family_counts": {
+            family: dict(sorted(counts.items()))
+            for family, counts in sorted(family_counts.items())
+        },
+        "variant_type_counts": {
+            variant: dict(sorted(counts.items()))
+            for variant, counts in sorted(variant_type_counts.items())
+        },
+        "failure_source_counts": dict(sorted(source_counts.items())),
     }
 
 
