@@ -27,6 +27,12 @@ from app.config import AppConfig
 from app.ops.tracing import TraceWriter, final_state_summary
 from app.tools.gateway import ToolGateway
 from app.tools.registry import ToolRegistry
+from app.agent.action_specs import (
+    WRITE_ACTION_BY_INTENT,
+    WRITE_ACTION_BY_NAME,
+    WRITE_ACTION_NAMES,
+    WRITE_INTENTS,
+)
 from app.tools.retail_adapter import RetailAdapter, get_order_from_db
 
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
@@ -50,15 +56,7 @@ SUPPORTED_INTENTS = {
     "transfer",
     "unknown",
 }
-SUPPORTED_PENDING_ACTIONS = {
-    "cancel_pending_order",
-    "modify_pending_order_address",
-    "modify_pending_order_items",
-    "modify_pending_order_payment",
-    "modify_user_address",
-    "return_delivered_order_items",
-    "exchange_delivered_order_items",
-}
+SUPPORTED_PENDING_ACTIONS = WRITE_ACTION_NAMES
 
 GUARD_USER_MESSAGES = {
     "replacement_item_product_mismatch": "I can only replace an item with another available option from the same product.",
@@ -437,18 +435,10 @@ class AgentRuntime:
 
     def _code_missing_slots(self, state: ConversationState) -> list[str]:
         """Code-side check for missing required slots per intent."""
-        required_map: Dict[str, tuple[str, ...]] = {
-            "cancel_order": ("order_id", "reason"),
-            "modify_order_address": ("order_id", "address"),
-            "modify_order_items": ("order_id", "item_ids", "new_item_ids"),
-            "modify_order_payment": ("order_id", "payment_method_id"),
-            "modify_user_address": ("address",),
-            "return_items": ("order_id", "item_ids", "payment_method_id"),
-            "exchange_items": (
-                "order_id", "item_ids", "new_item_ids", "payment_method_id",
-            ),
-        }
-        required = required_map.get(state.current_intent, ())
+        spec = WRITE_ACTION_BY_INTENT.get(state.current_intent)
+        if spec is None:
+            return []
+        required = spec.required_slots
         return [key for key in required if not state.slots.get(key)]
 
     def _merge_policy_decisions(
@@ -479,15 +469,7 @@ class AgentRuntime:
     def _policy_reasoner(self, state: ConversationState, content: str) -> None:
         if self._has_assistant_response(state):
             return
-        write_intents = {
-            "cancel_order",
-            "modify_order_address",
-            "modify_order_items",
-            "modify_order_payment",
-            "modify_user_address",
-            "return_items",
-            "exchange_items",
-        }
+        write_intents = WRITE_INTENTS
 
         # ── Code track ──
         if state.current_intent == "transfer":
@@ -1054,46 +1036,10 @@ class AgentRuntime:
     def _pending_action_has_required_args(
         self, action_name: str, arguments: Dict[str, Any]
     ) -> bool:
-        required = {
-            "cancel_pending_order": ("order_id", "reason"),
-            "modify_pending_order_address": (
-                "order_id",
-                "address1",
-                "city",
-                "state",
-                "country",
-                "zip",
-            ),
-            "modify_pending_order_items": (
-                "order_id",
-                "item_ids",
-                "new_item_ids",
-            ),
-            "modify_pending_order_payment": (
-                "order_id",
-                "payment_method_id",
-            ),
-            "modify_user_address": (
-                "user_id",
-                "address1",
-                "city",
-                "state",
-                "country",
-                "zip",
-            ),
-            "return_delivered_order_items": (
-                "order_id",
-                "item_ids",
-                "payment_method_id",
-            ),
-            "exchange_delivered_order_items": (
-                "order_id",
-                "item_ids",
-                "new_item_ids",
-                "payment_method_id",
-            ),
-        }[action_name]
-        return all(arguments.get(key) for key in required)
+        spec = WRITE_ACTION_BY_NAME.get(action_name)
+        if spec is None:
+            return False
+        return all(arguments.get(key) for key in spec.required_args)
 
     def _normalize_llm_action_arguments(
         self, action_name: str, arguments: Dict[str, Any]
