@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any, Callable, Dict, Iterable
 
 PHASE1_NODES = (
@@ -45,7 +46,13 @@ def _wrap(
 ) -> Callable[[Dict[str, Any]], Dict[str, Any]]:
     def run(payload: Dict[str, Any]) -> Dict[str, Any]:
         payload["current_node"] = node_name
-        return node_fn(payload)
+        t0 = time.perf_counter()
+        result = node_fn(payload)
+        elapsed = (time.perf_counter() - t0) * 1000
+        state = payload.get("state")
+        if state and hasattr(state, "step_durations"):
+            state.step_durations[node_name] = round(elapsed, 1)
+        return result
 
     return run
 

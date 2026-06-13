@@ -188,7 +188,11 @@ class AgentRuntime:
                 return state.messages[-1].content
             return ""
         for node in PHASE1_NODES:
+            t0 = time.perf_counter()
             getattr(self, f"_{node}")(state, content)
+            state.step_durations[node] = round(
+                (time.perf_counter() - t0) * 1000, 1
+            )
         return self._last_assistant_message(state)
 
     def _graph_node(self, payload: Dict[str, Any]) -> Dict[str, Any]:
