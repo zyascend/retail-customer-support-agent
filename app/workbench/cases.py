@@ -5,16 +5,58 @@ from typing import Any, Dict
 from app.eval.cases import EvalCase, get_cases
 
 DEMO_CASE_IDS = [
+    "auth_name_zip_lookup_order",
     "cancel_pending_order",
     "return_delivered_order_item",
-    "block_wrong_user_order_access",
-    "transfer_to_human",
-    "deny_cancel_confirmation",
-    "auth_name_zip_lookup_order",
     "modify_pending_order_items_success",
     "modify_pending_order_payment_success",
+    "block_wrong_user_order_access",
     "block_item_product_mismatch",
     "block_payment_insufficient_gift_card",
+    "deny_cancel_confirmation",
+    "transfer_to_human",
+]
+
+CASE_GROUPS = [
+    {
+        "key": "auth",
+        "label": "身份认证",
+        "emoji": "🔐",
+        "case_ids": ["auth_name_zip_lookup_order"],
+    },
+    {
+        "key": "success",
+        "label": "成功写操作",
+        "emoji": "✅",
+        "case_ids": [
+            "cancel_pending_order",
+            "return_delivered_order_item",
+            "modify_pending_order_items_success",
+            "modify_pending_order_payment_success",
+        ],
+    },
+    {
+        "key": "blocked",
+        "label": "写保护阻止",
+        "emoji": "🛡️",
+        "case_ids": [
+            "block_wrong_user_order_access",
+            "block_item_product_mismatch",
+            "block_payment_insufficient_gift_card",
+        ],
+    },
+    {
+        "key": "confirmation",
+        "label": "用户确认流程",
+        "emoji": "🔄",
+        "case_ids": ["deny_cancel_confirmation"],
+    },
+    {
+        "key": "transfer",
+        "label": "边界能力",
+        "emoji": "📞",
+        "case_ids": ["transfer_to_human"],
+    },
 ]
 
 CASE_TITLES = {
@@ -60,6 +102,7 @@ def build_case_catalog(subset: str = "curated_mvp") -> Dict[str, Any]:
         "demo_case_ids": list(DEMO_CASE_IDS),
         "demo_cases": demo_cases,
         "all_cases": serialized,
+        "groups": CASE_GROUPS,
     }
 
 
