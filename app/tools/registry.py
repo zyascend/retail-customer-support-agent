@@ -122,7 +122,7 @@ class ToolRegistry:
         return f"{name}. {constraints}"
 
     def _json_schema_for_tool(self, name: str) -> dict[str, Any]:
-        required = self._required_args_for_tool(name)
+        required = self.required_args_for_tool(name)
         properties = {arg: self._property_schema(name, arg) for arg in required}
         return {
             "type": "object",
@@ -131,7 +131,7 @@ class ToolRegistry:
             "additionalProperties": False,
         }
 
-    def _required_args_for_tool(self, name: str) -> list[str]:
+    def required_args_for_tool(self, name: str) -> list[str]:
         explicit: dict[str, list[str]] = {
             "find_user_id_by_email": ["email"],
             "find_user_id_by_name_zip": ["first_name", "last_name", "zip"],
