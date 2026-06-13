@@ -3,9 +3,9 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, Dict, Optional
 
-from app.agent.action_specs import WRITE_ACTION_BY_NAME, WRITE_ACTION_NAMES
+from app.agent.action_specs import WRITE_ACTION_NAMES
 from app.agent.models import ConversationState
-from app.agent.parsers import SUPPORTED_INTENTS, clean_llm_scalar, clean_llm_list
+from app.agent.parsers import SUPPORTED_INTENTS, clean_llm_list, clean_llm_scalar
 from app.agent.prompts import (
     ACTION_PLANNER_SYSTEM,
     POLICY_SYSTEM,
@@ -47,12 +47,14 @@ def llm_json(
         return {}
     finally:
         elapsed = (time.perf_counter() - t0) * 1000
-        state.llm_call_durations.append({
-            "node": node_name,
-            "call_type": "json",
-            "duration_ms": round(elapsed, 1),
-            "status": status,
-        })
+        state.llm_call_durations.append(
+            {
+                "node": node_name,
+                "call_type": "json",
+                "duration_ms": round(elapsed, 1),
+                "status": status,
+            }
+        )
     if not isinstance(result, dict):
         state.add_step(
             f"{node_name}_llm",
@@ -91,12 +93,14 @@ def llm_chat(
         return ""
     finally:
         elapsed = (time.perf_counter() - t0) * 1000
-        state.llm_call_durations.append({
-            "node": node_name,
-            "call_type": "chat",
-            "duration_ms": round(elapsed, 1),
-            "status": status,
-        })
+        state.llm_call_durations.append(
+            {
+                "node": node_name,
+                "call_type": "chat",
+                "duration_ms": round(elapsed, 1),
+                "status": status,
+            }
+        )
     response = response.strip()
     if response:
         state.add_step(f"{node_name}_llm", status="ok")
@@ -201,9 +205,7 @@ def apply_llm_action_plan(
         {
             "user_message": content,
             "policy_decision": (
-                state.policy_decision.model_dump()
-                if state.policy_decision
-                else None
+                state.policy_decision.model_dump() if state.policy_decision else None
             ),
             "current_intent": state.current_intent,
             "slots": state.slots,

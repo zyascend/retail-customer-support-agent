@@ -203,7 +203,9 @@ class CuratedEvalTests(unittest.TestCase):
         self.assertTrue(result.unexpected_mutation)
         self.assertFalse(result.db_accuracy_passed)
         self.assertEqual(result.db_accuracy_basis, "db_hash_no_write")
-        self.assertEqual(result.expected_actual_diff["mutation"]["expected"], "no_write")
+        self.assertEqual(
+            result.expected_actual_diff["mutation"]["expected"], "no_write"
+        )
         self.assertEqual(result.failure_category, None)
         self.assertEqual(metrics["mutation_error_rate"], 1.0)
 
@@ -264,7 +266,9 @@ class CuratedEvalTests(unittest.TestCase):
 
         self.assertGreater(len(generalized_cases), len(curated_cases))
         self.assertEqual({case.subset for case in curated_cases}, {"curated_mvp"})
-        self.assertEqual({case.subset for case in generalized_cases}, {"generalized_mvp"})
+        self.assertEqual(
+            {case.subset for case in generalized_cases}, {"generalized_mvp"}
+        )
         curated_ids = {case.case_id for case in curated_cases}
         generalized_ids = {case.case_id for case in generalized_cases}
         self.assertTrue(curated_ids.issubset(generalized_ids))
@@ -302,8 +306,9 @@ class CuratedEvalTests(unittest.TestCase):
     def test_generalized_mvp_has_minimum_case_count(self):
         cases = get_cases("generalized_mvp")
         self.assertGreaterEqual(
-            len(cases), 30,
-            f"generalized_mvp has {len(cases)} cases, expected at least 30"
+            len(cases),
+            30,
+            f"generalized_mvp has {len(cases)} cases, expected at least 30",
         )
         subsets = {case.subset for case in cases}
         self.assertEqual(subsets, {"generalized_mvp"})
@@ -312,7 +317,9 @@ class CuratedEvalTests(unittest.TestCase):
         cases = {case.case_id: case for case in get_cases("generalized_mvp")}
 
         exchange_case = cases["multi_item_exchange_success"]
-        exchange_text = " ".join(message["content"] for message in exchange_case.messages)
+        exchange_text = " ".join(
+            message["content"] for message in exchange_case.messages
+        )
         exchange_item_ids = re.findall(r"\b\d{8,}\b", exchange_text)
         self.assertGreaterEqual(len(set(exchange_item_ids)), 4)
         self.assertEqual(
@@ -411,7 +418,7 @@ def _result(
     blocked_tool_calls: int = 0,
     guard_blocks: int = 0,
     initial_db_hash: str = "same",
-        final_db_hash: str = "same",
+    final_db_hash: str = "same",
 ) -> EvalCaseResult:
     return EvalCaseResult(
         run_id=f"{case_id}-{trial}",
@@ -443,8 +450,10 @@ def _result(
 class TimingTests(unittest.TestCase):
     def test_step_durations_populated_after_run(self):
         import tempfile
-        from app.config import resolve_config
+
         from app.agent.runtime import AgentRuntime
+        from app.config import resolve_config
+
         with tempfile.TemporaryDirectory() as tmp:
             config = resolve_config(artifact_dir=tmp)
             runtime = AgentRuntime(config, require_llm=False)
@@ -453,17 +462,21 @@ class TimingTests(unittest.TestCase):
             )
             state = result.state
             durations = state.step_durations
-            self.assertGreater(len(durations), 0,
-                              "step_durations should be non-empty after a run")
+            self.assertGreater(
+                len(durations), 0, "step_durations should be non-empty after a run"
+            )
             for node_name, ms in durations.items():
-                self.assertGreaterEqual(ms, 0,
-                                  f"{node_name} duration should be >= 0, got {ms}")
-                self.assertIsInstance(ms, float,
-                                     f"{node_name} duration should be float")
+                self.assertGreaterEqual(
+                    ms, 0, f"{node_name} duration should be >= 0, got {ms}"
+                )
+                self.assertIsInstance(
+                    ms, float, f"{node_name} duration should be float"
+                )
 
     def test_trace_contains_timing_section(self):
-        from app.ops.tracing import build_trace_payload
         from app.agent.models import ConversationState
+        from app.ops.tracing import build_trace_payload
+
         state = ConversationState(session_id="test")
         state.step_durations = {"identity_resolver": 5.0, "run_logger": 1.0}
         state.llm_call_durations = [
@@ -479,7 +492,9 @@ class TimingTests(unittest.TestCase):
 
     def test_timing_fields_serializable(self):
         import json
+
         from app.agent.models import ConversationState
+
         state = ConversationState(session_id="test")
         state.step_durations = {"node1": 1.5}
         state.llm_call_durations = [

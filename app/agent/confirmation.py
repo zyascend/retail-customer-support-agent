@@ -9,29 +9,65 @@ ConfirmationIntent = Literal["confirm", "deny", "changed", "unknown"]
 
 _CONFIRM_KEYWORDS: dict[str, int] = {
     # Strong confirm (weight 3)
-    "yes": 3, "confirm": 3, "proceed": 3, "go ahead": 3,
-    "确认": 3, "可以": 3, "行": 3,
-    "是的": 3, "同意": 3,
-    "好的": 3, "没问题": 3, "继续": 3,
+    "yes": 3,
+    "confirm": 3,
+    "proceed": 3,
+    "go ahead": 3,
+    "确认": 3,
+    "可以": 3,
+    "行": 3,
+    "是的": 3,
+    "同意": 3,
+    "好的": 3,
+    "没问题": 3,
+    "继续": 3,
     # Medium confirm (weight 2)
     "好": 2,
     # Weak confirm (weight 1)
-    "ok": 1, "okay": 1, "sure": 1, "yeah": 1, "yep": 1, "yup": 1,
-    "是": 1, "嗯": 1, "对": 1,
+    "ok": 1,
+    "okay": 1,
+    "sure": 1,
+    "yeah": 1,
+    "yep": 1,
+    "yup": 1,
+    "是": 1,
+    "嗯": 1,
+    "对": 1,
 }
 
 _DENY_KEYWORDS: dict[str, int] = {
-    "no": 3, "nope": 3, "cancel": 3, "deny": 3, "reject": 3, "stop": 3,
-    "不": 3, "取消": 3, "拒绝": 3,
-    "don't": 2, "not": 2, "never": 2, "never mind": 2,
-    "不用": 2, "算了": 2,
-    "先不要": 2, "别改了": 2,
+    "no": 3,
+    "nope": 3,
+    "cancel": 3,
+    "deny": 3,
+    "reject": 3,
+    "stop": 3,
+    "不": 3,
+    "取消": 3,
+    "拒绝": 3,
+    "don't": 2,
+    "not": 2,
+    "never": 2,
+    "never mind": 2,
+    "不用": 2,
+    "算了": 2,
+    "先不要": 2,
+    "别改了": 2,
 }
 
 _CHANGE_KEYWORDS: dict[str, int] = {
-    "change": 3, "instead": 3, "different": 3, "replace": 3, "switch": 3,
-    "改": 3, "换": 3, "换成": 3, "替代": 3,
-    "modify": 2, "update": 2, "adjust": 2,
+    "change": 3,
+    "instead": 3,
+    "different": 3,
+    "replace": 3,
+    "switch": 3,
+    "改": 3,
+    "换": 3,
+    "换成": 3,
+    "替代": 3,
+    "modify": 2,
+    "update": 2,
+    "adjust": 2,
 }
 
 # ── Negation prefixes ──
@@ -63,7 +99,7 @@ def _score(text_lower: str, keywords: dict[str, int]) -> int:
     for phrase, weight in sorted(keywords.items(), key=lambda x: -len(x[0])):
         # For English-only phrases, use word boundary matching
         if phrase.isascii() and phrase.isalpha():
-            pattern = re.compile(r'\b' + re.escape(phrase) + r'\b', re.IGNORECASE)
+            pattern = re.compile(r"\b" + re.escape(phrase) + r"\b", re.IGNORECASE)
             if pattern.search(text_lower):
                 total += weight
         else:
@@ -72,8 +108,10 @@ def _score(text_lower: str, keywords: dict[str, int]) -> int:
             if idx >= 0:
                 # Check this match doesn't overlap with a previously-matched longer phrase
                 span = (idx, idx + len(phrase))
-                if not any(s[0] <= span[0] < s[1] or s[0] < span[1] <= s[1]
-                          for s in matched_spans):
+                if not any(
+                    s[0] <= span[0] < s[1] or s[0] < span[1] <= s[1]
+                    for s in matched_spans
+                ):
                     total += weight
                     matched_spans.append(span)
     return total

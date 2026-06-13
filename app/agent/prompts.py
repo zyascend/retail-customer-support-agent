@@ -45,12 +45,8 @@ RESPONSE_PROMPT = _load_prompt("response_generator_v001", "response_generator_v0
 
 CORE_CONTRACT_PROMPT = _load_prompt("core_contract_v001", "core_contract_v001.md")
 
-INTENT_SLOT_SYSTEM = (
-    CORE_CONTRACT_PROMPT.content + "\n\n" + INTENT_SLOT_PROMPT.content
-)
-POLICY_SYSTEM = (
-    CORE_CONTRACT_PROMPT.content + "\n\n" + POLICY_PROMPT.content
-)
+INTENT_SLOT_SYSTEM = CORE_CONTRACT_PROMPT.content + "\n\n" + INTENT_SLOT_PROMPT.content
+POLICY_SYSTEM = CORE_CONTRACT_PROMPT.content + "\n\n" + POLICY_PROMPT.content
 ACTION_PLANNER_SYSTEM = (
     CORE_CONTRACT_PROMPT.content
     + "\n\n"
@@ -59,9 +55,7 @@ ACTION_PLANNER_SYSTEM = (
         build_action_catalog_for_prompt(),
     )
 )
-RESPONSE_SYSTEM = (
-    CORE_CONTRACT_PROMPT.content + "\n\n" + RESPONSE_PROMPT.content
-)
+RESPONSE_SYSTEM = CORE_CONTRACT_PROMPT.content + "\n\n" + RESPONSE_PROMPT.content
 
 
 def prompt_metadata() -> Dict[str, Dict[str, str]]:

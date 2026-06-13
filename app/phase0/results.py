@@ -139,13 +139,17 @@ def _mean(values: Iterable[Optional[float]]) -> Optional[float]:
     return sum(present) / len(present)
 
 
-def _sum_optional_means(left: Optional[float], right: Optional[float]) -> Optional[float]:
+def _sum_optional_means(
+    left: Optional[float], right: Optional[float]
+) -> Optional[float]:
     if left is None and right is None:
         return None
     return (left or 0.0) + (right or 0.0)
 
 
-def _trial_count(data: Dict[str, Any], simulations: List[Dict[str, Any]]) -> Optional[int]:
+def _trial_count(
+    data: Dict[str, Any], simulations: List[Dict[str, Any]]
+) -> Optional[int]:
     info = data.get("info")
     if isinstance(info, dict):
         value = info.get("num_trials")

@@ -12,9 +12,7 @@ DEFAULT_TAU3_RETAIL_ROOT = Path(
     )
 )
 DEFAULT_TAU2_BENCH_ROOT = Path(
-    os.path.expanduser(
-        "~/Documents/ai/AgentProject/data_sources/raw/tau2-bench"
-    )
+    os.path.expanduser("~/Documents/ai/AgentProject/data_sources/raw/tau2-bench")
 )
 DEFAULT_ARTIFACT_DIR = Path("artifacts/phase1")
 DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
@@ -71,9 +69,7 @@ def resolve_config(
         or str(DEFAULT_TAU3_RETAIL_ROOT)
     ).expanduser()
     tau2_root = Path(
-        tau2_bench_root
-        or os.getenv("TAU2_BENCH_ROOT")
-        or str(DEFAULT_TAU2_BENCH_ROOT)
+        tau2_bench_root or os.getenv("TAU2_BENCH_ROOT") or str(DEFAULT_TAU2_BENCH_ROOT)
     ).expanduser()
     artifacts = Path(
         artifact_dir
@@ -168,5 +164,3 @@ def _int_env(name: str, default: int) -> int:
     if value < 0:
         raise ValueError(f"{name} must be >= 0")
     return value
-
-

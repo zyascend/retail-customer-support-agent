@@ -6,8 +6,8 @@ import subprocess
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -137,11 +137,16 @@ class CuratedEvalRunner:
         for trial in range(trials):
             if max_workers > 1:
                 trial_results = self._run_trial_parallel(
-                    eval_run_id, cases, trial, max_workers,
+                    eval_run_id,
+                    cases,
+                    trial,
+                    max_workers,
                 )
             else:
                 trial_results = self._run_trial_sequential(
-                    eval_run_id, cases, trial,
+                    eval_run_id,
+                    cases,
+                    trial,
                 )
             results.extend(trial_results)
         passed_count = sum(1 for result in results if result.passed)
@@ -226,18 +231,13 @@ class CuratedEvalRunner:
                 )
 
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [
-                pool.submit(_run_one, case, i)
-                for i, case in enumerate(cases)
-            ]
+            futures = [pool.submit(_run_one, case, i) for i, case in enumerate(cases)]
             for future in as_completed(futures):
                 results.append(future.result())
 
         return results
 
-    def _run_case(
-        self, eval_run_id: str, case: EvalCase, trial: int
-    ) -> EvalCaseResult:
+    def _run_case(self, eval_run_id: str, case: EvalCase, trial: int) -> EvalCaseResult:
         runtime_config = AppConfig(
             tau3_retail_root=self.config.tau3_retail_root,
             tau2_bench_root=self.config.tau2_bench_root,
@@ -333,7 +333,9 @@ class CuratedEvalRunner:
             successful_tool_calls=successful_tool_calls,
             failed_tool_calls=tool_errors,
             blocked_tool_calls=guard_blocks,
-            trial_turn_count=sum(1 for message in state.messages if message.role == "user"),
+            trial_turn_count=sum(
+                1 for message in state.messages if message.role == "user"
+            ),
             message_count=len(state.messages),
             policy_check_count=1 if state.policy_decision else 0,
             replay_metadata={

@@ -78,9 +78,13 @@ def run_environment_check(
 
     expected_root_files = ("pyproject.toml", "uv.lock", "src/tau2")
     if config.tau2_bench_root.exists():
-        messages.append(CheckMessage("tau2_bench_root", "ok", str(config.tau2_bench_root)))
+        messages.append(
+            CheckMessage("tau2_bench_root", "ok", str(config.tau2_bench_root))
+        )
         missing_root_files = [
-            item for item in expected_root_files if not (config.tau2_bench_root / item).exists()
+            item
+            for item in expected_root_files
+            if not (config.tau2_bench_root / item).exists()
         ]
         if missing_root_files:
             errors += 1
@@ -92,7 +96,9 @@ def run_environment_check(
                 )
             )
         else:
-            messages.append(CheckMessage("tau2_source_shape", "ok", "source files found"))
+            messages.append(
+                CheckMessage("tau2_source_shape", "ok", "source files found")
+            )
     else:
         errors += 1
         messages.append(
@@ -100,7 +106,9 @@ def run_environment_check(
         )
 
     missing_retail_files = [
-        name for name in RETAIL_REQUIRED_FILES if not (config.retail_domain_dir / name).exists()
+        name
+        for name in RETAIL_REQUIRED_FILES
+        if not (config.retail_domain_dir / name).exists()
     ]
     if missing_retail_files:
         errors += 1
@@ -151,7 +159,9 @@ def run_environment_check(
                 CheckMessage(
                     "retail_splits",
                     "ok",
-                    ", ".join(f"{name}={count}" for name, count in split_counts.items()),
+                    ", ".join(
+                        f"{name}={count}" for name, count in split_counts.items()
+                    ),
                 )
             )
 

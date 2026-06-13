@@ -25,9 +25,7 @@ CASE_TITLES = {
     "exchange_delivered_order_item": "换货已送达商品",
     "transfer_to_human": "转接人工客服",
     "deny_cancel_confirmation": "拒绝取消确认",
-    "changed_confirmation_discards_pending_action": (
-        "变更确认并丢弃待处理操作"
-    ),
+    "changed_confirmation_discards_pending_action": ("变更确认并丢弃待处理操作"),
     "block_cancel_processed_order": "阻止取消已处理订单",
     "block_return_pending_order": "阻止退回待处理订单",
     "block_wrong_user_order_access": "阻止访问他人订单",

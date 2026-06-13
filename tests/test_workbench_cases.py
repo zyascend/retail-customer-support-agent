@@ -35,9 +35,7 @@ class WorkbenchCaseCatalogTests(unittest.TestCase):
         ):
             self.assertIsNot(serialized_message, source_message)
         self.assertEqual(case["expected_tool_names"], source_case.expected_tool_names)
-        self.assertIsNot(
-            case["expected_tool_names"], source_case.expected_tool_names
-        )
+        self.assertIsNot(case["expected_tool_names"], source_case.expected_tool_names)
 
     def test_get_case_by_id_returns_eval_case(self):
         case = get_case_by_id("transfer_to_human")

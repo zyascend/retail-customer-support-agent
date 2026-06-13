@@ -41,9 +41,7 @@ class WorkbenchSnapshotTests(unittest.TestCase):
         self.assertEqual(redacted["order_id"], "#W1234567")
 
     def test_redacts_sensitive_patterns_without_losing_context(self):
-        redacted = redact_value(
-            "My email is sofia@example.com. Cancel order #W5918442"
-        )
+        redacted = redact_value("My email is sofia@example.com. Cancel order #W5918442")
 
         self.assertEqual(
             redacted,

@@ -29,9 +29,7 @@ class WorkbenchSessionTests(unittest.TestCase):
             second = session.run_all()
             self.assertEqual(second["script_cursor"], 2)
             self.assertEqual(second["business"]["confirmation_status"], "confirmed")
-            self.assertIn(
-                "order:#W5918442:cancel", second["business"]["write_locks"]
-            )
+            self.assertIn("order:#W5918442:cancel", second["business"]["write_locks"])
             self.assertTrue(Path(second["trace_artifact_path"]).exists())
 
     def test_concurrent_steps_serialize_script_cursor(self):
@@ -154,9 +152,7 @@ class WorkbenchSessionTests(unittest.TestCase):
             manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
 
             with self.assertRaises(WorkbenchAPIError) as create_context:
-                manager.create_session(
-                    mode="deterministic", case_id="missing_case"
-                )
+                manager.create_session(mode="deterministic", case_id="missing_case")
 
             self.assertEqual(create_context.exception.code, "case_not_found")
             self.assertEqual(create_context.exception.status_code, 404)
@@ -198,7 +194,9 @@ class WorkbenchSessionTests(unittest.TestCase):
             self.assertEqual(session.script_cursor, 1)
             self.assertEqual(session.state.messages, before_messages)
             self.assertIs(session.runtime, before_runtime)
-            self.assertEqual(session.snapshot()["messages"], before_snapshot["messages"])
+            self.assertEqual(
+                session.snapshot()["messages"], before_snapshot["messages"]
+            )
 
     def test_failed_reset_during_trace_write_preserves_existing_session_state(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -234,7 +232,9 @@ class WorkbenchSessionTests(unittest.TestCase):
             self.assertIs(session.runtime, before_runtime)
             self.assertIs(session.state, before_state)
             self.assertEqual(session.trace_artifact_path, before_trace_path)
-            self.assertEqual(session.snapshot()["messages"], before_snapshot["messages"])
+            self.assertEqual(
+                session.snapshot()["messages"], before_snapshot["messages"]
+            )
 
     def test_failed_reset_trace_staging_preserves_existing_trace_file(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -286,7 +286,9 @@ class WorkbenchSessionTests(unittest.TestCase):
 
             snapshot = session.run_all()
 
-            self.assertEqual(snapshot["selected_case_id"], "block_wrong_user_order_access")
+            self.assertEqual(
+                snapshot["selected_case_id"], "block_wrong_user_order_access"
+            )
             self.assertIn("another account", snapshot["messages"][-1]["content"])
             self.assertEqual(len(snapshot["guard_blocks"]), 1)
             self.assertEqual(snapshot["guard_blocks"][0]["status"], "blocked")

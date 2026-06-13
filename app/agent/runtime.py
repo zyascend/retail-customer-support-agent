@@ -6,21 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
-from app.agent.confirmation import ConfirmationResolver
-from app.agent.graph import PHASE1_NODES, build_linear_graph
-from app.agent.models import (
-    ConversationState,
-    Message,
-)
-from app.agent.prompts import (
-    INTENT_SLOT_SYSTEM,
-    prompt_metadata,
-)
-from app.agent.providers import DisabledLLMProvider, LLMProvider, build_default_provider
-from app.config import AppConfig
-from app.ops.tracing import TraceWriter, final_state_summary
-from app.tools.gateway import ToolGateway
-from app.tools.registry import ToolRegistry
 from app.agent.action_specs import (
     WRITE_INTENTS,
 )
@@ -30,12 +15,18 @@ from app.agent.builders import (
     pending_action_has_required_args,
     pending_prompt,
 )
+from app.agent.confirmation import ConfirmationResolver
+from app.agent.graph import PHASE1_NODES, build_linear_graph
 from app.agent.llm_client import (
     apply_llm_action_plan,
     apply_llm_intent_slots,
     llm_chat,
     llm_json,
     llm_policy_decision,
+)
+from app.agent.models import (
+    ConversationState,
+    Message,
 )
 from app.agent.parsers import (
     NAME_ZIP_RE,
@@ -75,6 +66,15 @@ from app.agent.plan_handlers import (
     set_pending,
     transfer_to_human,
 )
+from app.agent.prompts import (
+    INTENT_SLOT_SYSTEM,
+    prompt_metadata,
+)
+from app.agent.providers import DisabledLLMProvider, LLMProvider, build_default_provider
+from app.config import AppConfig
+from app.ops.tracing import TraceWriter, final_state_summary
+from app.tools.gateway import ToolGateway
+from app.tools.registry import ToolRegistry
 from app.tools.retail_adapter import RetailAdapter, get_order_from_db
 
 GUARD_USER_MESSAGES = {
@@ -208,9 +208,7 @@ class AgentRuntime:
         for node in PHASE1_NODES:
             t0 = time.perf_counter()
             getattr(self, f"_{node}")(state, content)
-            state.step_durations[node] = round(
-                (time.perf_counter() - t0) * 1000, 1
-            )
+            state.step_durations[node] = round((time.perf_counter() - t0) * 1000, 1)
         return self._last_assistant_message(state)
 
     def _graph_node(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -265,7 +263,12 @@ class AgentRuntime:
         user_id = str(record.observation)
         state.authenticated_user_id = user_id
         state.auth_method = "name_zip"
-        state.active_user_identity = {"first_name": first_name, "last_name": last_name, "zip": zip_code, "user_id": user_id}
+        state.active_user_identity = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "zip": zip_code,
+            "user_id": user_id,
+        }
         user_record = self.gateway.execute(
             state=state,
             tool_name="get_user_details",
@@ -273,7 +276,12 @@ class AgentRuntime:
         )
         if user_record.status == "success":
             state.loaded_context.users[user_id] = user_record.observation
-        state.add_step("identity_resolver", status="authenticated", user_id=user_id, method="name_zip")
+        state.add_step(
+            "identity_resolver",
+            status="authenticated",
+            user_id=user_id,
+            method="name_zip",
+        )
         return True
 
     def _intent_and_slot_extractor(
@@ -411,9 +419,7 @@ class AgentRuntime:
     ) -> Dict[str, Any]:
         return llm_json(state, node_name, system_prompt, payload, schema, self.provider)
 
-    def _llm_chat(
-        self, state: ConversationState, node_name: str, draft: str
-    ) -> str:
+    def _llm_chat(self, state: ConversationState, node_name: str, draft: str) -> str:
         return llm_chat(state, node_name, draft, self.provider)
 
     def _apply_llm_intent_slots(
@@ -444,9 +450,7 @@ class AgentRuntime:
             self._llm_json,
         )
 
-    def _apply_llm_action_plan(
-        self, state: ConversationState, content: str
-    ) -> bool:
+    def _apply_llm_action_plan(self, state: ConversationState, content: str) -> bool:
         return apply_llm_action_plan(
             state,
             content,
