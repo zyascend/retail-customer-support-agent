@@ -17,9 +17,10 @@ def _runtime_with_disabled_provider(tmp: str) -> AgentRuntime:
 
 
 class TestRuntimeSafeFallback:
-    """Tests: provider=None returns safe fallback message."""
+    """Tests: provider=None falls back to DeterministicProvider."""
 
     def test_safe_fallback_when_no_provider(self) -> None:
+        # Phase 7: DisabledLLMProvider → self.provider = None → DeterministicProvider
         with tempfile.TemporaryDirectory() as tmp:
             runtime = _runtime_with_disabled_provider(tmp)
             result = runtime.run_script(
@@ -27,7 +28,9 @@ class TestRuntimeSafeFallback:
                 session_id="test-fallback",
             )
 
-        assert "offline" in result.state.messages[-1].content.lower()
+        # DeterministicProvider echoes last user message; agent should not crash
+        assert len(result.state.messages) >= 2  # user + assistant
+        assert result.state.messages[-1].role == "assistant"
         assert result.state.termination_reason == "script_completed"
 
 

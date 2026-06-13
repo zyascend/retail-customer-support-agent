@@ -181,18 +181,16 @@ class AgentRuntime:
         if not session.authenticated_user_id:
             self._preflight_identity(session, content)
 
-        # 3. LLM agent loop (or safe fallback)
-        if self.provider is None:
-            msg = (
-                "I'm sorry, the agent is running in offline mode. "
-                "Please configure an LLM provider to handle your request."
-            )
-            session.messages.append(Message(role="assistant", content=msg))
-            session.add_step("safe_fallback", reason="no_provider")
-            return msg
+        # 3. LLM agent loop
+        # Phase 7: fall back to deterministic provider when no LLM configured
+        provider = self.provider
+        if provider is None:
+            from app.agent.providers import DeterministicProvider
+            provider = DeterministicProvider()
+            session.add_step("deterministic_fallback")
 
         loop = AgentLoop(
-            provider=self.provider,
+            provider=provider,
             gateway=self.gateway,
             registry=self.registry,
             context_builder=self._context_builder,
