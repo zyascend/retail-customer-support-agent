@@ -12,6 +12,7 @@ from app.analysis.tau_task_analyzer import (
     TaskSpaceStats,
     _resolve_tau3_retail_dir,
     aggregate_by_capability,
+    analyze_and_report,
     analyze_nl_assertions,
     classify_task,
     compute_task_space_stats,
@@ -343,3 +344,18 @@ def test_render_report_produces_markdown_with_all_sections():
     assert "2" in report  # total tasks
     assert "supported" in report
     assert "partial_nl_assertion" in report
+
+
+def test_analyze_and_report_runs_on_real_data():
+    """analyze_and_report runs against real tau3 data and returns non-empty report."""
+    try:
+        report = analyze_and_report()
+    except FileNotFoundError:
+        pytest.skip("tau3 retail data not available")
+    assert len(report) > 1000
+    assert "# Tau Retail Task Space Analysis" in report
+    assert "## 8. Phase 9 首批 Ingestion 建议" in report
+
+    # Verify all 114 tasks appear in the report
+    task_id_pattern = sum(1 for line in report.splitlines() if line.startswith("| "))
+    assert task_id_pattern > 100  # at least the full task list rows

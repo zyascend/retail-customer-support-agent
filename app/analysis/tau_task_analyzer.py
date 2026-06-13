@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
-from app.config import AppConfig
+from app.config import AppConfig, resolve_config
 
 
 @dataclass
@@ -784,3 +784,121 @@ def _section_8_recommendations(
     lines.append("- 短期内不考虑 `get_item_details` 工具实现（仅 3 个 task 使用）")
     lines.append("- 不引入 `calculate` 工具（Agent 的 LLM 推理可替代简单数学计算）")
     lines.append("")
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+
+def analyze_and_report(config: AppConfig | None = None) -> str:
+    """Run full analysis and return the Markdown report as a string.
+
+    Args:
+        config: Optional AppConfig. If None, resolves from env.
+
+    Returns:
+        Complete Markdown report string.
+
+    Raises:
+        FileNotFoundError: If tau3 retail data directory is not found.
+    """
+    if config is None:
+        config = resolve_config()
+
+    retail_dir = _resolve_tau3_retail_dir(config)
+
+    # Load data
+    tasks = load_tasks(retail_dir)
+    splits = load_splits(retail_dir)
+
+    # Statistics
+    stats = compute_task_space_stats(tasks, splits)
+
+    # Classify every task
+    classifications = [classify_task(t, splits) for t in tasks]
+
+    # NL assertion analysis
+    nl_analysis = analyze_nl_assertions(tasks)
+
+    # Capability aggregation
+    cap_agg = aggregate_by_capability(classifications)
+
+    # Tool gap info
+    unsupported_tool_info: dict = {}
+    missing_tool_info: dict = {}
+    for c in classifications:
+        for tool in c.missing_tools:
+            if tool in AUXILIARY_TOOLS:
+                target = missing_tool_info
+            else:
+                target = unsupported_tool_info
+            if tool not in target:
+                target[tool] = {"count": 0, "task_ids": []}
+            target[tool]["count"] += 1
+            if c.task_id not in target[tool]["task_ids"]:
+                target[tool]["task_ids"].append(c.task_id)
+
+    # Render report
+    report = render_report(
+        stats=stats,
+        classifications=classifications,
+        nl_analysis=nl_analysis,
+        cap_agg=cap_agg,
+        data_source_path=str(retail_dir),
+        unsupported_tool_info=unsupported_tool_info,
+        missing_tool_info=missing_tool_info,
+    )
+    return report
+
+
+def main() -> None:
+    """CLI entry point: run analysis and write report to docs/."""
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(
+        description="Analyze tau3 retail task space and generate a report."
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Also write structured classifications to artifacts/phase9a/",
+    )
+    args = parser.parse_args()
+
+    config = resolve_config()
+    try:
+        report = analyze_and_report(config)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Write report
+    report_path = Path("docs/tau-task-space-analysis.md")
+    report_path.write_text(report, encoding="utf-8")
+    print(f"Report written to {report_path}")
+
+    # Optional JSON output
+    if args.json:
+        json_dir = Path("artifacts/phase9a")
+        json_dir.mkdir(parents=True, exist_ok=True)
+        # Re-run classification to get the data for JSON
+        retail_dir = _resolve_tau3_retail_dir(config)
+        tasks = load_tasks(retail_dir)
+        splits = load_splits(retail_dir)
+        classifications = [classify_task(t, splits) for t in tasks]
+        json_path = json_dir / "task_classifications.json"
+        json_path.write_text(
+            json.dumps(
+                [c.__dict__ for c in classifications],
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        print(f"Classifications written to {json_path}")
+
+
+if __name__ == "__main__":
+    main()
