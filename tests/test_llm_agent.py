@@ -295,3 +295,67 @@ class TestAgentLoopWritePending:
         blocked = [r for r in session.tool_results if r.status == "blocked"]
         assert len(blocked) == 1
         assert blocked[0].error == "read_before_write_required"
+
+
+class TestAgentLoopGuardBlock:
+    """Tests: guard blocks (non-confirmation) become tool errors."""
+
+    def test_cancel_delivered_order_guard_block(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+        from app.agent.models import ToolCallRequest
+        from app.tools.retail_adapter import get_order_from_db
+
+        gateway = _gateway()
+        db = gateway.runtime.db
+        db_orders = db.get("orders", {})
+        delivered_order = next(
+            (oid for oid, o in db_orders.items() if o.get("status") == "delivered"),
+            None,
+        )
+        assert delivered_order is not None, "Need a delivered order in test DB"
+
+        order = get_order_from_db(db, delivered_order)
+        user_id = order["user_id"]
+
+        session = _session(
+            authenticated_user_id=user_id,
+            active_user_identity={"user_id": user_id},
+        )
+        session.loaded_context.orders[delivered_order] = order
+
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_cancel",
+                            tool_name="cancel_pending_order",
+                            arguments={
+                                "order_id": delivered_order,
+                                "reason": "no longer needed",
+                            },
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                ToolCallResponse(
+                    assistant_content=(
+                        "I cannot cancel this order because it has already been "
+                        "delivered. Would you like to return it instead?"
+                    ),
+                    finish_reason="stop",
+                ),
+            ]
+        )
+        loop = AgentLoop(
+            provider=provider,
+            gateway=gateway,
+            registry=_registry(),
+            context_builder=_context_builder(),
+        )
+        result = loop.run_turn(session, "Cancel my order")
+
+        assert "cannot cancel" in result.assistant_message.lower() or "delivered" in result.assistant_message.lower()
+        blocked = [r for r in session.tool_results if r.status == "blocked"]
+        assert len(blocked) == 1
+        assert blocked[0].error == "non_pending_order_cannot_be_cancelled"
