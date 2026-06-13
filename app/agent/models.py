@@ -119,12 +119,7 @@ class SessionState(BaseModel):
     pending_action: Optional[PendingAction] = None
     termination_reason: Optional[str] = None
 
-    # ── Phase 4 temporary compat (Phase 5 removes these) ──
-    current_intent: str = "unknown"
-    slots: Dict[str, Any] = Field(default_factory=dict)
     confirmation_status: str = "not_required"
-    policy_decision: Optional[PolicyDecision] = None
-    risk_level: str = "low"
     step_durations: dict[str, float] = Field(default_factory=dict)
 
     steps: List[AgentStep] = Field(default_factory=list)

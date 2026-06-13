@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
-from app.agent.models import ConversationState
+from app.agent.models import ConversationState, SessionState
 
 
 class TraceWriter:
@@ -57,9 +57,6 @@ def build_trace_payload(
         "messages": [message.model_dump() for message in state.messages],
         "steps": [step.model_dump() for step in state.steps],
         "tool_calls": [record.model_dump() for record in state.tool_results],
-        "policy_checks": (
-            [state.policy_decision.model_dump()] if state.policy_decision else []
-        ),
         "write_audit_logs": state.audit_logs,
         "final_state": final_state_summary(state),
         "timing": _build_timing_section(state),
@@ -85,8 +82,6 @@ def final_state_summary(state: ConversationState) -> Dict[str, Any]:
         "task_id": state.task_id,
         "authenticated_user_id": state.authenticated_user_id,
         "auth_method": state.auth_method,
-        "current_intent": state.current_intent,
-        "slots": state.slots,
         "confirmation_status": state.confirmation_status,
         "pending_action": (
             state.pending_action.model_dump() if state.pending_action else None

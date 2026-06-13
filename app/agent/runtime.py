@@ -245,7 +245,6 @@ class AgentRuntime:
             return msg
         elif resolution == "changed":
             session.pending_action = None
-            session.slots = {}
             msg = "I discarded the previous request. Please provide updated details."
             session.messages.append(Message(role="assistant", content=msg))
             return msg

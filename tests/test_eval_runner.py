@@ -538,6 +538,15 @@ class CuratedEvalTests(unittest.TestCase):
 
         self.assertIsNone(label)
 
+    def test_session_state_has_no_phase4_compat_fields(self):
+        from app.agent.models import SessionState
+
+        state = SessionState(session_id="test")
+        for removed_field in ("current_intent", "slots", "policy_decision", "risk_level"):
+            with self.subTest(field=removed_field):
+                with self.assertRaises(AttributeError):
+                    getattr(state, removed_field)
+
     def test_live_flag_passes_provider_none_to_runtime(self):
         """Verify live=False produces scripted eval_backend and runs all cases."""
         import tempfile

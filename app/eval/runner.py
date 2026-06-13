@@ -379,7 +379,7 @@ class CuratedEvalRunner:
         failure_label = classify_failure(
             case=case,
             authenticated_user_id=state.authenticated_user_id,
-            final_intent=state.current_intent,
+            final_intent="",
             write_locks=state.write_locks,
             actual_order_status=actual_order_status,
             assistant_messages=[
@@ -413,7 +413,7 @@ class CuratedEvalRunner:
             llm_loop_iterations=total_loop_iterations,
             trace_artifact_path=str(run_result.trace_artifact_path),
             authenticated_user_id=state.authenticated_user_id,
-            final_intent=state.current_intent,
+            final_intent="",
             termination_reason=state.termination_reason,
             expected_write_lock=case.expected_write_lock,
             write_locks=list(state.write_locks),
@@ -438,7 +438,7 @@ class CuratedEvalRunner:
                 1 for message in state.messages if message.role == "user"
             ),
             message_count=len(state.messages),
-            policy_check_count=1 if state.policy_decision else 0,
+            policy_check_count=0,
             replay_metadata={
                 "run_id": run_result.run_id,
                 "session_id": state.session_id,
@@ -572,8 +572,6 @@ def classify_failure(
     if not is_tau:
         if authenticated_user_id != case.expected_user_id:
             return "auth_failure"
-        if final_intent != case.expected_intent:
-            return "wrong_intent"
     # Tau subsets: loose tool check — at least one expected tool must be
     # called (any tool, read or write). Don't require full action sequence.
     # Skip check if expected_tool_names is empty (no tool expectations).
