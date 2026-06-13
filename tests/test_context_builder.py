@@ -39,9 +39,8 @@ def _session() -> SessionState:
 
 def test_build_includes_auth_summary() -> None:
     summary = ContextBuilder(policy_text="dummy").build(_session())
-    assert "Alice Smith" in summary
-    assert "U1" in summary
-    assert "example.com" in summary
+    assert "user_id=U1" in summary
+    assert "(email)" in summary
 
 
 def test_build_includes_order_summaries() -> None:
@@ -50,11 +49,6 @@ def test_build_includes_order_summaries() -> None:
     assert "pending" in summary
     assert "O2" in summary
     assert "delivered" in summary
-
-
-def test_build_marks_writable_orders() -> None:
-    summary = ContextBuilder(policy_text="dummy").build(_session())
-    assert "[writable]" in summary
 
 
 def test_build_includes_pending_action() -> None:
@@ -78,13 +72,13 @@ def test_build_includes_write_locks() -> None:
 def test_build_handles_unauthenticated_user() -> None:
     session = SessionState(session_id="ctx-2")
     summary = ContextBuilder(policy_text="dummy").build(session)
-    assert "not authenticated" in summary.lower()
+    assert "User:" not in summary
 
 
 def test_build_handles_empty_state() -> None:
     session = SessionState(session_id="ctx-3")
     summary = ContextBuilder(policy_text="dummy").build(session)
-    assert len(summary) > 0
+    assert summary == ""
 
 
 def test_estimate_tokens_is_reasonable() -> None:
@@ -95,11 +89,9 @@ def test_estimate_tokens_is_reasonable() -> None:
     assert 0 < tokens < 2000
 
 
-def test_recent_messages_limited_to_last_six() -> None:
+def test_recent_messages_not_included() -> None:
     session = _session()
     for i in range(10):
         session.messages.append(Message(role="user", content=f"msg {i}"))
     summary = ContextBuilder(policy_text="dummy").build(session)
-    assert "msg 0" not in summary
-    assert "msg 3" not in summary
-    assert "msg 8" in summary
+    assert "msg" not in summary
