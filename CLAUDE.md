@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Conventions
 
+- **文档语言**: 项目文档默认使用中文，包括 README、docs 下的设计文档、路线图、计划、评审说明和阶段总结。只有外部 API 名称、代码标识符、命令、指标名、英文专有术语或需要对齐上游英文材料时保留英文。
 - **Commit messages**: `<type>: 中文描述` — type 用 `feat` / `fix` / `chore` / `docs` / `refactor` / `test`，描述用中文。示例：`feat: 添加 action_specs 单一事实来源`
-- **分支管理**: 使用 `git checkout -b` 创建分支开发，不使用 git worktree。合并后删除分支
+- **分支管理**: 使用普通 git 分支开发，优先 `git checkout -b <branch>`；不使用 git worktree。合并后删除已完成分支。
 
 ## Commands
 
