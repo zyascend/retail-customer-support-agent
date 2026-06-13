@@ -62,6 +62,20 @@ def build_trace_payload(
         ),
         "write_audit_logs": state.audit_logs,
         "final_state": final_state_summary(state),
+        "timing": _build_timing_section(state),
+    }
+
+
+def _build_timing_section(state: ConversationState) -> dict:
+    step_durations = getattr(state, "step_durations", {}) or {}
+    llm_call_durations = getattr(state, "llm_call_durations", []) or []
+    total_ms = sum(step_durations.values())
+    llm_total_ms = sum(call.get("duration_ms", 0) for call in llm_call_durations)
+    return {
+        "step_durations_ms": step_durations,
+        "total_ms": round(total_ms, 1),
+        "llm_total_ms": round(llm_total_ms, 1),
+        "llm_calls": llm_call_durations,
     }
 
 
