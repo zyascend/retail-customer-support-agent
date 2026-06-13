@@ -5,54 +5,95 @@ from typing import Literal
 
 ConfirmationIntent = Literal["confirm", "deny", "changed", "unknown"]
 
-CONFIRM_TERMS = {
-    "yes",
-    "yep",
-    "yeah",
-    "confirm",
-    "go ahead",
-    "proceed",
-    "ok",
-    "okay",
-    "sure",
-    "确认",
-    "可以",
-    "是的",
-    "好的",
-    "行",
-    "没问题",
-    "继续",
+# ── Weighted keyword dictionaries ──
+
+_CONFIRM_KEYWORDS: dict[str, int] = {
+    # Strong confirm (weight 3)
+    "yes": 3, "confirm": 3, "proceed": 3, "go ahead": 3,
+    "确认": 3, "可以": 3, "行": 3,
+    "是的": 3, "同意": 3,
+    "好的": 3, "没问题": 3, "继续": 3,
+    # Medium confirm (weight 2)
+    "好": 2,
+    # Weak confirm (weight 1)
+    "ok": 1, "okay": 1, "sure": 1, "yeah": 1, "yep": 1, "yup": 1,
+    "是": 1, "嗯": 1, "对": 1,
 }
-DENY_TERMS = {
-    "no",
-    "nope",
-    "cancel",
-    "stop",
-    "never mind",
-    "不",
-    "不用",
-    "取消",
-    "算了",
-    "先不要",
-    "别改了",
+
+_DENY_KEYWORDS: dict[str, int] = {
+    "no": 3, "nope": 3, "cancel": 3, "deny": 3, "reject": 3, "stop": 3,
+    "不": 3, "取消": 3, "拒绝": 3,
+    "don't": 2, "not": 2, "never": 2, "never mind": 2,
+    "不用": 2, "算了": 2,
+    "先不要": 2, "别改了": 2,
 }
-CHANGE_PATTERNS = (
-    r"#W\d+",
-    r"\b\d{8,}\b",
-    r"\b\d{5}(?:-\d{4})?\b",
-    r"\b(address|item|payment|reason|instead|different|change)\b",
-    r"(地址|商品|支付|原因|换成|改成)",
+
+_CHANGE_KEYWORDS: dict[str, int] = {
+    "change": 3, "instead": 3, "different": 3, "replace": 3, "switch": 3,
+    "改": 3, "换": 3, "换成": 3, "替代": 3,
+    "modify": 2, "update": 2, "adjust": 2,
+}
+
+# ── Negation prefixes ──
+
+_NEGATION_RE = re.compile(
+    r"\b(?:don'?t|do not|not|never|won'?t|cannot|can'?t)\b",
+    re.IGNORECASE,
 )
+_CN_NEGATION_RE = re.compile(
+    r"(?:不|不要|别|不想|别要)",
+)
+
+_CHANGE_PATTERN = re.compile(
+    r"\b(?:change|instead|different|replace|switch|modify|update|adjust"
+    r"|改|换|换成|替代)\b",
+    re.IGNORECASE,
+)
+
+
+def _score(text_lower: str, keywords: dict[str, int]) -> int:
+    """Sum weights of keywords found in text. Multi-word keys checked first."""
+    total = 0
+    # Sort by length descending so "go ahead" matches before "go" or "ahead"
+    for phrase, weight in sorted(keywords.items(), key=lambda x: -len(x[0])):
+        if phrase in text_lower:
+            total += weight
+    return total
+
+
+def _has_negated_change(text_lower: str) -> bool:
+    """Detect patterns like 'don't change', '不想改'."""
+    if _NEGATION_RE.search(text_lower) and _CHANGE_PATTERN.search(text_lower):
+        return True
+    if _CN_NEGATION_RE.search(text_lower) and _CHANGE_PATTERN.search(text_lower):
+        return True
+    return False
 
 
 class ConfirmationResolver:
     def resolve(self, text: str) -> ConfirmationIntent:
-        normalized = " ".join(text.lower().strip().split())
-        if normalized in CONFIRM_TERMS:
-            return "confirm"
-        if normalized in DENY_TERMS:
-            return "deny"
-        if any(re.search(pattern, text, re.IGNORECASE) for pattern in CHANGE_PATTERNS):
-            return "changed"
-        return "unknown"
+        text_lower = text.lower().strip()
 
+        # 1. Negated change gets highest priority: "don't change" → denied
+        if _has_negated_change(text_lower):
+            return "deny"
+
+        # 2. Compute confidence scores
+        confirm = _score(text_lower, _CONFIRM_KEYWORDS)
+        deny = _score(text_lower, _DENY_KEYWORDS)
+        change = _score(text_lower, _CHANGE_KEYWORDS)
+
+        # 3. Clear deny signal
+        if deny > confirm + change and deny >= 2:
+            return "deny"
+
+        # 4. User wants to change the request (even if "no" appears)
+        if change > confirm and change >= 2:
+            return "changed"
+
+        # 5. Clear confirm signal
+        if confirm > deny and confirm >= 2:
+            return "confirm"
+
+        # 6. Ambiguous — require clarification
+        return "unknown"
