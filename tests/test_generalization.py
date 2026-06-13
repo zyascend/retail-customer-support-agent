@@ -84,3 +84,48 @@ def test_derive_unknown_variant_raises():
     world = SyntheticDBGenerator.from_seed(42)
     with pytest.raises(ValueError, match="Unknown variant_type"):
         derive_oracle(world, {}, "nonexistent_variant")
+
+
+def test_select_pending_order_for_cancel():
+    world = SyntheticDBGenerator.from_seed(100)
+    from app.synthetic.oracle import select_entity_for_variant
+    entities = select_entity_for_variant(world, "cancel_success")
+    assert entities["order"]["status"] == "pending"
+    assert entities["user"]["user_id"] == entities["order"]["user_id"]
+
+
+def test_select_non_pending_order():
+    world = SyntheticDBGenerator.from_seed(103)
+    from app.synthetic.oracle import select_entity_for_variant
+    entities = select_entity_for_variant(world, "cancel_block_nonpending")
+    assert entities["order"]["status"] != "pending"
+
+
+def test_select_wrong_user_order():
+    world = SyntheticDBGenerator.from_seed(104)
+    from app.synthetic.oracle import select_entity_for_variant
+    entities = select_entity_for_variant(world, "cancel_block_wrong_user")
+    # user and order should belong to different people
+    assert entities["user"]["user_id"] != entities["order"]["user_id"]
+
+
+def test_select_any_user_with_valid_email():
+    world = SyntheticDBGenerator.from_seed(300)
+    from app.synthetic.oracle import select_entity_for_variant
+    entities = select_entity_for_variant(world, "coupon_transfer_no_write")
+    assert "@" in entities["user"]["email"]
+
+
+def test_select_pending_order_for_shipping():
+    world = SyntheticDBGenerator.from_seed(200)
+    from app.synthetic.oracle import select_entity_for_variant
+    entities = select_entity_for_variant(world, "shipping_success_express")
+    assert entities["order"]["status"] == "pending"
+    assert entities["order"].get("shipping_method") != "express"
+
+
+def test_select_shipping_block_nonpending():
+    world = SyntheticDBGenerator.from_seed(203)
+    from app.synthetic.oracle import select_entity_for_variant
+    entities = select_entity_for_variant(world, "shipping_block_nonpending")
+    assert entities["order"]["status"] != "pending"

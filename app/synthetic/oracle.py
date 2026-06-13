@@ -152,3 +152,71 @@ def derive_oracle(world: dict, entities: dict, variant_type: str) -> Determinist
     if deriver is None:
         raise ValueError(f"Unknown variant_type: {variant_type}")
     return deriver(world, entities)
+
+
+def select_entity_for_variant(world: dict, variant_type: str) -> dict:
+    """从合成世界中选取适配 variant_type 的实体 (user + order)。"""
+    users = list(world["users"].values())
+    orders = list(world["orders"].values())
+
+    if variant_type == "cancel_success":
+        for order in orders:
+            if order["status"] == "pending":
+                user = world["users"][order["user_id"]]
+                return {"user": user, "order": order}
+        raise ValueError("No pending order found for cancel_success")
+
+    if variant_type == "cancel_block_nonpending":
+        for order in orders:
+            if order["status"] != "pending":
+                user = world["users"][order["user_id"]]
+                return {"user": user, "order": order}
+        raise ValueError("No non-pending order found for cancel_block_nonpending")
+
+    if variant_type == "cancel_block_wrong_user":
+        if len(users) < 2 or len(orders) < 2:
+            raise ValueError("Need at least 2 users and 2 orders for wrong_user variant")
+        user = users[0]
+        for order in orders:
+            if order["user_id"] != user["user_id"]:
+                return {"user": user, "order": order}
+        raise ValueError("No order from different user found for cancel_block_wrong_user")
+
+    if variant_type.startswith("shipping_success_"):
+        target_method = variant_type.replace("shipping_success_", "")
+        for order in orders:
+            if order["status"] == "pending" and order.get("shipping_method") != target_method:
+                user = world["users"][order["user_id"]]
+                return {"user": user, "order": order, "target_method": target_method}
+        raise ValueError(f"No pending order found for shipping_success {target_method}")
+
+    if variant_type == "shipping_block_same_method":
+        for order in orders:
+            if order["status"] == "pending":
+                user = world["users"][order["user_id"]]
+                return {"user": user, "order": order}
+        raise ValueError("No pending order for shipping_block_same_method")
+
+    if variant_type == "shipping_block_nonpending":
+        for order in orders:
+            if order["status"] != "pending":
+                user = world["users"][order["user_id"]]
+                return {"user": user, "order": order}
+        raise ValueError("No non-pending order for shipping_block_nonpending")
+
+    if variant_type == "shipping_block_unknown_method":
+        for order in orders:
+            if order["status"] == "pending":
+                user = world["users"][order["user_id"]]
+                return {"user": user, "order": order}
+        raise ValueError("No pending order for shipping_block_unknown_method")
+
+    if variant_type == "coupon_transfer_no_write":
+        if not users:
+            raise ValueError("No users found for coupon_transfer_no_write")
+        user = users[0]
+        user_orders = [o for o in orders if o["user_id"] == user["user_id"]]
+        order = user_orders[0] if user_orders else None
+        return {"user": user, "order": order}
+
+    raise ValueError(f"Unknown variant_type: {variant_type}")
