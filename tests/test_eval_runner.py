@@ -440,5 +440,58 @@ def _result(
     )
 
 
+class TimingTests(unittest.TestCase):
+    def test_step_durations_populated_after_run(self):
+        import tempfile
+        from app.config import resolve_config
+        from app.agent.runtime import AgentRuntime
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            runtime = AgentRuntime(config, require_llm=False)
+            result = runtime.run_script(
+                messages=[{"role": "user", "content": "find my order"}]
+            )
+            state = result.state
+            durations = state.step_durations
+            self.assertGreater(len(durations), 0,
+                              "step_durations should be non-empty after a run")
+            for node_name, ms in durations.items():
+                self.assertGreaterEqual(ms, 0,
+                                  f"{node_name} duration should be >= 0, got {ms}")
+                self.assertIsInstance(ms, float,
+                                     f"{node_name} duration should be float")
+
+    def test_trace_contains_timing_section(self):
+        from app.ops.tracing import build_trace_payload
+        from app.agent.models import ConversationState
+        state = ConversationState(session_id="test")
+        state.step_durations = {"identity_resolver": 5.0, "run_logger": 1.0}
+        state.llm_call_durations = [
+            {"node": "test", "call_type": "json", "duration_ms": 10.0, "status": "ok"}
+        ]
+        trace = build_trace_payload(run_id="test", state=state, metadata={})
+        self.assertIn("timing", trace)
+        timing = trace["timing"]
+        self.assertIn("step_durations_ms", timing)
+        self.assertIn("llm_calls", timing)
+        self.assertEqual(timing["total_ms"], 6.0)
+        self.assertEqual(timing["llm_total_ms"], 10.0)
+
+    def test_timing_fields_serializable(self):
+        import json
+        from app.agent.models import ConversationState
+        state = ConversationState(session_id="test")
+        state.step_durations = {"node1": 1.5}
+        state.llm_call_durations = [
+            {"node": "n", "call_type": "json", "duration_ms": 2.0, "status": "ok"}
+        ]
+        dumped = state.model_dump()
+        self.assertIn("step_durations", dumped)
+        self.assertIn("llm_call_durations", dumped)
+        encoded = json.dumps(dumped)
+        decoded = json.loads(encoded)
+        self.assertEqual(decoded["step_durations"], {"node1": 1.5})
+
+
 if __name__ == "__main__":
     unittest.main()
