@@ -45,11 +45,6 @@ class WriteActionGuard:
             return self._blocked("unknown_write_action")
         if not state.authenticated_user_id:
             return self._blocked("authentication_required")
-        if not confirmed:
-            return self._blocked(
-                "explicit_confirmation_required",
-                missing=["explicit_user_confirmation"],
-            )
 
         normalized = ToolCall(
             tool_name=action.tool_name,
@@ -64,6 +59,12 @@ class WriteActionGuard:
         policy_reason = self._validate_policy(db, normalized)
         if policy_reason:
             return self._blocked(policy_reason)
+
+        if not confirmed:
+            return self._blocked(
+                "explicit_confirmation_required",
+                missing=["explicit_user_confirmation"],
+            )
 
         lock = self._resource_lock(normalized)
         conflict = self._lock_conflict(state.write_locks, lock, normalized.tool_name)

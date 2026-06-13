@@ -6,6 +6,7 @@ from typing import Any
 from app.agent.context_builder import ContextBuilder
 from app.agent.models import (
     AgentTurnResult,
+    PendingAction,
     SessionState,
     ToolCallResponse,
     ToolExecutionError,
@@ -78,6 +79,41 @@ class AgentLoop:
                     tool_name=tc.tool_name,
                     status=record.status,
                 )
+
+                if record.status == "blocked":
+                    if record.error == "explicit_confirmation_required":
+                        session.pending_action = PendingAction(
+                            action_name=tc.tool_name,
+                            arguments=dict(tc.arguments),
+                            user_facing_summary=(
+                                f"{tc.tool_name}: {', '.join(f'{k}={v}' for k, v in tc.arguments.items())}"
+                            ),
+                        )
+                        turn.termination = "pending_confirmation"
+                        turn.add_step("pending_set", tool_name=tc.tool_name)
+                        return AgentTurnResult(
+                            assistant_message=(
+                                f"I'd like to {tc.tool_name.replace('_', ' ')}. "
+                                "Can you confirm?"
+                            ),
+                            turn=turn,
+                            pending_action_set=True,
+                        )
+                    else:
+                        error_msg = ToolExecutionError(
+                            error_type="guard_blocked",
+                            message_for_llm=(
+                                f"Tool {tc.tool_name} was blocked: {record.error}. "
+                                "Explain this to the user and suggest alternatives."
+                            ),
+                            retryable=False,
+                        )
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": error_msg.model_dump_json(),
+                        })
+                    continue
 
                 if record.status == "success":
                     all_failed = False

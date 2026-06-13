@@ -178,3 +178,120 @@ class TestAgentLoopReadTools:
         assert len(session.tool_results) == 2
         assert session.tool_results[0].tool_name == "get_order_details"
         assert session.tool_results[1].tool_name == "get_user_details"
+
+
+class TestAgentLoopWritePending:
+    """Tests: write tool requires confirmation."""
+
+    def test_write_triggers_pending_confirmation(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+        from app.agent.models import ToolCallRequest
+        from app.tools.retail_adapter import get_order_from_db
+
+        gateway = _gateway()
+        runtime = gateway.runtime
+        db = runtime.db
+        db_orders = db.get("orders", {})
+        pending_order = next(
+            (oid for oid, o in db_orders.items() if o.get("status") == "pending"),
+            None,
+        )
+        assert pending_order is not None, "Need a pending order in test DB"
+
+        order = get_order_from_db(db, pending_order)
+        user_id = order["user_id"]
+
+        session = _session(
+            authenticated_user_id=user_id,
+            active_user_identity={"user_id": user_id, "name": "Test User"},
+        )
+        session.loaded_context.orders[pending_order] = order
+
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_cancel",
+                            tool_name="cancel_pending_order",
+                            arguments={
+                                "order_id": pending_order,
+                                "reason": "no longer needed",
+                            },
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+            ]
+        )
+        loop = AgentLoop(
+            provider=provider,
+            gateway=gateway,
+            registry=_registry(),
+            context_builder=_context_builder(),
+        )
+        result = loop.run_turn(session, "Cancel my order")
+
+        assert result.pending_action_set is True
+        assert session.pending_action is not None
+        assert session.pending_action.action_name == "cancel_pending_order"
+        assert session.pending_action.arguments.get("order_id") == pending_order
+        assert "cancel" in result.assistant_message.lower()
+
+    def test_write_without_read_before_write_blocks(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+        from app.agent.models import ToolCallRequest
+        from app.tools.retail_adapter import get_order_from_db
+
+        gateway = _gateway()
+        runtime = gateway.runtime
+        db = runtime.db
+        db_orders = db.get("orders", {})
+        pending_order = next(
+            (oid for oid, o in db_orders.items() if o.get("status") == "pending"),
+            None,
+        )
+        assert pending_order is not None
+
+        order = get_order_from_db(db, pending_order)
+        user_id = order["user_id"]
+
+        session = _session(
+            authenticated_user_id=user_id,
+            active_user_identity={"user_id": user_id},
+        )
+        # Deliberately NOT loading order into loaded_context
+
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_cancel",
+                            tool_name="cancel_pending_order",
+                            arguments={
+                                "order_id": pending_order,
+                                "reason": "no longer needed",
+                            },
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                ToolCallResponse(
+                    assistant_content="I need to review the order details first.",
+                    finish_reason="stop",
+                ),
+            ]
+        )
+        loop = AgentLoop(
+            provider=provider,
+            gateway=gateway,
+            registry=_registry(),
+            context_builder=_context_builder(),
+        )
+        result = loop.run_turn(session, "Cancel my order")
+
+        assert result.pending_action_set is False
+        blocked = [r for r in session.tool_results if r.status == "blocked"]
+        assert len(blocked) == 1
+        assert blocked[0].error == "read_before_write_required"
