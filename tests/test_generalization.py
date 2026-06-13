@@ -256,3 +256,27 @@ def test_l3_variants_are_exploratory_only():
     assert {case.language_variation_level for case in exploratory} == {"L3"}
     assert all(case.subset == "generalization_exploratory" for case in exploratory)
     assert not gate_ids.intersection({case.case_id for case in exploratory})
+
+
+def test_unhandled_variant_logs_warning_for_l2_and_l3(caplog):
+    """L2/L3 should warn when no explicit rule exists for a variant_type."""
+    import logging
+
+    from app.synthetic.language_variation import build_language_variants
+
+    entities = {"user": {"email": "test@example.com"}}
+    base_messages = [{"role": "user", "content": "Do something."}]
+
+    with caplog.at_level(logging.WARNING, logger="app.synthetic.language_variation"):
+        variants = build_language_variants(base_messages, "unknown_variant", entities)
+
+    l2_logs = [r.message for r in caplog.records if "L2" in r.message.split(":")[0]]
+    l3_logs = [r.message for r in caplog.records if "L3" in r.message.split(":")[0]]
+
+    assert len(l2_logs) >= 1, "expected L2 warning for unknown variant_type"
+    assert len(l3_logs) >= 1, "expected L3 warning for unknown variant_type"
+    assert "unknown_variant" in l2_logs[0]
+    assert "unknown_variant" in l3_logs[0]
+    # Verify that L2/L3 messages fall back to base content unchanged
+    assert variants[2].messages == base_messages  # L2 falls back
+    assert variants[3].messages == base_messages  # L3 falls back
