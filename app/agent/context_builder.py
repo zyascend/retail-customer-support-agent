@@ -16,6 +16,10 @@ class ContextBuilder:
         self._policy_text = policy_text
         self._max_recent_messages = max_recent_messages
 
+    @property
+    def policy_text(self) -> str:
+        return self._policy_text
+
     def build(self, session: SessionState) -> str:
         parts: list[str] = [self._auth_summary(session)]
         if session.loaded_context.orders:

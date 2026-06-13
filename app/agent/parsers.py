@@ -10,21 +10,6 @@ NAME_ZIP_RE = re.compile(
     r"(?:my name is|i am|i'm)\s+([A-Za-z]+)\s+([A-Za-z]+).*?\bzip(?:[ -]?code)? is\s+(\d{5}(?:-\d{4})?)",
     re.IGNORECASE,
 )
-SUPPORTED_INTENTS = {
-    "lookup",
-    "cancel_order",
-    "modify_order_address",
-    "modify_order_items",
-    "modify_order_payment",
-    "modify_shipping_method",
-    "modify_user_address",
-    "return_items",
-    "exchange_items",
-    "transfer",
-    "unknown",
-}
-
-
 # ── Pure parser / utility functions ──
 
 

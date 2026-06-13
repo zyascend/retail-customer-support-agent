@@ -108,6 +108,20 @@ def test_fake_failing_provider_malformed_arguments_response() -> None:
     assert response.tool_calls[0].raw_arguments == "{not-json"
 
 
+def test_fake_failing_provider_unknown_tool_response() -> None:
+    provider = FakeFailingProvider(error_type="unknown_tool")
+    response = provider.chat_with_tools(messages=[], tools=[])
+    assert response.tool_calls[0].tool_name == "hallucinated_tool"
+    assert response.finish_reason == "tool_calls"
+
+
+def test_fake_failing_provider_missing_args_response() -> None:
+    provider = FakeFailingProvider(error_type="missing_args")
+    response = provider.chat_with_tools(messages=[], tools=[])
+    assert response.tool_calls[0].tool_name == "get_order_details"
+    assert response.tool_calls[0].arguments == {}
+
+
 def test_normalize_openai_style_tool_call_message() -> None:
     message = {
         "content": None,

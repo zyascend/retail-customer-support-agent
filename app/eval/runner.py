@@ -81,6 +81,11 @@ class EvalCaseResult:
     replay_metadata: Dict[str, Any] = field(default_factory=dict)
     db_assertion_failures: List[str] = field(default_factory=list)
 
+    # ── Phase 5: LLM tool-calling metrics ──
+    eval_backend: str = "scripted"
+    llm_token_usage: Optional[Dict[str, Any]] = None
+    llm_loop_iterations: int = 0
+
 
 @dataclass
 class EvalRunSummary:
@@ -109,6 +114,9 @@ class EvalRunSummary:
     results: List[EvalCaseResult]
     generalization_families: List[str] = field(default_factory=list)
     generalization_variant_count: int = 0
+
+    # ── Phase 5 ──
+    eval_backend: str = "scripted"
 
     def as_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -141,11 +149,13 @@ class CuratedEvalRunner:
         config: AppConfig,
         artifact_dir: Path = DEFAULT_EVAL_ARTIFACT_DIR,
         require_llm: bool = False,
+        live: bool = False,
         progress_callback: Optional[Callable[[str, EvalCaseResult], None]] = None,
     ) -> None:
         self.config = config
         self.artifact_dir = artifact_dir
         self.require_llm = require_llm
+        self.live = live
         self.progress_callback = progress_callback
 
     def run(
@@ -191,7 +201,7 @@ class CuratedEvalRunner:
             created_at=created_at,
             agent_strategy="guarded_workflow_agent",
             model=self.config.default_agent_model,
-            llm_required=self.require_llm,
+            llm_required=self.require_llm or self.live,
             llm_timeout_seconds=self.config.agent_llm_timeout_seconds,
             llm_max_retries=self.config.agent_llm_max_retries,
             case_count=len(results),
@@ -214,6 +224,7 @@ class CuratedEvalRunner:
             generalization_variant_count=len(results)
             if subset == "generalization"
             else 0,
+            eval_backend="live" if self.live else "scripted",
         )
         self._write_summary(summary)
         self._write_report(summary)
@@ -282,7 +293,13 @@ class CuratedEvalRunner:
             agent_llm_timeout_seconds=self.config.agent_llm_timeout_seconds,
             agent_llm_max_retries=self.config.agent_llm_max_retries,
         )
-        provider = None if self.require_llm else DisabledLLMProvider()
+        # Phase 5: live mode uses real LLM provider, scripted uses disabled
+        if self.live:
+            provider = None  # let AgentRuntime build real DeepSeekProvider
+        elif self.require_llm:
+            provider = None
+        else:
+            provider = DisabledLLMProvider()
         # Synthetic subset: use synthetic runtime
         if case.subset in (
             "synthetic_seeded_v1",
@@ -328,6 +345,19 @@ class CuratedEvalRunner:
             user_simulator_callback=user_simulator_callback,
         )
         duration_seconds = round(time.perf_counter() - started_at, 3)
+
+        # Phase 5: extract LLM metrics from turn contexts
+        total_tokens = None
+        total_loop_iterations = 0
+        for turn_ctx in run_result.turn_contexts:
+            total_loop_iterations += turn_ctx.loop_iterations
+            if turn_ctx.llm_token_usage:
+                if total_tokens is None:
+                    total_tokens = dict(turn_ctx.llm_token_usage)
+                else:
+                    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                        total_tokens[key] = total_tokens.get(key, 0) + turn_ctx.llm_token_usage.get(key, 0)
+
         state = run_result.state
         actual_order_status = self._order_status(runtime, case)
         guard_block_reasons = [
@@ -349,7 +379,7 @@ class CuratedEvalRunner:
         failure_label = classify_failure(
             case=case,
             authenticated_user_id=state.authenticated_user_id,
-            final_intent=state.current_intent,
+            final_intent="",
             write_locks=state.write_locks,
             actual_order_status=actual_order_status,
             assistant_messages=[
@@ -378,9 +408,12 @@ class CuratedEvalRunner:
             seed=getattr(case, "seed", None),
             passed=failure_label is None,
             failure_label=failure_label,
+            eval_backend="live" if self.live else "scripted",
+            llm_token_usage=total_tokens,
+            llm_loop_iterations=total_loop_iterations,
             trace_artifact_path=str(run_result.trace_artifact_path),
             authenticated_user_id=state.authenticated_user_id,
-            final_intent=state.current_intent,
+            final_intent="",
             termination_reason=state.termination_reason,
             expected_write_lock=case.expected_write_lock,
             write_locks=list(state.write_locks),
@@ -405,7 +438,7 @@ class CuratedEvalRunner:
                 1 for message in state.messages if message.role == "user"
             ),
             message_count=len(state.messages),
-            policy_check_count=1 if state.policy_decision else 0,
+            policy_check_count=0,
             replay_metadata={
                 "run_id": run_result.run_id,
                 "session_id": state.session_id,
@@ -432,6 +465,7 @@ class CuratedEvalRunner:
             final_intent="",
             termination_reason=None,
             expected_write_lock=case.expected_write_lock,
+            eval_backend="live" if self.live else "scripted",
         )
 
     def _order_status(self, runtime: AgentRuntime, case: EvalCase) -> Optional[str]:
@@ -538,8 +572,6 @@ def classify_failure(
     if not is_tau:
         if authenticated_user_id != case.expected_user_id:
             return "auth_failure"
-        if final_intent != case.expected_intent:
-            return "wrong_intent"
     # Tau subsets: loose tool check — at least one expected tool must be
     # called (any tool, read or write). Don't require full action sequence.
     # Skip check if expected_tool_names is empty (no tool expectations).
@@ -556,6 +588,19 @@ def classify_failure(
         ]
         if missing_tools:
             return "wrong_tool"
+    # Phase 5: required_tools / forbidden_tools
+    if case.required_tools:
+        missing_required = [
+            t for t in case.required_tools if t not in tool_names
+        ]
+        if missing_required:
+            return "required_tool_missing"
+    if case.forbidden_tools:
+        violated = [
+            t for t in case.forbidden_tools if t in tool_names
+        ]
+        if violated:
+            return "forbidden_tool_called"
     if tool_errors:
         return "tool_exception"
     if case.expected_guard_block_reason:

@@ -29,6 +29,9 @@ class EvalCase:
     expected_db_assertions: Dict[str, object] = field(default_factory=dict)
     expected_tool_sequence: List[str] = field(default_factory=list)
     seed: Optional[int] = None
+    # ── Phase 5: tool-calling 语义断言 ──
+    required_tools: set = field(default_factory=set)
+    forbidden_tools: set = field(default_factory=set)
 
 
 CURATED_MVP_CASES: List[EvalCase] = [
@@ -287,6 +290,8 @@ def _case_for_subset(case: EvalCase, subset: str) -> EvalCase:
         expected_db_assertions=dict(case.expected_db_assertions),
         expected_tool_sequence=list(case.expected_tool_sequence),
         seed=case.seed,
+        required_tools=set(case.required_tools),
+        forbidden_tools=set(case.forbidden_tools),
     )
 
 

@@ -8,6 +8,7 @@ from app.agent.models import (
     AgentTurnResult,
     PendingAction,
     SessionState,
+    ToolCallRecord,
     ToolCallRequest,
     ToolCallResponse,
     ToolExecutionError,
@@ -77,87 +78,16 @@ class AgentLoop:
 
             all_failed = True
             for tc in response.tool_calls:
-                validation_error = self._validate_tool_call(tc)
-                if validation_error:
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": validation_error.model_dump_json(),
-                    })
-                    continue
+                record, obs_msg = self._step_tool_execute(session, tc, turn)
 
-                t0 = time.perf_counter()
-                record = self._gateway.execute(
-                    state=session,
-                    tool_name=tc.tool_name,
-                    arguments=tc.arguments,
-                )
-                turn.step_durations[f"tool_{tc.tool_name}"] = round(
-                    (time.perf_counter() - t0) * 1000, 1
-                )
-                turn.add_step(
-                    "tool_execute",
-                    tool_name=tc.tool_name,
-                    status=record.status,
-                )
+                if record is not None and record.status == "blocked" and record.error == "explicit_confirmation_required":
+                    return self._step_pending(session, tc, turn)
 
-                if record.status == "blocked":
-                    if record.error == "explicit_confirmation_required":
-                        session.pending_action = PendingAction(
-                            action_name=tc.tool_name,
-                            arguments=dict(tc.arguments),
-                            user_facing_summary=(
-                                f"{tc.tool_name}: {', '.join(f'{k}={v}' for k, v in tc.arguments.items())}"
-                            ),
-                        )
-                        turn.termination = "pending_confirmation"
-                        turn.add_step("pending_set", tool_name=tc.tool_name)
-                        return AgentTurnResult(
-                            assistant_message=(
-                                f"I'd like to {tc.tool_name.replace('_', ' ')}. "
-                                "Can you confirm?"
-                            ),
-                            turn=turn,
-                            pending_action_set=True,
-                        )
-                    else:
-                        error_msg = ToolExecutionError(
-                            error_type="guard_blocked",
-                            message_for_llm=(
-                                f"Tool {tc.tool_name} was blocked: {record.error}. "
-                                "Explain this to the user and suggest alternatives."
-                            ),
-                            retryable=False,
-                        )
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "content": error_msg.model_dump_json(),
-                        })
-                    continue
+                if obs_msg is not None:
+                    messages.append(obs_msg)
 
-                if record.status == "success":
+                if record is not None and record.status == "success":
                     all_failed = False
-                    obs = record.observation
-                    obs_str = str(obs)[:500] if obs is not None else "(none)"
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": obs_str,
-                    })
-                else:
-                    error_msg = ToolExecutionError(
-                        error_type="tool_execution_error",
-                        message_for_llm=(
-                            f"Tool {tc.tool_name} failed: {record.error or 'unknown error'}"
-                        ),
-                        retryable=True,
-                    )
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": error_msg.model_dump_json(),
-                    })
 
             if all_failed:
                 turn.consecutive_tool_failures += 1
@@ -203,6 +133,96 @@ class AgentLoop:
             turn=turn,
         )
 
+    def _step_tool_execute(
+        self,
+        session: SessionState,
+        tool_call: ToolCallRequest,
+        turn: TurnContext,
+    ) -> tuple[ToolCallRecord | None, dict[str, Any] | None]:
+        """Execute a single tool call. Returns (record, error_message_dict_or_None)."""
+        # Pre-gateway validation
+        validation_error = self._validate_tool_call(tool_call)
+        if validation_error:
+            return None, {
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": validation_error.model_dump_json(),
+            }
+
+        t0 = time.perf_counter()
+        record = self._gateway.execute(
+            state=session,
+            tool_name=tool_call.tool_name,
+            arguments=tool_call.arguments,
+        )
+        turn.step_durations[f"tool_{tool_call.tool_name}"] = round(
+            (time.perf_counter() - t0) * 1000, 1
+        )
+        turn.add_step("tool_execute", tool_name=tool_call.tool_name, status=record.status)
+
+        # Build tool observation message
+        if record.status == "success":
+            obs = record.observation
+            obs_str = str(obs)[:500] if obs is not None else "(none)"
+            return record, {
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": obs_str,
+            }
+        elif record.status == "blocked":
+            if record.error == "explicit_confirmation_required":
+                return record, None  # caller handles pending
+            else:
+                error_msg = ToolExecutionError(
+                    error_type="guard_blocked",
+                    message_for_llm=(
+                        f"Tool {tool_call.tool_name} was blocked: {record.error}. "
+                        "Explain this to the user and suggest alternatives."
+                    ),
+                    retryable=False,
+                )
+                return record, {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": error_msg.model_dump_json(),
+                }
+        else:
+            error_msg = ToolExecutionError(
+                error_type="tool_execution_error",
+                message_for_llm=(
+                    f"Tool {tool_call.tool_name} failed: {record.error or 'unknown error'}"
+                ),
+                retryable=True,
+            )
+            return record, {
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": error_msg.model_dump_json(),
+            }
+
+    def _step_pending(
+        self, session: SessionState, tool_call: ToolCallRequest, turn: TurnContext
+    ) -> AgentTurnResult:
+        """Set pending action and return a confirmation-request turn result."""
+        session.pending_action = PendingAction(
+            action_name=tool_call.tool_name,
+            arguments=dict(tool_call.arguments),
+            user_facing_summary=(
+                f"{tool_call.tool_name}: "
+                f"{', '.join(f'{k}={v}' for k, v in tool_call.arguments.items())}"
+            ),
+        )
+        turn.termination = "pending_confirmation"
+        turn.add_step("pending_set", tool_name=tool_call.tool_name)
+        return AgentTurnResult(
+            assistant_message=(
+                f"I'd like to {tool_call.tool_name.replace('_', ' ')}. "
+                "Can you confirm?"
+            ),
+            turn=turn,
+            pending_action_set=True,
+        )
+
     # ── Internal helpers ──
 
     def _load_system_prompt_template(self) -> str:
@@ -210,9 +230,7 @@ class AgentLoop:
         prompt_path = Path("prompts/llm_agent_system_v001.md")
         template = prompt_path.read_text(encoding="utf-8")
         tool_catalog = self._registry.tool_catalog_for_llm()
-        policy_text = ""
-        if hasattr(self._context_builder, "_policy_text"):
-            policy_text = self._context_builder._policy_text
+        policy_text = self._context_builder.policy_text
         return (
             template.replace("{tool_catalog}", tool_catalog)
             .replace("{policy}", policy_text)

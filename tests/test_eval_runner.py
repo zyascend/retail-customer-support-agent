@@ -107,7 +107,7 @@ class CuratedEvalTests(unittest.TestCase):
             )
 
         self.assertEqual(summary.case_count, 11)
-        self.assertEqual(summary.schema_version, "phase2.eval_run_summary.v1")
+        self.assertEqual(summary.schema_version, "phase5.eval_run_summary.v1")
         self.assertEqual(summary.passed_count, 11)
         self.assertEqual(summary.pass_rate, 1.0)
         self.assertEqual(payload["passed_count"], 11)
@@ -126,7 +126,7 @@ class CuratedEvalTests(unittest.TestCase):
         self.assertEqual(payload["metrics"]["db_accuracy_denominator"], 9)
         self.assertEqual(payload["metrics"]["tool_error_rate"], 0.0)
         self.assertEqual(payload["metrics"]["mutation_error_rate"], 0.0)
-        self.assertEqual(payload["schema_version"], "phase2.eval_run_summary.v1")
+        self.assertEqual(payload["schema_version"], "phase5.eval_run_summary.v1")
         self.assertIn("failure_label_counts", payload["failure_analysis"])
         self.assertIn("run_id", payload["results"][0])
         self.assertIn("session_id", payload["results"][0])
@@ -134,8 +134,8 @@ class CuratedEvalTests(unittest.TestCase):
         self.assertIn("message_count", payload["results"][0])
         self.assertIn("policy_check_count", payload["results"][0])
         self.assertTrue(report_exists)
-        self.assertEqual(report["schema_version"], "phase2.eval_report.v1")
-        self.assertEqual(report["report_type"], "phase2_eval_report")
+        self.assertEqual(report["schema_version"], "phase5.eval_report.v1")
+        self.assertEqual(report["report_type"], "phase5_eval_report")
         self.assertEqual(report["metrics"]["pass_1"], 1.0)
 
     def test_curated_eval_runner_reports_progress(self):
@@ -430,6 +430,150 @@ class CuratedEvalTests(unittest.TestCase):
             self.assertEqual(summary.metrics["pass_k"], 1.0)
             self.assertEqual(summary.metrics["mutation_error_rate"], 0.0)
             self.assertEqual(summary.metrics["tool_error_rate"], 0.0)
+
+    def test_required_tool_missing_fails_classify(self):
+        case = EvalCase(
+            case_id="req_test",
+            category="test",
+            messages=[],
+            expected_user_id="user",
+            expected_intent="lookup",
+            required_tools={"must_have_tool"},
+        )
+
+        label = classify_failure(
+            case=case,
+            authenticated_user_id="user",
+            final_intent="lookup",
+            write_locks=[],
+            actual_order_status=None,
+            assistant_messages=[],
+            tool_names=["other_tool"],
+            guard_block_reasons=[],
+            tool_errors=0,
+            guard_blocks=0,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="not_required",
+        )
+
+        self.assertEqual(label, "required_tool_missing")
+
+    def test_forbidden_tool_called_fails_classify(self):
+        case = EvalCase(
+            case_id="forbid_test",
+            category="test",
+            messages=[],
+            expected_user_id="user",
+            expected_intent="lookup",
+            forbidden_tools={"dangerous_tool"},
+        )
+
+        label = classify_failure(
+            case=case,
+            authenticated_user_id="user",
+            final_intent="lookup",
+            write_locks=[],
+            actual_order_status=None,
+            assistant_messages=[],
+            tool_names=["dangerous_tool", "other_tool"],
+            guard_block_reasons=[],
+            tool_errors=0,
+            guard_blocks=0,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="not_required",
+        )
+
+        self.assertEqual(label, "forbidden_tool_called")
+
+    def test_eval_case_result_defaults_to_scripted_backend(self):
+        result = _result("test_case", 0)
+        self.assertEqual(result.eval_backend, "scripted")
+
+    def test_eval_case_result_carries_llm_metrics(self):
+        result = _result("test_case", 0)
+        result.llm_token_usage = {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
+        result.llm_loop_iterations = 3
+
+        self.assertEqual(result.eval_backend, "scripted")
+        self.assertEqual(result.llm_token_usage["total_tokens"], 150)
+        self.assertEqual(result.llm_loop_iterations, 3)
+
+    def test_eval_run_summary_has_eval_backend(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            summary = CuratedEvalRunner(
+                config=config,
+                artifact_dir=Path(tmp),
+            ).run(subset="curated_mvp", trials=1)
+        self.assertEqual(summary.eval_backend, "scripted")
+
+    def test_required_and_forbidden_pass_when_satisfied(self):
+        case = EvalCase(
+            case_id="both_test",
+            category="test",
+            messages=[],
+            expected_user_id="user",
+            expected_intent="lookup",
+            required_tools={"good_tool"},
+            forbidden_tools={"bad_tool"},
+        )
+
+        label = classify_failure(
+            case=case,
+            authenticated_user_id="user",
+            final_intent="lookup",
+            write_locks=[],
+            actual_order_status=None,
+            assistant_messages=[],
+            tool_names=["good_tool", "neutral_tool"],
+            guard_block_reasons=[],
+            tool_errors=0,
+            guard_blocks=0,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="not_required",
+        )
+
+        self.assertIsNone(label)
+
+    def test_session_state_has_no_phase4_compat_fields(self):
+        from app.agent.models import SessionState
+
+        state = SessionState(session_id="test")
+        for removed_field in ("current_intent", "slots", "policy_decision", "risk_level"):
+            with self.subTest(field=removed_field):
+                with self.assertRaises(AttributeError):
+                    getattr(state, removed_field)
+
+    def test_live_flag_passes_provider_none_to_runtime(self):
+        """Verify live=False produces scripted eval_backend and runs all cases."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            summary = CuratedEvalRunner(
+                config=config,
+                artifact_dir=Path(tmp),
+                live=False,
+            ).run(subset="curated_mvp", trials=1)
+            self.assertEqual(summary.eval_backend, "scripted")
+            self.assertEqual(summary.case_count, 11)
+
+    def test_eval_backend_in_summary_matches_live_flag(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            summary = CuratedEvalRunner(
+                config=config,
+                artifact_dir=Path(tmp),
+                live=False,
+            ).run(subset="curated_mvp", trials=1)
+            self.assertEqual(summary.eval_backend, "scripted")
+            for result in summary.results:
+                self.assertEqual(result.eval_backend, "scripted")
 
 
 def _result(

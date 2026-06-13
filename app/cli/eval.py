@@ -29,6 +29,7 @@ def eval_main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--tau3-retail-root", help="Override TAU3_RETAIL_ROOT.")
     parser.add_argument("--tau2-bench-root", help="Override TAU2_BENCH_ROOT.")
     parser.add_argument("--require-llm", action="store_true")
+    parser.add_argument("--live", action="store_true", help="Use real LLM provider for eval.")
     parser.add_argument("--max-workers", type=int, default=50)
     parser.add_argument(
         "--seed", type=int, default=42, help="Seed for synthetic world generation."
@@ -53,6 +54,7 @@ def eval_main(argv: Optional[list[str]] = None) -> int:
             config=config,
             artifact_dir=Path(args.artifact_dir).expanduser(),
             require_llm=args.require_llm,
+            live=args.live,
             progress_callback=None if args.no_progress else _print_progress,
         ).run(
             subset=args.subset,
