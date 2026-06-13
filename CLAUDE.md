@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Conventions
 
 - **Commit messages**: `<type>: 中文描述` — type 用 `feat` / `fix` / `chore` / `docs` / `refactor` / `test`，描述用中文。示例：`feat: 添加 action_specs 单一事实来源`
+- **分支管理**: 使用 `git checkout -b` 创建分支开发，不使用 git worktree。合并后删除分支
 
 ## Commands
 
