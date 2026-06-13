@@ -10,8 +10,12 @@ supported / partial / unsupported，分析 NL 断言，并生成综合性的 Mar
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Optional
+
+from app.config import AppConfig
 
 
 @dataclass
@@ -49,3 +53,38 @@ class NLAssertionItem:
     task_id: str
     text: str
     category: str  # "must_say" | "must_not_say" | "must_convey"
+
+
+# ---------------------------------------------------------------------------
+# Data loading
+# ---------------------------------------------------------------------------
+
+
+def _resolve_tau3_retail_dir(config: AppConfig) -> Path:
+    """Resolve the tau3 retail domain directory, raising if not found."""
+    retail_dir = config.retail_domain_dir
+    if not retail_dir.exists():
+        raise FileNotFoundError(
+            f"tau3 retail domain directory not found: {retail_dir}\n"
+            f"Set TAU3_RETAIL_ROOT or ensure the data exists at the default path."
+        )
+    return retail_dir
+
+
+def load_tasks(retail_dir: Path) -> list[dict]:
+    """Load all tasks from tasks.json."""
+    tasks_path = retail_dir / "tasks.json"
+    with open(tasks_path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_splits(retail_dir: Path) -> dict:
+    """Load train/test split definitions.
+
+    Returns:
+        dict with keys "train", "test", "base", each mapping to a list of
+        task ID strings.
+    """
+    splits_path = retail_dir / "split_tasks.json"
+    with open(splits_path, encoding="utf-8") as f:
+        return json.load(f)
