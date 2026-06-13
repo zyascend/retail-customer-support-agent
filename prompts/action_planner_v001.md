@@ -40,14 +40,7 @@ Response: a specific question asking for the missing information
 When: no tool action is needed, just a text reply (e.g., status update, denial)
 Response: user-facing message
 
-## Allowed pending_write action_name values
-- cancel_pending_order
-- modify_pending_order_address
-- modify_pending_order_items
-- modify_pending_order_payment
-- modify_user_address
-- return_delivered_order_items
-- exchange_delivered_order_items
+{action_catalog}
 
 ## Examples
 

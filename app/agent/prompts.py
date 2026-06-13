@@ -5,6 +5,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Dict
 
+from app.agent.action_specs import build_action_catalog_for_prompt
 from app.ops.serialization import stable_json
 
 PROMPT_DIR = Path("prompts")
@@ -51,7 +52,12 @@ POLICY_SYSTEM = (
     CORE_CONTRACT_PROMPT.content + "\n\n" + POLICY_PROMPT.content
 )
 ACTION_PLANNER_SYSTEM = (
-    CORE_CONTRACT_PROMPT.content + "\n\n" + ACTION_PLANNER_PROMPT.content
+    CORE_CONTRACT_PROMPT.content
+    + "\n\n"
+    + ACTION_PLANNER_PROMPT.content.replace(
+        "{action_catalog}",
+        build_action_catalog_for_prompt(),
+    )
 )
 RESPONSE_SYSTEM = (
     CORE_CONTRACT_PROMPT.content + "\n\n" + RESPONSE_PROMPT.content
