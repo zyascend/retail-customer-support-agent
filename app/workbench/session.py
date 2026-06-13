@@ -6,7 +6,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, Optional
 
-from app.agent.models import AgentStep, ConversationState
+from app.agent.models import AgentStep, SessionState
 from app.agent.prompts import prompt_metadata
 from app.agent.providers import DisabledLLMProvider
 from app.agent.runtime import AgentRuntime
@@ -163,7 +163,7 @@ class WorkbenchSession:
         *,
         mode: str,
         selected_case: Optional[EvalCase],
-    ) -> tuple[AgentRuntime, ConversationState, str]:
+    ) -> tuple[AgentRuntime, SessionState, str]:
         provider = DisabledLLMProvider() if mode == "deterministic" else None
 
         # If this is a synthetic case, use SyntheticRetailAdapter
@@ -184,7 +184,7 @@ class WorkbenchSession:
             require_llm=mode == "llm",
             **runtime_kwargs,
         )
-        state = ConversationState(
+        state = SessionState(
             session_id=self.session_id,
             task_id=(selected_case.case_id if selected_case is not None else None),
         )
@@ -225,7 +225,7 @@ class WorkbenchSession:
         self,
         *,
         runtime: AgentRuntime,
-        state: ConversationState,
+        state: SessionState,
         mode: str,
         initial_db_hash: Optional[str],
         trace_path: Optional[Path] = None,
@@ -254,7 +254,7 @@ class WorkbenchSession:
         self,
         *,
         runtime: AgentRuntime,
-        state: ConversationState,
+        state: SessionState,
         mode: str,
         initial_db_hash: Optional[str],
     ) -> str:
@@ -281,7 +281,7 @@ class WorkbenchSession:
         *,
         trace_path: Path,
         runtime: AgentRuntime,
-        state: ConversationState,
+        state: SessionState,
         mode: str,
         initial_db_hash: Optional[str],
     ) -> None:

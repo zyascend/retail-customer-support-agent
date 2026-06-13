@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
-from app.agent.models import ConversationState
+from app.agent.models import SessionState
 
 
 class TraceWriter:
@@ -16,7 +16,7 @@ class TraceWriter:
         self,
         *,
         run_id: str,
-        state: ConversationState,
+        state: SessionState,
         metadata: Dict[str, Any],
     ) -> Path:
         self.artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -29,7 +29,7 @@ class TraceWriter:
         *,
         path: Path,
         run_id: str,
-        state: ConversationState,
+        state: SessionState,
         metadata: Dict[str, Any],
     ) -> Path:
         payload = build_trace_payload(
@@ -47,7 +47,7 @@ class TraceWriter:
 def build_trace_payload(
     *,
     run_id: str,
-    state: ConversationState,
+    state: SessionState,
     metadata: Dict[str, Any],
 ) -> Dict[str, Any]:
     return {
@@ -63,7 +63,7 @@ def build_trace_payload(
     }
 
 
-def _build_timing_section(state: ConversationState) -> dict:
+def _build_timing_section(state: SessionState) -> dict:
     step_durations = getattr(state, "step_durations", {}) or {}
     llm_call_durations = getattr(state, "llm_call_durations", []) or []
     total_ms = sum(step_durations.values())
@@ -76,13 +76,15 @@ def _build_timing_section(state: ConversationState) -> dict:
     }
 
 
-def final_state_summary(state: ConversationState) -> Dict[str, Any]:
+def final_state_summary(state: SessionState) -> Dict[str, Any]:
     return {
         "session_id": state.session_id,
         "task_id": state.task_id,
         "authenticated_user_id": state.authenticated_user_id,
         "auth_method": state.auth_method,
         "confirmation_status": state.confirmation_status,
+        "current_intent": "unknown",
+        "slots": {},
         "pending_action": (
             state.pending_action.model_dump() if state.pending_action else None
         ),

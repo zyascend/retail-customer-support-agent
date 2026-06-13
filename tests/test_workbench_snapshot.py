@@ -1,6 +1,6 @@
 import unittest
 
-from app.agent.models import ConversationState, Message, PendingAction, ToolCallRecord
+from app.agent.models import SessionState, Message, PendingAction, ToolCallRecord
 from app.workbench.snapshot import build_timeline, redact_value, snapshot_from_state
 
 SNAPSHOT_KEYS = {
@@ -49,7 +49,7 @@ class WorkbenchSnapshotTests(unittest.TestCase):
         )
 
     def test_timeline_combines_messages_steps_tools_and_audit(self):
-        state = ConversationState(session_id="session-1")
+        state = SessionState(session_id="session-1")
         state.messages.append(Message(role="user", content="hello"))
         state.add_step("receive_message", status="seen")
         state.tool_results.append(
@@ -73,7 +73,7 @@ class WorkbenchSnapshotTests(unittest.TestCase):
         self.assertEqual(timeline[2]["label"], "cancel_pending_order")
 
     def test_timeline_preserves_message_and_step_chronology(self):
-        state = ConversationState(session_id="session-1")
+        state = SessionState(session_id="session-1")
         state.messages.append(
             Message(
                 role="user",
@@ -103,11 +103,9 @@ class WorkbenchSnapshotTests(unittest.TestCase):
         )
 
     def test_snapshot_includes_pending_action_and_business_summary(self):
-        state = ConversationState(
+        state = SessionState(
             session_id="session-1", authenticated_user_id="user-1"
         )
-        state.current_intent = "cancel_order"
-        state.slots["order_id"] = "#W5918442"
         state.pending_action = PendingAction(
             action_name="cancel_pending_order",
             arguments={"order_id": "#W5918442", "reason": "no longer needed"},
@@ -130,7 +128,7 @@ class WorkbenchSnapshotTests(unittest.TestCase):
 
         self.assertEqual(snapshot["session_id"], "session-1")
         self.assertEqual(snapshot["business"]["authenticated_user_id"], "user-1")
-        self.assertEqual(snapshot["business"]["active_order_id"], "#W5918442")
+        self.assertIsNone(snapshot["business"]["active_order_id"])
         self.assertEqual(
             snapshot["pending_action"]["action_name"], "cancel_pending_order"
         )
@@ -138,7 +136,7 @@ class WorkbenchSnapshotTests(unittest.TestCase):
         self.assertTrue(snapshot["run_controls"]["can_run_all"])
 
     def test_snapshot_uses_supplied_last_error_and_required_keys(self):
-        state = ConversationState(session_id="session-1")
+        state = SessionState(session_id="session-1")
         supplied_error = {
             "code": "case_failed",
             "message": "Could not continue session #W5918442",

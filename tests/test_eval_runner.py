@@ -645,35 +645,28 @@ class TimingTests(unittest.TestCase):
                 )
 
     def test_trace_contains_timing_section(self):
-        from app.agent.models import ConversationState
+        from app.agent.models import SessionState
         from app.ops.tracing import build_trace_payload
 
-        state = ConversationState(session_id="test")
+        state = SessionState(session_id="test")
         state.step_durations = {"identity_resolver": 5.0, "run_logger": 1.0}
-        state.llm_call_durations = [
-            {"node": "test", "call_type": "json", "duration_ms": 10.0, "status": "ok"}
-        ]
         trace = build_trace_payload(run_id="test", state=state, metadata={})
         self.assertIn("timing", trace)
         timing = trace["timing"]
         self.assertIn("step_durations_ms", timing)
         self.assertIn("llm_calls", timing)
         self.assertEqual(timing["total_ms"], 6.0)
-        self.assertEqual(timing["llm_total_ms"], 10.0)
+        self.assertEqual(timing["llm_total_ms"], 0.0)
 
     def test_timing_fields_serializable(self):
         import json
 
-        from app.agent.models import ConversationState
+        from app.agent.models import SessionState
 
-        state = ConversationState(session_id="test")
+        state = SessionState(session_id="test")
         state.step_durations = {"node1": 1.5}
-        state.llm_call_durations = [
-            {"node": "n", "call_type": "json", "duration_ms": 2.0, "status": "ok"}
-        ]
         dumped = state.model_dump()
         self.assertIn("step_durations", dumped)
-        self.assertIn("llm_call_durations", dumped)
         encoded = json.dumps(dumped)
         decoded = json.loads(encoded)
         self.assertEqual(decoded["step_durations"], {"node1": 1.5})

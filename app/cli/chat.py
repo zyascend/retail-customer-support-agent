@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from app.agent.models import ConversationState
+from app.agent.models import SessionState
 from app.agent.prompts import prompt_metadata
 from app.agent.runtime import AgentRuntime
 from app.config import resolve_config
@@ -86,7 +86,7 @@ def _read_script(path: Path) -> Dict[str, Any]:
 
 def _interactive(runtime: AgentRuntime, max_turns: int, json_output: bool) -> int:
     session_id = "interactive"
-    state = ConversationState(session_id=session_id)
+    state = SessionState(session_id=session_id)
     initial_db_hash = runtime.retail_runtime.db_hash()
     print("Phase 1 interactive session. Type 'exit' to finish.", file=sys.stderr)
     for _ in range(max_turns):
