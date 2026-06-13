@@ -123,11 +123,13 @@ def intent_and_slot_extractor(
     apply_llm_intent_slots_fn: Callable,
     parse_address_fn: Callable,
     parse_item_replacement_pairs_fn: Callable,
+    parse_shipping_method_fn: Callable,
     merge_slots_fn: Callable,
 ) -> None:
     if has_assistant_fn(state):
         return
     from app.agent.parsers import ITEM_RE, ORDER_RE, PAYMENT_RE  # noqa: PLC0415
+
 
     lowered = content.lower()
     # Preserve existing intent when message is a bare confirmation/denial
@@ -217,6 +219,10 @@ def intent_and_slot_extractor(
             code_slots["item_ids"] = [
                 iid for iid in code_slots["item_ids"] if iid != new_item_id
             ]
+
+    shipping_method = parse_shipping_method_fn(content)
+    if shipping_method:
+        code_slots["shipping_method"] = shipping_method
 
     state.slots = merge_slots_fn(
         code_slots=code_slots,
@@ -351,6 +357,7 @@ def action_planner(
     plan_user_address_fn: Callable,
     plan_return_fn: Callable,
     plan_exchange_fn: Callable,
+    plan_shipping_method_fn: Callable,
 ) -> None:
     if has_assistant_fn(state):
         return
@@ -393,6 +400,9 @@ def action_planner(
         return
     if intent == "exchange_items":
         plan_exchange_fn(state)
+        return
+    if intent == "modify_shipping_method":
+        plan_shipping_method_fn(state)
         return
     assistant_fn(
         state,

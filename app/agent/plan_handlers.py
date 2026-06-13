@@ -193,6 +193,35 @@ def plan_user_address(
     )
 
 
+def plan_shipping_method(
+    state: ConversationState,
+    assistant_fn: Callable,
+    set_pending_fn: Callable,
+) -> None:
+    order_id = state.slots.get("order_id")
+    shipping_method = state.slots.get("shipping_method")
+    if not order_id:
+        assistant_fn(state, "Which order would you like to change shipping for?")
+        return
+    if not shipping_method:
+        assistant_fn(
+            state,
+            "Which shipping method would you like? We offer "
+            "standard (free), express ($9.99), and overnight ($24.99).",
+        )
+        return
+    set_pending_fn(
+        state,
+        "modify_pending_order_shipping_method",
+        {
+            "order_id": order_id,
+            "shipping_method": shipping_method,
+        },
+        f"Change shipping for order {order_id} to {shipping_method}. "
+        "Please confirm yes or no.",
+    )
+
+
 def respond_with_order_lookup(
     state: ConversationState,
     assistant_fn: Callable,

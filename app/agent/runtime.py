@@ -304,6 +304,7 @@ class AgentRuntime:
             apply_llm_intent_slots_fn=self._apply_llm_intent_slots,
             parse_address_fn=self._parse_address,
             parse_item_replacement_pairs_fn=self._parse_item_replacement_pairs,
+            parse_shipping_method_fn=self._parse_shipping_method,
             merge_slots_fn=self._merge_slots,
         )
 
@@ -357,6 +358,7 @@ class AgentRuntime:
             plan_user_address_fn=self._plan_user_address,
             plan_return_fn=self._plan_return,
             plan_exchange_fn=self._plan_exchange,
+            plan_shipping_method_fn=self._plan_shipping_method,
         )
 
     def _transfer_to_human(self, state: ConversationState, content: str) -> None:
@@ -399,6 +401,10 @@ class AgentRuntime:
 
     def _plan_user_address(self, state: ConversationState) -> None:
         plan_user_address(state, self._assistant, self._set_pending)
+
+    def _plan_shipping_method(self, state: ConversationState) -> None:
+        from app.agent.plan_handlers import plan_shipping_method
+        plan_shipping_method(state, self._assistant, self._set_pending)
 
     def _respond_with_order_lookup(self, state: ConversationState) -> None:
         respond_with_order_lookup(
@@ -496,6 +502,10 @@ class AgentRuntime:
 
     def _parse_item_replacement_pairs(self, lowered: str) -> list[tuple[str, str]]:
         return parse_item_replacement_pairs(lowered)
+
+    def _parse_shipping_method(self, content: str) -> Optional[str]:
+        from app.agent.parsers import parse_shipping_method
+        return parse_shipping_method(content)
 
     def _assistant(
         self, state: ConversationState, content: str, allow_llm: bool = True
