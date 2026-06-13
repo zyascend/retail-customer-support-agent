@@ -475,7 +475,7 @@ def _section_1_overview(lines: list[str], stats: TaskSpaceStats, data_source: st
     lines.append("")
     lines.append("## 1. 概述")
     lines.append("")
-    lines.append(f"**分析日期**: 2026-06-13")
+    lines.append("**分析日期**: 2026-06-13")
     lines.append(f"**数据来源**: `{data_source}`")
     lines.append(f"**Task 总数**: {stats.total_tasks}")
     lines.append(f"**Split 分布**: train {stats.train_count} / test {stats.test_count}")
@@ -487,8 +487,8 @@ def _section_2_task_space(lines: list[str], stats: TaskSpaceStats) -> None:
     lines.append("")
     lines.append("### 2.1 Split 分布")
     lines.append("")
-    lines.append(f"| Split | Task 数量 |")
-    lines.append(f"|-------|----------|")
+    lines.append("| Split | Task 数量 |")
+    lines.append("|-------|----------|")
     lines.append(f"| train | {stats.train_count} |")
     lines.append(f"| test  | {stats.test_count} |")
     lines.append(f"| **合计** | **{stats.total_tasks}** |")
@@ -496,8 +496,8 @@ def _section_2_task_space(lines: list[str], stats: TaskSpaceStats) -> None:
 
     lines.append("### 2.2 Reward Basis 分布")
     lines.append("")
-    lines.append(f"| Reward Basis | 数量 |")
-    lines.append(f"|-------------|------|")
+    lines.append("| Reward Basis | 数量 |")
+    lines.append("|-------------|------|")
     for basis, count in sorted(stats.reward_basis_distribution.items()):
         lines.append(f"| {basis} | {count} |")
     lines.append("")
@@ -511,8 +511,8 @@ def _section_2_task_space(lines: list[str], stats: TaskSpaceStats) -> None:
 
     lines.append("### 2.4 工具使用频率 (Top 15)")
     lines.append("")
-    lines.append(f"| 工具 | 出现次数 |")
-    lines.append(f"|------|---------|")
+    lines.append("| 工具 | 出现次数 |")
+    lines.append("|------|---------|")
     for tool, count in list(stats.tool_frequencies.items())[:15]:
         lines.append(f"| {tool} | {count} |")
     lines.append("")
@@ -528,8 +528,8 @@ def _section_3_tool_coverage(
     lines.append("")
     lines.append("### 3.1 Agent 已支持工具 vs tau3 要求工具")
     lines.append("")
-    lines.append(f"| 工具 | 状态 | 出现次数 |")
-    lines.append(f"|------|------|---------|")
+    lines.append("| 工具 | 状态 | 出现次数 |")
+    lines.append("|------|------|---------|")
     tau_tools = set()
     for c in classifications:
         tau_tools.update(c.tools_used)
@@ -555,7 +555,7 @@ def _section_3_tool_coverage(
         lines.append(f"#### `{tool_name}` (辅助工具)")
         lines.append(f"- 出现次数: {info['count']}")
         lines.append(f"- 影响 task: {', '.join(info['task_ids'])}")
-        lines.append(f"- 评估: 辅助计算/查询，Agent 主流程不受阻，标记为 partial")
+        lines.append("- 评估: 辅助计算/查询，Agent 主流程不受阻，标记为 partial")
         lines.append("")
 
 
@@ -573,8 +573,8 @@ def _section_4_classification(
 
     lines.append("### 4.1 总览")
     lines.append("")
-    lines.append(f"| 分类 | 数量 | 占比 |")
-    lines.append(f"|------|------|------|")
+    lines.append("| 分类 | 数量 | 占比 |")
+    lines.append("|------|------|------|")
     lines.append(f"| supported | {len(supported)} | {len(supported)/stats.total_tasks*100:.1f}% |")
     lines.append(f"| partial | {len(partial)} | {len(partial)/stats.total_tasks*100:.1f}% |")
     lines.append(f"| unsupported | {len(unsupported)} | {len(unsupported)/stats.total_tasks*100:.1f}% |")
@@ -592,8 +592,8 @@ def _section_4_classification(
     lines.append("")
     lines.append("### 4.3 Partial 子类别")
     lines.append("")
-    lines.append(f"| 子类别 | 数量 |")
-    lines.append(f"|--------|------|")
+    lines.append("| 子类别 | 数量 |")
+    lines.append("|--------|------|")
     subcat_counts: dict[str, int] = {}
     for c in partial:
         key = c.subcategory or "unknown"
@@ -604,8 +604,8 @@ def _section_4_classification(
     lines.append("")
     lines.append("### 4.4 Unsupported 子类别")
     lines.append("")
-    lines.append(f"| 子类别 | 数量 | Task IDs |")
-    lines.append(f"|--------|------|----------|")
+    lines.append("| 子类别 | 数量 | Task IDs |")
+    lines.append("|--------|------|----------|")
     usubcat: dict[str, list[str]] = {}
     for c in unsupported:
         key = c.subcategory or "unknown"
@@ -616,8 +616,8 @@ def _section_4_classification(
     lines.append("")
     lines.append("### 4.5 完整 Task 分类清单")
     lines.append("")
-    lines.append(f"| Task ID | Split | 状态 | 子类别 | 工具数 | NL Assertion | 备注 |")
-    lines.append(f"|---------|-------|------|--------|--------|-------------|------|")
+    lines.append("| Task ID | Split | 状态 | 子类别 | 工具数 | NL Assertion | 备注 |")
+    lines.append("|---------|-------|------|--------|--------|-------------|------|")
     for c in sorted(classifications, key=lambda x: int(x.task_id)):
         nl_mark = "✓" if c.has_nl_assertion else "-"
         lines.append(
@@ -640,8 +640,8 @@ def _section_5_nl_assertions(
 
     lines.append("### 5.1 按类型分布")
     lines.append("")
-    lines.append(f"| 类型 | 数量 | 说明 |")
-    lines.append(f"|------|------|------|")
+    lines.append("| 类型 | 数量 | 说明 |")
+    lines.append("|------|------|------|")
     lines.append(f"| must_say | {nl_analysis['by_category'].get('must_say', 0)} | Agent 必须说出特定信息 |")
     lines.append(f"| must_not_say | {nl_analysis['by_category'].get('must_not_say', 0)} | Agent 不得提及特定内容 |")
     lines.append(f"| must_convey | {nl_analysis['by_category'].get('must_convey', 0)} | Agent 必须传达概念（措辞不限） |")
@@ -677,8 +677,8 @@ def _section_5_nl_assertions(
 def _section_6_capability(lines: list[str], cap_agg: dict) -> None:
     lines.append("## 6. 按 Capability 维度聚合")
     lines.append("")
-    lines.append(f"| Capability | 总数 | Supported | Partial | Unsupported | Train | Test |")
-    lines.append(f"|-----------|------|-----------|---------|-------------|-------|------|")
+    lines.append("| Capability | 总数 | Supported | Partial | Unsupported | Train | Test |")
+    lines.append("|-----------|------|-----------|---------|-------------|-------|------|")
     for cap in sorted(cap_agg.keys()):
         d = cap_agg[cap]
         lines.append(
@@ -760,12 +760,12 @@ def _section_8_recommendations(
     lines.append("")
     lines.append("**第二步: Supported 全量接入**")
     lines.append(f"- 接入全部 {len(supported)} 个 supported task")
-    lines.append(f"- 新增 subset: `tau_retail_supported`")
-    lines.append(f"- 作为 Phase 9 的 gate")
+    lines.append("- 新增 subset: `tau_retail_supported`")
+    lines.append("- 作为 Phase 9 的 gate")
     lines.append("")
     lines.append("**第三步: Partial 接入**")
     lines.append(f"- 接入 {len(partial)} 个 partial task，NL assertion 作为非 gate 参考维度")
-    lines.append(f"- 新增 subset: `tau_retail_partial`")
+    lines.append("- 新增 subset: `tau_retail_partial`")
     lines.append("")
 
     lines.append("### 8.3 风险提示")
