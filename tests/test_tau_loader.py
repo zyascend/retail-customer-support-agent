@@ -98,6 +98,7 @@ class TestBuildUserMessage:
         msg = _build_user_message(SAMPLE_TASK)
         assert "exchange" in msg.lower()
         assert "Yusuf Rossi" in msg
+        assert "my zip code is 19122" in msg
         assert "don't remember my email" in msg
 
     def test_handles_empty_unknown_info(self):

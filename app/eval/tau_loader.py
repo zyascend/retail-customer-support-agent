@@ -79,7 +79,7 @@ def _build_user_message(task: dict) -> str:
     return " ".join(parts)
 
 
-def _to_first_person(text: str) -> str:
+def _to_first_person(text: Optional[str]) -> str:
     """Convert tau3 second-person instructions to first-person user message.
 
     Common patterns in tau3 instructions:
@@ -91,10 +91,15 @@ def _to_first_person(text: str) -> str:
     """
     import re
 
-    # "You are First Last in zip 12345." → "My name is First Last and I live in zip 12345."
+    if not text:
+        return ""
+
+    # "You are First Last in zip 12345." or "...in zip code 12345."
+    # → "My name is First Last and my zip code is 12345."
+    # (matches NAME_ZIP_RE: "my name is First Last ... zip code is 12345")
     text = re.sub(
-        r"\bYou are ([\w\s]+?) in zip (\d{5})\b",
-        r"My name is \1 and I live in zip \2",
+        r"\bYou are ([\w\s]+?) in zip(?: code)? (\d{5})\b",
+        r"My name is \1 and my zip code is \2",
         text,
     )
     # "Your email is X" → "My email is X"

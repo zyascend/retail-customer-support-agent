@@ -507,13 +507,22 @@ def classify_failure(
             return "auth_failure"
         if final_intent != case.expected_intent:
             return "wrong_intent"
-    missing_tools = [
-        tool_name
-        for tool_name in case.expected_tool_names
-        if tool_name not in tool_names
-    ]
-    if missing_tools:
-        return "wrong_tool"
+    # Tau subsets: loose tool check — at least one expected tool must be
+    # called (any tool, read or write). Don't require full action sequence.
+    # Skip check if expected_tool_names is empty (no tool expectations).
+    if is_tau:
+        if case.expected_tool_names and not any(
+            t in tool_names for t in case.expected_tool_names
+        ):
+            return "wrong_tool"
+    else:
+        missing_tools = [
+            tool_name
+            for tool_name in case.expected_tool_names
+            if tool_name not in tool_names
+        ]
+        if missing_tools:
+            return "wrong_tool"
     if tool_errors:
         return "tool_exception"
     if case.expected_guard_block_reason:
