@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from app.config import AppConfig
 from app.eval.cases import EvalCase
@@ -27,8 +27,16 @@ TOOL_TO_INTENT: dict[str, str] = {
     "transfer_to_human_agents": "transfer",
 }
 
-# Write tools that trigger DB assertions
-WRITE_TOOLS: set[str] = set(TOOL_TO_INTENT.keys())
+# Write tools that trigger DB assertions (excludes transfer_to_human_agents)
+WRITE_TOOLS: set[str] = {
+    "cancel_pending_order",
+    "return_delivered_order_items",
+    "exchange_delivered_order_items",
+    "modify_pending_order_address",
+    "modify_pending_order_items",
+    "modify_pending_order_payment",
+    "modify_user_address",
+}
 
 # Smoke test task IDs: prioritize task_issues (4,5,7) + diverse capabilities
 SMOKE_TASK_IDS: set[str] = {"3", "4", "5", "7", "16", "17", "22", "40"}
@@ -162,9 +170,9 @@ def get_tau_smoke_cases(config: AppConfig) -> list[EvalCase]:
     """
     from app.analysis.tau_task_analyzer import (
         _resolve_tau3_retail_dir,
-        load_tasks,
-        load_splits,
         classify_task,
+        load_splits,
+        load_tasks,
     )
 
     retail_dir = _resolve_tau3_retail_dir(config)
