@@ -23,7 +23,7 @@ SUPPORTED_INTENTS = {
     "modify_order_address",
     "modify_order_items",
     "modify_order_payment",
-    "modify_order_shipping_method",
+    "modify_shipping_method",
     "modify_user_address",
     "return_items",
     "exchange_items",
