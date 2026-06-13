@@ -97,6 +97,17 @@ def infer_intent(lowered: str) -> str:
         "shipping" in lowered or "delivery" in lowered
     ):
         return "modify_shipping_method"
+    # Catch delivery/shipping requests with non-standard method names
+    # e.g., "drone delivery", "need helicopter shipping"
+    # Avoid false positives on "delivery status/tracking/info"
+    if re.search(r"\b(delivery|shipping)\b", lowered) and re.search(
+        r"\b(need|want|get|use|change|modify|update)\b", lowered
+    ):
+        if not re.search(
+            r"\b(delivery|shipping)\s+(status|update|info|tracking|date|time)\b",
+            lowered,
+        ):
+            return "modify_shipping_method"
 
     # Payment modification
     if "payment" in lowered and re.search(
@@ -246,4 +257,18 @@ def parse_shipping_method(content: str) -> Optional[str]:
         pattern = alias.replace(" ", r"\s+")
         if re.search(rf"\b{pattern}\b", lowered):
             return canonical
+    # Extract non-standard method name from patterns like "drone delivery"
+    # or "helicopter shipping" — returns the raw term for guard to reject
+    m = re.search(r"\b(\w+)\s+(?:delivery|shipping)\b", lowered)
+    if m:
+        candidate = m.group(1)
+        if candidate not in (
+            "free",
+            "fast",
+            "cheap",
+            "international",
+            "domestic",
+            "expedited",
+        ):
+            return candidate
     return None

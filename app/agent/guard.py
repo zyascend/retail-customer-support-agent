@@ -241,6 +241,9 @@ class WriteActionGuard:
             if fee_delta > 0:
                 payment_method_id = args.get("payment_method_id")
                 if not payment_method_id:
+                    # Auto-select the order's existing payment method
+                    payment_method_id = get_current_payment_method_id(order)
+                if not payment_method_id:
                     return "payment_method_required_for_upgrade"
                 user = get_user_from_db(db, order.get("user_id", ""))
                 if not user:

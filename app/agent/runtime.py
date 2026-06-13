@@ -404,6 +404,7 @@ class AgentRuntime:
 
     def _plan_shipping_method(self, state: ConversationState) -> None:
         from app.agent.plan_handlers import plan_shipping_method
+
         plan_shipping_method(state, self._assistant, self._set_pending)
 
     def _respond_with_order_lookup(self, state: ConversationState) -> None:
@@ -505,6 +506,7 @@ class AgentRuntime:
 
     def _parse_shipping_method(self, content: str) -> Optional[str]:
         from app.agent.parsers import parse_shipping_method
+
         return parse_shipping_method(content)
 
     def _assistant(

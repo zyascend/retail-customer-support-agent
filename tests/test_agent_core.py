@@ -1006,9 +1006,7 @@ class ShippingIntentParserTests(unittest.TestCase):
     def test_compensation_request_is_transfer(self):
         from app.agent.parsers import infer_intent
 
-        self.assertEqual(
-            infer_intent("I deserve compensation for this"), "transfer"
-        )
+        self.assertEqual(infer_intent("I deserve compensation for this"), "transfer")
         self.assertEqual(infer_intent("refund my money"), "transfer")
 
     def test_return_with_refund_word_is_still_return(self):
@@ -1024,33 +1022,25 @@ class ShippingSlotParserTests(unittest.TestCase):
     def test_parse_standard_shipping(self):
         from app.agent.parsers import parse_shipping_method
 
-        self.assertEqual(parse_shipping_method("change to standard shipping"), "standard")
         self.assertEqual(
-            parse_shipping_method("I want regular shipping"), "standard"
+            parse_shipping_method("change to standard shipping"), "standard"
         )
-        self.assertEqual(
-            parse_shipping_method("normal shipping please"), "standard"
-        )
-        self.assertEqual(
-            parse_shipping_method("just use free shipping"), "standard"
-        )
+        self.assertEqual(parse_shipping_method("I want regular shipping"), "standard")
+        self.assertEqual(parse_shipping_method("normal shipping please"), "standard")
+        self.assertEqual(parse_shipping_method("just use free shipping"), "standard")
 
     def test_parse_express_shipping(self):
         from app.agent.parsers import parse_shipping_method
 
         self.assertEqual(parse_shipping_method("upgrade to express"), "express")
-        self.assertEqual(
-            parse_shipping_method("expedited shipping please"), "express"
-        )
+        self.assertEqual(parse_shipping_method("expedited shipping please"), "express")
 
     def test_parse_overnight_shipping(self):
         from app.agent.parsers import parse_shipping_method
 
         self.assertEqual(parse_shipping_method("I need overnight"), "overnight")
         self.assertEqual(parse_shipping_method("next day delivery"), "overnight")
-        self.assertEqual(
-            parse_shipping_method("next-day shipping please"), "overnight"
-        )
+        self.assertEqual(parse_shipping_method("next-day shipping please"), "overnight")
 
     def test_parse_no_shipping_returns_none(self):
         from app.agent.parsers import parse_shipping_method

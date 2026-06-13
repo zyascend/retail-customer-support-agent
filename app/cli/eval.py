@@ -30,7 +30,9 @@ def eval_main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--tau2-bench-root", help="Override TAU2_BENCH_ROOT.")
     parser.add_argument("--require-llm", action="store_true")
     parser.add_argument("--max-workers", type=int, default=50)
-    parser.add_argument("--seed", type=int, default=42, help="Seed for synthetic world generation.")
+    parser.add_argument(
+        "--seed", type=int, default=42, help="Seed for synthetic world generation."
+    )
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
     args = parser.parse_args(argv)

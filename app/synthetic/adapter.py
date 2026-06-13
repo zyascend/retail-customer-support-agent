@@ -48,6 +48,7 @@ class SyntheticRetailTools:
 
     def get_hash(self) -> str:
         from app.ops.serialization import stable_hash
+
         return stable_hash(self.db)
 
     # ── Private helpers ──
@@ -151,27 +152,43 @@ class SyntheticRetailTools:
         return copy.deepcopy(order)
 
     def modify_pending_order_address(
-        self, order_id: str, address1: str, address2: str,
-        city: str, state: str, country: str, zip: str,
+        self,
+        order_id: str,
+        address1: str,
+        address2: str,
+        city: str,
+        state: str,
+        country: str,
+        zip: str,
     ) -> Dict[str, Any]:
         order = self._get_order(order_id)
         assert "pending" in order["status"]
         order["address"] = {
-            "address1": address1, "address2": address2,
-            "city": city, "state": state, "country": country, "zip": zip,
+            "address1": address1,
+            "address2": address2,
+            "city": city,
+            "state": state,
+            "country": country,
+            "zip": zip,
         }
         return copy.deepcopy(order)
 
     def modify_pending_order_items(
-        self, order_id: str, item_ids: list[str], new_item_ids: list[str],
+        self,
+        order_id: str,
+        item_ids: list[str],
+        new_item_ids: list[str],
     ) -> Dict[str, Any]:
         order = self._get_order(order_id)
         assert order["status"] == "pending"
         assert len(item_ids) == len(new_item_ids)
         for old_item_id, new_item_id in zip(item_ids, new_item_ids):
             matching_index = next(
-                (idx for idx, item in enumerate(order["items"])
-                 if item["item_id"] == old_item_id),
+                (
+                    idx
+                    for idx, item in enumerate(order["items"])
+                    if item["item_id"] == old_item_id
+                ),
                 None,
             )
             assert matching_index is not None
@@ -187,7 +204,9 @@ class SyntheticRetailTools:
         return copy.deepcopy(order)
 
     def modify_pending_order_payment(
-        self, order_id: str, payment_method_id: str,
+        self,
+        order_id: str,
+        payment_method_id: str,
     ) -> Dict[str, Any]:
         order = self._get_order(order_id)
         assert "pending" in order["status"]
@@ -197,15 +216,20 @@ class SyntheticRetailTools:
         amount = sum(float(item.get("price", 0.0)) for item in order["items"])
         if payment_method.get("source") == "gift_card":
             assert float(payment_method.get("balance", 0.0)) >= amount
-        order["payment_history"].append({
-            "transaction_type": "payment",
-            "amount": round(amount, 2),
-            "payment_method_id": payment_method_id,
-        })
+        order["payment_history"].append(
+            {
+                "transaction_type": "payment",
+                "amount": round(amount, 2),
+                "payment_method_id": payment_method_id,
+            }
+        )
         return copy.deepcopy(order)
 
     def return_delivered_order_items(
-        self, order_id: str, item_ids: list[str], payment_method_id: str,
+        self,
+        order_id: str,
+        item_ids: list[str],
+        payment_method_id: str,
     ) -> Dict[str, Any]:
         order = self._get_order(order_id)
         assert order["status"] == "delivered"
@@ -219,8 +243,11 @@ class SyntheticRetailTools:
         return copy.deepcopy(order)
 
     def exchange_delivered_order_items(
-        self, order_id: str, item_ids: list[str],
-        new_item_ids: list[str], payment_method_id: str,
+        self,
+        order_id: str,
+        item_ids: list[str],
+        new_item_ids: list[str],
+        payment_method_id: str,
     ) -> Dict[str, Any]:
         order = self._get_order(order_id)
         assert order["status"] == "delivered"
@@ -240,20 +267,32 @@ class SyntheticRetailTools:
         return copy.deepcopy(order)
 
     def modify_user_address(
-        self, user_id: str, address1: str, address2: str,
-        city: str, state: str, country: str, zip: str,
+        self,
+        user_id: str,
+        address1: str,
+        address2: str,
+        city: str,
+        state: str,
+        country: str,
+        zip: str,
     ) -> Dict[str, Any]:
         user = self._get_user(user_id)
         user["address"] = {
-            "address1": address1, "address2": address2,
-            "city": city, "state": state, "country": country, "zip": zip,
+            "address1": address1,
+            "address2": address2,
+            "city": city,
+            "state": state,
+            "country": country,
+            "zip": zip,
         }
         return copy.deepcopy(user)
 
     # ── New write tool: modify shipping method ──
 
     def modify_pending_order_shipping_method(
-        self, order_id: str, shipping_method: str,
+        self,
+        order_id: str,
+        shipping_method: str,
         payment_method_id: str | None = None,
     ) -> Dict[str, Any]:
         order = self._get_order(order_id)
@@ -266,11 +305,13 @@ class SyntheticRetailTools:
         order["shipping_method"] = shipping_method
         order["shipping_fee"] = new_fee
         if fee_delta > 0 and payment_method_id:
-            order["payment_history"].append({
-                "transaction_type": "shipping_upgrade",
-                "amount": round(fee_delta, 2),
-                "payment_method_id": payment_method_id,
-            })
+            order["payment_history"].append(
+                {
+                    "transaction_type": "shipping_upgrade",
+                    "amount": round(fee_delta, 2),
+                    "payment_method_id": payment_method_id,
+                }
+            )
         return copy.deepcopy(order)
 
     # ── Generic ──

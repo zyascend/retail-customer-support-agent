@@ -130,7 +130,6 @@ def intent_and_slot_extractor(
         return
     from app.agent.parsers import ITEM_RE, ORDER_RE, PAYMENT_RE  # noqa: PLC0415
 
-
     lowered = content.lower()
     # Preserve existing intent when message is a bare confirmation/denial
     bare_response = lowered.strip() in {

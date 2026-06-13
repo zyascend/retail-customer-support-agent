@@ -254,6 +254,7 @@ class CuratedEvalRunner:
         # Synthetic subset: use synthetic runtime
         if case.subset == "synthetic_seeded_v1":
             from app.synthetic.adapter import SyntheticRetailAdapter
+
             seed = getattr(self, "_seed", 42)
             synthetic_adapter = SyntheticRetailAdapter(seed=seed)
             synthetic_runtime = synthetic_adapter.create_runtime()

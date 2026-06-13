@@ -6,33 +6,105 @@ import json
 import random
 from pathlib import Path
 
-
 FIRST_NAMES = [
-    "Alice", "Bob", "Carol", "Dave", "Eve", "Frank", "Grace", "Heidi",
-    "Ivan", "Judy", "Kevin", "Linda", "Mallory", "Nancy", "Oscar",
-    "Peggy", "Quinn", "Ruth", "Steve", "Trudy",
+    "Alice",
+    "Bob",
+    "Carol",
+    "Dave",
+    "Eve",
+    "Frank",
+    "Grace",
+    "Heidi",
+    "Ivan",
+    "Judy",
+    "Kevin",
+    "Linda",
+    "Mallory",
+    "Nancy",
+    "Oscar",
+    "Peggy",
+    "Quinn",
+    "Ruth",
+    "Steve",
+    "Trudy",
 ]
 LAST_NAMES = [
-    "Wang", "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia",
-    "Miller", "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez",
-    "Gonzalez", "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson",
+    "Wang",
+    "Smith",
+    "Johnson",
+    "Williams",
+    "Brown",
+    "Jones",
+    "Garcia",
+    "Miller",
+    "Davis",
+    "Rodriguez",
+    "Martinez",
+    "Hernandez",
+    "Lopez",
+    "Gonzalez",
+    "Wilson",
+    "Anderson",
+    "Thomas",
+    "Taylor",
+    "Moore",
+    "Jackson",
 ]
 CITIES = [
-    "New York", "Los Angeles", "Chicago", "Houston", "Phoenix",
-    "Philadelphia", "San Antonio", "San Diego", "Dallas", "Austin",
+    "New York",
+    "Los Angeles",
+    "Chicago",
+    "Houston",
+    "Phoenix",
+    "Philadelphia",
+    "San Antonio",
+    "San Diego",
+    "Dallas",
+    "Austin",
 ]
 STATES = [
-    "NY", "CA", "IL", "TX", "AZ", "PA", "TX", "CA", "TX", "TX",
+    "NY",
+    "CA",
+    "IL",
+    "TX",
+    "AZ",
+    "PA",
+    "TX",
+    "CA",
+    "TX",
+    "TX",
 ]
 PRODUCT_NAMES = [
-    "Ergonomic Chair", "Standing Desk", "Monitor Arm", "Keyboard Tray",
-    "Desk Lamp", "Filing Cabinet", "Bookshelf", "Office Mat",
-    "Headset", "Webcam", "Mouse Pad", "Laptop Stand",
-    "Cable Organizer", "Whiteboard", "Plant Pot", "Water Bottle",
-    "Notebook", "Pen Set", "Sticky Notes", "Paper Shredder",
-    "Desk Fan", "USB Hub", "External Drive", "Mouse",
-    "Keyboard", "Monitor", "Speaker", "Charger",
-    "Backpack", "Lunch Box",
+    "Ergonomic Chair",
+    "Standing Desk",
+    "Monitor Arm",
+    "Keyboard Tray",
+    "Desk Lamp",
+    "Filing Cabinet",
+    "Bookshelf",
+    "Office Mat",
+    "Headset",
+    "Webcam",
+    "Mouse Pad",
+    "Laptop Stand",
+    "Cable Organizer",
+    "Whiteboard",
+    "Plant Pot",
+    "Water Bottle",
+    "Notebook",
+    "Pen Set",
+    "Sticky Notes",
+    "Paper Shredder",
+    "Desk Fan",
+    "USB Hub",
+    "External Drive",
+    "Mouse",
+    "Keyboard",
+    "Monitor",
+    "Speaker",
+    "Charger",
+    "Backpack",
+    "Lunch Box",
 ]
 VARIANT_OPTIONS_LIST = [
     [{"color": "Black"}, {"color": "White"}, {"color": "Gray"}],
@@ -153,26 +225,35 @@ class SyntheticDBGenerator:
         user_ids = list(users.keys())
         product_ids = list(products.keys())
         shipping_keys = list(SHIPPING_METHODS.keys())
-        statuses = ["pending"] * 30 + ["delivered"] * 10 + ["processing"] * 5 + ["cancelled"] * 5
+        statuses = (
+            ["pending"] * 30
+            + ["delivered"] * 10
+            + ["processing"] * 5
+            + ["cancelled"] * 5
+        )
         self._rng.shuffle(statuses)
         for i in range(50):
             oid = f"#W{1000 + i}"
             uid = self._rng.choice(user_ids)
             user = users[uid]
             item_count = self._rng.randint(1, 3)
-            selected_products = self._rng.sample(product_ids, min(item_count, len(product_ids)))
+            selected_products = self._rng.sample(
+                product_ids, min(item_count, len(product_ids))
+            )
             items = []
             amount = 0.0
             for pid in selected_products:
                 variants = products[pid]["variants"]
                 variant = self._rng.choice(list(variants.values()))
-                items.append({
-                    "item_id": variant["item_id"],
-                    "product_id": pid,
-                    "name": variant["name"],
-                    "price": variant["price"],
-                    "options": copy.deepcopy(variant["options"]),
-                })
+                items.append(
+                    {
+                        "item_id": variant["item_id"],
+                        "product_id": pid,
+                        "name": variant["name"],
+                        "price": variant["price"],
+                        "options": copy.deepcopy(variant["options"]),
+                    }
+                )
                 amount += variant["price"]
             payment_method_ids = list(user["payment_methods"].keys())
             payment_method_id = self._rng.choice(payment_method_ids)
