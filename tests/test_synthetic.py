@@ -216,3 +216,182 @@ class SyntheticRetailAdapterTests(unittest.TestCase):
         db = runtime.tools.db
         for key in ("users", "orders", "products", "shipping_methods"):
             self.assertIn(key, db)
+
+
+class SyntheticGuardTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from app.synthetic.generator import SyntheticDBGenerator
+        cls.world = SyntheticDBGenerator(seed=42).generate()
+        from app.agent.guard import WriteActionGuard
+        cls.guard = WriteActionGuard()
+        cls.db = cls.world
+
+    def _make_state(self, user_id=None, loaded_order_ids=None):
+        from app.agent.models import ConversationState
+        state = ConversationState(session_id="test-session", task_id="test")
+        state.authenticated_user_id = user_id
+        if loaded_order_ids:
+            for oid in loaded_order_ids:
+                order = self.world["orders"].get(oid)
+                if order:
+                    state.loaded_context.orders[oid] = order
+        return state
+
+    def test_blocks_non_pending_shipping_change(self):
+        non_pending = next(
+            o for o in self.world["orders"].values()
+            if o["status"] != "pending"
+        )
+        user_id = non_pending["user_id"]
+        state = self._make_state(user_id=user_id, loaded_order_ids=[non_pending["order_id"]])
+        from app.agent.models import ToolCall
+        result = self.guard.check(
+            state=state, db=self.db,
+            action=ToolCall(
+                tool_name="modify_pending_order_shipping_method",
+                arguments={"order_id": non_pending["order_id"], "shipping_method": "express"},
+            ),
+            confirmed=True,
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.block_reason, "non_pending_order_cannot_be_modified")
+
+    def test_blocks_same_shipping_method(self):
+        pending = next(
+            o for o in self.world["orders"].values()
+            if o["status"] == "pending"
+        )
+        user_id = pending["user_id"]
+        current_method = pending["shipping_method"]
+        state = self._make_state(user_id=user_id, loaded_order_ids=[pending["order_id"]])
+        from app.agent.models import ToolCall
+        result = self.guard.check(
+            state=state, db=self.db,
+            action=ToolCall(
+                tool_name="modify_pending_order_shipping_method",
+                arguments={"order_id": pending["order_id"], "shipping_method": current_method},
+            ),
+            confirmed=True,
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.block_reason, "same_shipping_method")
+
+    def test_blocks_unknown_shipping_method(self):
+        pending = next(
+            o for o in self.world["orders"].values()
+            if o["status"] == "pending"
+        )
+        user_id = pending["user_id"]
+        state = self._make_state(user_id=user_id, loaded_order_ids=[pending["order_id"]])
+        from app.agent.models import ToolCall
+        result = self.guard.check(
+            state=state, db=self.db,
+            action=ToolCall(
+                tool_name="modify_pending_order_shipping_method",
+                arguments={"order_id": pending["order_id"], "shipping_method": "drone"},
+            ),
+            confirmed=True,
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.block_reason, "unknown_shipping_method")
+
+    def test_blocks_unauthenticated_shipping_change(self):
+        pending = next(
+            o for o in self.world["orders"].values()
+            if o["status"] == "pending"
+        )
+        state = self._make_state(user_id=None, loaded_order_ids=[pending["order_id"]])
+        from app.agent.models import ToolCall
+        result = self.guard.check(
+            state=state, db=self.db,
+            action=ToolCall(
+                tool_name="modify_pending_order_shipping_method",
+                arguments={"order_id": pending["order_id"], "shipping_method": "express"},
+            ),
+            confirmed=True,
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.block_reason, "authentication_required")
+
+    def test_blocks_without_confirmation(self):
+        pending = next(
+            o for o in self.world["orders"].values()
+            if o["status"] == "pending"
+        )
+        user_id = pending["user_id"]
+        state = self._make_state(user_id=user_id, loaded_order_ids=[pending["order_id"]])
+        from app.agent.models import ToolCall
+        result = self.guard.check(
+            state=state, db=self.db,
+            action=ToolCall(
+                tool_name="modify_pending_order_shipping_method",
+                arguments={"order_id": pending["order_id"], "shipping_method": "express"},
+            ),
+            confirmed=False,
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.block_reason, "explicit_confirmation_required")
+
+    def test_allows_valid_shipping_change_no_fee(self):
+        pending = next(
+            o for o in self.world["orders"].values()
+            if o["status"] == "pending" and o["shipping_method"] != "standard"
+        )
+        user_id = pending["user_id"]
+        state = self._make_state(user_id=user_id, loaded_order_ids=[pending["order_id"]])
+        from app.agent.models import ToolCall
+        result = self.guard.check(
+            state=state, db=self.db,
+            action=ToolCall(
+                tool_name="modify_pending_order_shipping_method",
+                arguments={"order_id": pending["order_id"], "shipping_method": "standard"},
+            ),
+            confirmed=True,
+        )
+        self.assertTrue(result.allowed)
+
+    def test_blocks_upgrade_without_payment_method(self):
+        pending = next(
+            o for o in self.world["orders"].values()
+            if o["status"] == "pending" and o["shipping_method"] == "standard"
+        )
+        user_id = pending["user_id"]
+        state = self._make_state(user_id=user_id, loaded_order_ids=[pending["order_id"]])
+        from app.agent.models import ToolCall
+        result = self.guard.check(
+            state=state, db=self.db,
+            action=ToolCall(
+                tool_name="modify_pending_order_shipping_method",
+                arguments={
+                    "order_id": pending["order_id"],
+                    "shipping_method": "overnight",
+                },
+            ),
+            confirmed=True,
+        )
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.block_reason, "payment_method_required_for_upgrade")
+
+    def test_resource_lock_format(self):
+        pending = next(
+            o for o in self.world["orders"].values()
+            if o["status"] == "pending" and o["shipping_method"] != "standard"
+        )
+        user_id = pending["user_id"]
+        state = self._make_state(user_id=user_id, loaded_order_ids=[pending["order_id"]])
+        from app.agent.models import ToolCall
+        result = self.guard.check(
+            state=state, db=self.db,
+            action=ToolCall(
+                tool_name="modify_pending_order_shipping_method",
+                arguments={
+                    "order_id": pending["order_id"],
+                    "shipping_method": "standard",
+                },
+            ),
+            confirmed=True,
+        )
+        self.assertTrue(result.allowed)
+        self.assertIsNotNone(result.resource_lock)
+        self.assertIn("modify_shipping_method", result.resource_lock)

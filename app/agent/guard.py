@@ -164,6 +164,8 @@ class WriteActionGuard:
             replacement_reason = self._validate_item_replacements(db, order, args)
             if replacement_reason:
                 return replacement_reason
+        if action.tool_name == "modify_pending_order_shipping_method":
+            return self._validate_shipping_method_change(db, order, args)
         if action.tool_name == "modify_pending_order_payment":
             if not order or order.get("status") != "pending":
                 return "non_pending_order_cannot_be_modified"
@@ -220,6 +222,37 @@ class WriteActionGuard:
                 return "gift_card_balance_insufficient"
         return None
 
+    def _validate_shipping_method_change(
+        self, db: Any, order: Dict[str, Any], args: Dict[str, Any]
+    ) -> Optional[str]:
+        if not order or order.get("status") != "pending":
+            return "non_pending_order_cannot_be_modified"
+        new_method = args.get("shipping_method", "")
+        current_method = order.get("shipping_method", "")
+        if new_method == current_method:
+            return "same_shipping_method"
+        shipping_methods = _get_shipping_methods(db)
+        if new_method not in shipping_methods:
+            return "unknown_shipping_method"
+        if shipping_methods:
+            old_fee = shipping_methods.get(current_method, {}).get("fee", 0.0)
+            new_fee = shipping_methods.get(new_method, {}).get("fee", 0.0)
+            fee_delta = new_fee - old_fee
+            if fee_delta > 0:
+                payment_method_id = args.get("payment_method_id")
+                if not payment_method_id:
+                    return "payment_method_required_for_upgrade"
+                user = get_user_from_db(db, order.get("user_id", ""))
+                if not user:
+                    return "user_not_found"
+                payment_method = user.get("payment_methods", {}).get(payment_method_id)
+                if payment_method is None:
+                    return "payment_method_not_owned"
+                if payment_method.get("source") == "gift_card":
+                    if float(payment_method.get("balance", 0.0)) < fee_delta:
+                        return "gift_card_balance_insufficient"
+        return None
+
     def _resource_lock(self, action: ToolCall) -> str:
         args = action.arguments
         if action.tool_name == "modify_user_address":
@@ -232,6 +265,8 @@ class WriteActionGuard:
             item_ids = ",".join(sorted(args.get("item_ids", [])))
             category = "return" if action.tool_name.startswith("return") else "exchange"
             return f"item:{item_ids}:{category}"
+        if action.tool_name == "modify_pending_order_shipping_method":
+            return f"order:{args.get('order_id')}:modify_shipping_method"
         category = {
             "cancel_pending_order": "cancel",
             "modify_pending_order_address": "modify_address",
@@ -279,6 +314,18 @@ class WriteActionGuard:
             return f"Modify items for order {action.arguments.get('order_id')}."
         if action.tool_name == "modify_pending_order_payment":
             return f"Modify payment for order {action.arguments.get('order_id')}."
+        if action.tool_name == "modify_pending_order_shipping_method":
+            return (
+                f"Modify shipping method to {action.arguments.get('shipping_method')} "
+                f"for order {action.arguments.get('order_id')}."
+            )
         if action.tool_name == "modify_user_address":
             return f"Modify default address for user {action.arguments.get('user_id')}."
         return action.tool_name
+
+
+def _get_shipping_methods(db: Any) -> dict:
+    try:
+        return db.get("shipping_methods", {})
+    except AttributeError:
+        return {}
