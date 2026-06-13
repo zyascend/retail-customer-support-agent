@@ -64,6 +64,20 @@ from app.agent.parsers import (
     parse_address,
     parse_item_replacement_pairs,
 )
+from app.agent.pipeline import (
+    action_planner,
+    context_loader,
+    conversation_gate,
+    identity_resolver,
+    intent_and_slot_extractor,
+    observation_reducer,
+    policy_reasoner,
+    receive_message,
+    response_generator,
+    run_logger,
+    tool_executor,
+    write_action_guard,
+)
 from app.agent.plan_handlers import (
     plan_address_change,
     plan_cancel,
@@ -222,93 +236,27 @@ class AgentRuntime:
         return payload
 
     def _receive_message(self, state: ConversationState, content: str) -> None:
-        state.add_step("receive_message", content=content)
+        receive_message(state, content)
 
     def _conversation_gate(self, state: ConversationState, content: str) -> None:
-        if state.pending_action:
-            resolution = self.confirmation_resolver.resolve(content)
-            state.confirmation_status = {
-                "confirm": "confirmed",
-                "deny": "denied",
-                "changed": "changed",
-                "unknown": "unknown",
-            }[resolution]
-            state.add_step("conversation_gate", confirmation=resolution)
-            if resolution == "confirm":
-                action = state.pending_action
-                record = self.gateway.execute(
-                    state=state,
-                    tool_name=action.action_name,
-                    arguments=action.arguments,
-                    confirmed=True,
-                )
-                state.pending_action = None
-                if record.status == "success":
-                    self._assistant(
-                        state,
-                        "Done. I have completed the requested update.",
-                    )
-                else:
-                    self._assistant(
-                        state,
-                        _map_guard_error_to_user_message(str(record.error)),
-                    )
-            elif resolution == "deny":
-                state.pending_action = None
-                self._assistant(state, "No changes were made.")
-            elif resolution == "changed":
-                state.pending_action = None
-                state.slots = {}
-                self._assistant(
-                    state,
-                    "I discarded the previous request. Please provide updated details.",
-                )
-            else:
-                self._assistant(
-                    state,
-                    "Please confirm yes or no: "
-                    f"{state.pending_action.user_facing_summary}",
-                )
-            return
-        state.add_step(
-            "conversation_gate",
-            authenticated=bool(state.authenticated_user_id),
+        conversation_gate(
+            state,
+            content,
+            self.confirmation_resolver,
+            self.gateway,
+            self._assistant,
+            _map_guard_error_to_user_message,
         )
 
     def _identity_resolver(self, state: ConversationState, content: str) -> None:
-        if state.authenticated_user_id or self._has_assistant_response(state):
-            return
-        email_match = EMAIL_RE.search(content)
-        if not email_match:
-            if self._identity_resolver_name_zip(state, content):
-                return
-            self._assistant(
-                state,
-                "Please provide the email address on your account so I can verify you.",
-            )
-            state.add_step("identity_resolver", status="need_user_info")
-            return
-        email = email_match.group(0)
-        record = self.gateway.execute(
-            state=state,
-            tool_name="find_user_id_by_email",
-            arguments={"email": email},
+        identity_resolver(
+            state,
+            content,
+            self._has_assistant_response,
+            self._assistant,
+            self.gateway,
+            self._identity_resolver_name_zip,
         )
-        if record.status != "success":
-            self._assistant(state, "I could not verify that email address.")
-            return
-        user_id = str(record.observation)
-        state.authenticated_user_id = user_id
-        state.auth_method = "email"
-        state.active_user_identity = {"email": email, "user_id": user_id}
-        user_record = self.gateway.execute(
-            state=state,
-            tool_name="get_user_details",
-            arguments={"user_id": user_id},
-        )
-        if user_record.status == "success":
-            state.loaded_context.users[user_id] = user_record.observation
-        state.add_step("identity_resolver", status="authenticated", user_id=user_id)
 
     def _identity_resolver_name_zip(
         self, state: ConversationState, content: str
@@ -348,115 +296,26 @@ class AgentRuntime:
     def _intent_and_slot_extractor(
         self, state: ConversationState, content: str
     ) -> None:
-        if self._has_assistant_response(state):
-            return
-        lowered = content.lower()
-        # Preserve existing intent when message is a bare confirmation/denial
-        bare_response = lowered.strip() in {
-            "yes", "no", "confirm", "ok", "y", "n", "go ahead",
-            "proceed", "sure", "yeah", "yep", "nope", "cancel",
-        }
-        if bare_response and state.current_intent and state.current_intent != "unknown":
-            pass  # keep prior intent rather than resetting to unknown
-        else:
-            state.current_intent = self._infer_intent(lowered)
-        llm_payload = self._llm_json(
+        intent_and_slot_extractor(
             state,
-            "intent_and_slot_extractor",
-            INTENT_SLOT_SYSTEM,
-            {
-                "user_message": content,
-                "known_slots": state.slots,
-                "authenticated_user_id": state.authenticated_user_id,
-            },
-            {
-                "type": "object",
-                "properties": {
-                    "intent": {"type": "string"},
-                    "slots": {"type": "object"},
-                },
-            },
-        )
-        if llm_payload:
-            llm_intent = str(llm_payload.get("intent") or "").strip()
-            if llm_intent and llm_intent != state.current_intent:
-                state.add_step(
-                    "intent_and_slot_extractor_divergence",
-                    code_intent=state.current_intent,
-                    llm_intent=llm_intent,
-                    resolved=state.current_intent,
-                )
-            self._apply_llm_intent_slots(state, llm_payload)
-        llm_slots = (llm_payload.get("slots") or {}) if llm_payload else {}
-        code_slots: Dict[str, Any] = dict(state.slots)
-
-        order_match = ORDER_RE.search(content)
-        if order_match:
-            code_slots["order_id"] = order_match.group(0)
-        payment_match = PAYMENT_RE.search(content)
-        if payment_match:
-            code_slots["payment_method_id"] = payment_match.group(0)
-        item_ids = [
-            item
-            for item in ITEM_RE.findall(content)
-            if not item.startswith("000") and len(item) >= 8
-        ]
-        if item_ids:
-            code_slots["item_ids"] = item_ids
-        if "ordered by mistake" in lowered:
-            code_slots["reason"] = "ordered by mistake"
-        elif "no longer needed" in lowered or "don't need" in lowered:
-            code_slots["reason"] = "no longer needed"
-        address = self._parse_address(content)
-        if address:
-            code_slots["address"] = address
-        item_pairs = self._parse_item_replacement_pairs(lowered)
-        if item_pairs:
-            code_slots["item_ids"] = [old for old, _new in item_pairs]
-            code_slots["new_item_ids"] = [new for _old, new in item_pairs]
-
-        new_item_marker = re.search(
-            r"(?:new items?|exchange for|instead|to new item|"
-            r"for new items?)\s+(\d{8,})",
-            lowered,
-        )
-        if new_item_marker:
-            new_item_id = new_item_marker.group(1)
-            code_slots["new_item_ids"] = [new_item_id]
-            if "item_ids" in code_slots:
-                code_slots["item_ids"] = [
-                    iid for iid in code_slots["item_ids"]
-                    if iid != new_item_id
-                ]
-
-        state.slots = self._merge_slots(
-            code_slots=code_slots,
-            llm_slots=llm_slots,
+            content,
+            has_assistant_fn=self._has_assistant_response,
+            infer_intent_fn=self._infer_intent,
+            llm_json_fn=self._llm_json,
+            INTENT_SLOT_SYSTEM=INTENT_SLOT_SYSTEM,
+            apply_llm_intent_slots_fn=self._apply_llm_intent_slots,
+            parse_address_fn=self._parse_address,
+            parse_item_replacement_pairs_fn=self._parse_item_replacement_pairs,
+            merge_slots_fn=self._merge_slots,
         )
 
     def _context_loader(self, state: ConversationState, content: str) -> None:
-        if self._has_assistant_response(state):
-            return
-        order_id = state.slots.get("order_id")
-        if order_id and order_id not in state.loaded_context.orders:
-            record = self.gateway.execute(
-                state=state,
-                tool_name="get_order_details",
-                arguments={"order_id": order_id},
-            )
-            if record.status == "success":
-                order = record.observation
-                state.loaded_context.orders[order_id] = order
-                if order.get("user_id") != state.authenticated_user_id:
-                    self._assistant(
-                        state,
-                        "I cannot access or modify orders for another account.",
-                    )
-            else:
-                self._assistant(state, f"I could not find order {order_id}.")
-        state.add_step(
-            "context_loader",
-            loaded_orders=list(state.loaded_context.orders),
+        context_loader(
+            state,
+            content,
+            self._has_assistant_response,
+            self.gateway,
+            self._assistant,
         )
 
     def _code_missing_slots(self, state: ConversationState) -> list[str]:
@@ -473,154 +332,54 @@ class AgentRuntime:
         )
 
     def _policy_reasoner(self, state: ConversationState, content: str) -> None:
-        if self._has_assistant_response(state):
-            return
-        write_intents = WRITE_INTENTS
-
-        # ── Code track ──
-        if state.current_intent == "transfer":
-            code_decision = "transfer"
-        elif state.current_intent == "lookup":
-            code_decision = "allow"
-        elif state.current_intent in write_intents:
-            if self._code_missing_slots(state):
-                code_decision = "ask_clarification"
-            else:
-                code_decision = "allow"
-        else:
-            code_decision = "ask_clarification"
-
-        # ── LLM track ──
-        llm_payload = self._llm_policy_decision(state, content, code_decision)
-        llm_decision = llm_payload.get("decision") if llm_payload else None
-
-        # ── Conservative merge ──
-        final_decision = self._merge_policy_decisions(
-            code_decision=code_decision,
-            llm_decision=llm_decision,
-        )
-
-        # Log divergence for audit
-        if llm_decision and llm_decision != code_decision:
-            state.add_step(
-                "policy_reasoner_divergence",
-                code=code_decision,
-                llm=llm_decision,
-                merged=final_decision,
-            )
-
-        explanation = ""
-        if llm_payload and final_decision == "deny":
-            explanation = self._clean_llm_scalar(
-                llm_payload.get("explanation_for_user")
-            ) or ""
-
-        state.policy_decision = PolicyDecision(
-            decision=final_decision,
-            intent=(
-                llm_payload.get("intent", state.current_intent)
-                if llm_payload
-                else state.current_intent
-            ),
-            missing_slots=(
-                llm_payload.get("missing_slots")
-                if llm_payload and isinstance(llm_payload.get("missing_slots"), list)
-                else []
-            ),
-            user_confirmation_required=(
-                llm_payload.get("user_confirmation_required", False)
-                if llm_payload
-                else state.current_intent in write_intents
-            ),
-            explanation_for_user=explanation,
-            internal_reasoning_summary=(
-                llm_payload.get("internal_reasoning_summary", "")
-                if llm_payload
-                else ""
-            ),
-        )
-        state.add_step(
-            "policy_reasoner",
-            decision=final_decision,
-            llm_used=bool(llm_payload),
-            code_decision=code_decision,
+        policy_reasoner(
+            state,
+            content,
+            has_assistant_fn=self._has_assistant_response,
+            WRITE_INTENTS=WRITE_INTENTS,
+            code_missing_slots_fn=self._code_missing_slots,
+            llm_policy_decision_fn=self._llm_policy_decision,
+            merge_policy_decisions_fn=self._merge_policy_decisions,
+            clean_llm_scalar_fn=self._clean_llm_scalar,
         )
 
     def _action_planner(self, state: ConversationState, content: str) -> None:
-        if self._has_assistant_response(state):
-            return
-        if state.policy_decision and state.policy_decision.decision == "deny":
-            self._assistant(
-                state,
-                state.policy_decision.explanation_for_user
-                or "I cannot complete that request under the retail policy.",
-            )
-            return
-        if state.policy_decision and state.policy_decision.decision == "transfer":
-            self._transfer_to_human(state, content)
-            return
-        if self._apply_llm_action_plan(state, content):
-            return
-        intent = state.current_intent
-        if intent == "transfer":
-            self._transfer_to_human(state, content)
-            return
-        if intent == "lookup":
-            self._respond_with_order_lookup(state)
-            return
-        if intent == "cancel_order":
-            self._plan_cancel(state)
-            return
-        if intent == "modify_order_address":
-            self._plan_address_change(state)
-            return
-        if intent == "modify_order_items":
-            self._plan_modify_items(state)
-            return
-        if intent == "modify_order_payment":
-            self._plan_modify_payment(state)
-            return
-        if intent == "modify_user_address":
-            self._plan_user_address(state)
-            return
-        if intent == "return_items":
-            self._plan_return(state)
-            return
-        if intent == "exchange_items":
-            self._plan_exchange(state)
-            return
-        self._assistant(
+        action_planner(
             state,
-            "Please tell me which order or retail support action you need help with.",
+            content,
+            has_assistant_fn=self._has_assistant_response,
+            assistant_fn=self._assistant,
+            transfer_to_human_fn=self._transfer_to_human,
+            apply_llm_action_plan_fn=self._apply_llm_action_plan,
+            respond_with_order_lookup_fn=self._respond_with_order_lookup,
+            plan_cancel_fn=self._plan_cancel,
+            plan_address_change_fn=self._plan_address_change,
+            plan_modify_items_fn=self._plan_modify_items,
+            plan_modify_payment_fn=self._plan_modify_payment,
+            plan_user_address_fn=self._plan_user_address,
+            plan_return_fn=self._plan_return,
+            plan_exchange_fn=self._plan_exchange,
         )
 
     def _transfer_to_human(self, state: ConversationState, content: str) -> None:
         transfer_to_human(state, content, self.gateway)
 
     def _write_action_guard(self, state: ConversationState, content: str) -> None:
-        state.add_step(
-            "write_action_guard",
-            pending_action=(
-                state.pending_action.model_dump() if state.pending_action else None
-            ),
-        )
+        write_action_guard(state, content)
 
     def _tool_executor(self, state: ConversationState, content: str) -> None:
-        state.add_step(
-            "tool_executor",
-            deferred_pending_write=bool(state.pending_action),
-        )
+        tool_executor(state, content)
 
     def _observation_reducer(self, state: ConversationState, content: str) -> None:
-        state.add_step("observation_reducer", tool_result_count=len(state.tool_results))
+        observation_reducer(state, content)
 
     def _response_generator(self, state: ConversationState, content: str) -> None:
-        if not self._has_assistant_response(state):
-            self._assistant(state, "I need a bit more information to help with that.")
-        state.add_step("response_generator", last_message=state.messages[-1].content)
+        response_generator(
+            state, content, self._has_assistant_response, self._assistant
+        )
 
     def _run_logger(self, state: ConversationState, content: str) -> None:
-        state.add_step("run_logger", message_count=len(state.messages))
+        run_logger(state, content)
 
     def _plan_cancel(self, state: ConversationState) -> None:
         plan_cancel(state, self._assistant, self._set_pending)
