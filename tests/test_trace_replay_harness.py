@@ -211,3 +211,64 @@ class TraceReplayHarnessTests(unittest.TestCase):
             )
             self.assertIsInstance(result, AgentTurnResult)
             self.assertIn("pending", result.assistant_message)
+
+    def test_replay_exhausted_llm_responses_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            responses = [
+                ToolCallResponse(
+                    assistant_content="Done.",
+                    finish_reason="stop",
+                ).model_dump(),
+            ]
+            trace_path = self._make_trace(tmp, responses, [])
+            registry = self._make_registry()
+            context_builder = self._make_context_builder()
+
+            from app.agent.replay import TraceReplayHarness
+            harness = TraceReplayHarness(trace_path, registry)
+            session = SessionState(session_id="replay-test")
+            result = harness.replay(
+                session, "hello", context_builder=context_builder
+            )
+            self.assertIsInstance(result, AgentTurnResult)
+            self.assertEqual(result.assistant_message, "Done.")
+
+    def test_replay_with_write_pending_confirmation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            responses = [
+                ToolCallResponse(
+                    assistant_content="I'll cancel that order.",
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_1",
+                            tool_name="cancel_pending_order",
+                            arguments={"order_id": "W123", "reason": "no longer needed"},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ).model_dump(),
+            ]
+            tool_calls = [
+                ToolCallRecord(
+                    tool_name="cancel_pending_order",
+                    arguments={"order_id": "W123", "reason": "no longer needed"},
+                    tool_kind="write",
+                    status="blocked",
+                    error="explicit_confirmation_required",
+                ).model_dump(),
+            ]
+            trace_path = self._make_trace(tmp, responses, tool_calls)
+            registry = self._make_registry()
+            # Ensure cancel_pending_order is in the registry tools
+            registry.tools.add("cancel_pending_order")
+            context_builder = self._make_context_builder()
+
+            from app.agent.replay import TraceReplayHarness
+            harness = TraceReplayHarness(trace_path, registry)
+            session = SessionState(session_id="replay-test")
+            result = harness.replay(
+                session, "Cancel order #W123", context_builder=context_builder
+            )
+            self.assertTrue(result.pending_action_set)
+            self.assertIsNotNone(session.pending_action)
+            self.assertEqual(session.pending_action.action_name, "cancel_pending_order")
