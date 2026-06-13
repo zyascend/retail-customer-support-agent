@@ -116,6 +116,24 @@ class EvalRunSummary:
         return payload
 
 
+def _load_tau_task_by_id(case_id: str, config: AppConfig) -> Optional[dict]:
+    """Load a single tau3 task by its EvalCase case_id ('tau_0' → task id '0')."""
+    if not case_id.startswith("tau_"):
+        return None
+    task_id = case_id[4:]  # strip 'tau_' prefix
+    try:
+        from app.analysis.tau_task_analyzer import _resolve_tau3_retail_dir, load_tasks
+
+        retail_dir = _resolve_tau3_retail_dir(config)
+        tasks = load_tasks(retail_dir)
+        for t in tasks:
+            if str(t["id"]) == task_id:
+                return t
+    except Exception:
+        pass
+    return None
+
+
 class CuratedEvalRunner:
     def __init__(
         self,
@@ -285,14 +303,27 @@ class CuratedEvalRunner:
             require_llm=self.require_llm,
             runtime=synthetic_runtime,
         )
+        # Tau subsets: use UserSimulator for multi-turn conversations
+        user_simulator_callback = None
+        run_messages = case.messages
+        if case.subset and case.subset.startswith("tau_retail_"):
+            task_data = _load_tau_task_by_id(case.case_id, self.config)
+            if task_data is not None:
+                from app.eval.tau_user_simulator import TauUserSimulator
+
+                simulator = TauUserSimulator(task_data)
+                run_messages = [{"role": "user", "content": simulator.initial_message()}]
+                user_simulator_callback = simulator.respond
+
         session_id = f"{eval_run_id}-{case.case_id}-trial-{trial}"
         order_status_before = self._order_status(runtime, case)
         started_at = time.perf_counter()
         run_result = runtime.run_script(
-            messages=case.messages,
+            messages=run_messages,
             session_id=session_id,
             task_id=case.case_id,
             max_turns=case.max_turns,
+            user_simulator_callback=user_simulator_callback,
         )
         duration_seconds = round(time.perf_counter() - started_at, 3)
         state = run_result.state

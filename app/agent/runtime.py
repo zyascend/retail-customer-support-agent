@@ -4,7 +4,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Callable, Dict, Iterable, Optional
 
 from app.agent.action_specs import (
     WRITE_INTENTS,
@@ -169,17 +169,26 @@ class AgentRuntime:
         session_id: Optional[str] = None,
         task_id: Optional[str] = None,
         max_turns: int = 20,
+        user_simulator_callback: Optional[Callable[[str], Optional[str]]] = None,
     ) -> AgentRunResult:
         run_id = session_id or f"agent-{uuid.uuid4().hex[:12]}"
         state = ConversationState(session_id=run_id, task_id=task_id)
         initial_db_hash = self.retail_runtime.db_hash()
-        for index, message in enumerate(messages):
-            if index >= max_turns:
-                state.termination_reason = "max_turns"
-                break
+        turn = 0
+        message_list = list(messages)
+        message_index = 0
+        while message_index < len(message_list) and turn < max_turns:
+            message = message_list[message_index]
+            message_index += 1
+            turn += 1
             if message.get("role") != "user":
                 continue
-            self.handle_user_message(state, message.get("content", ""))
+            assistant_msg = self.handle_user_message(state, message.get("content", ""))
+            # Multi-turn: use callback to get user's next response
+            if user_simulator_callback and assistant_msg and not state.termination_reason:
+                next_user_msg = user_simulator_callback(assistant_msg)
+                if next_user_msg:
+                    message_list.append({"role": "user", "content": next_user_msg})
         if not state.termination_reason:
             state.termination_reason = "script_completed"
         trace_path = TraceWriter(self.config.run_artifact_dir).write(
