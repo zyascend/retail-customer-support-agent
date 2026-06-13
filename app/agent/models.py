@@ -100,6 +100,41 @@ class AgentStep(BaseModel):
     detail: Dict[str, Any] = Field(default_factory=dict)
 
 
+class SessionState(BaseModel):
+    """Cross-turn persistent state.
+
+    Replaces ConversationState's session-level fields. Phase 4 will make
+    this the primary state object when the old pipeline is removed.
+    """
+    session_id: str
+    task_id: Optional[str] = None
+    authenticated_user_id: Optional[str] = None
+    auth_method: Optional[str] = None
+    active_user_identity: Dict[str, Any] = Field(default_factory=dict)
+    messages: List[Message] = Field(default_factory=list)
+    loaded_context: LoadedContext = Field(default_factory=LoadedContext)
+    tool_results: List[ToolCallRecord] = Field(default_factory=list)
+    write_locks: List[str] = Field(default_factory=list)
+    audit_logs: List[Dict[str, Any]] = Field(default_factory=list)
+    pending_action: Optional[PendingAction] = None
+    termination_reason: Optional[str] = None
+
+
+class TurnContext(BaseModel):
+    """Single-turn ephemeral bookkeeping.
+
+    Recorded in trace artifacts but not persisted across turns.
+    Phase 3's LLM agent loop will populate this.
+    """
+    steps: List[AgentStep] = Field(default_factory=list)
+    step_durations: dict[str, float] = Field(default_factory=dict)
+    llm_call_durations: list[dict] = Field(default_factory=list)
+    llm_token_usage: Optional[Dict[str, Any]] = None
+    loop_iterations: int = 0
+    consecutive_tool_failures: int = 0
+    termination: Optional[str] = None
+
+
 class ConversationState(BaseModel):
     session_id: str
     task_id: Optional[str] = None

@@ -38,7 +38,7 @@
 ## Phase Status
 
 - Phase 1：✅ 完成 — provider/harness/schema 测试（15 新增）、完整 pytest（243 existing + 15 new = 258 passed）、ruff 全部通过（2026-06-13）。
-- Phase 2：Phase 1 完成后可以开始单独规划。
+- Phase 2：✅ 完成 — SessionState/TurnContext 模型、ContextBuilder、259 测试通过、eval 11/11 通过（2026-06-13）。
 
 ---
 
