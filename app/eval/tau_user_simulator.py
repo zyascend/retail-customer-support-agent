@@ -18,7 +18,7 @@ _NAME_KEYWORDS = ("name", "who are you", "identify", "zip", "tell me who")
 def _extract_name(instructions: dict) -> Optional[str]:
     """Extract user's full name from tau3 instructions."""
     known = instructions.get("known_info", "") or ""
-    m = re.search(r"You (?:are|name is) ([\w\s]+?)(?: in| with| \(| living| residing|\.|$)", known)
+    m = re.search(r"You (?:are|name is) ([\w\s]+?)(?: in| with|, and| \(| living| residing|\.|$)", known)
     if m:
         return m.group(1).strip().rstrip(".")
     m = re.search(r"Your name is ([\w\s]+?)(?:,| and|\.|$)", known)
@@ -43,6 +43,10 @@ def _extract_zip(instructions: dict) -> Optional[str]:
     """Extract zip code from tau3 instructions."""
     known = instructions.get("known_info", "") or ""
     m = re.search(r"zip(?:[ -]?code)? (\d{5})", known)
+    if m:
+        return m.group(1)
+    # Fallback: any 5-digit number at end of known_info or near city
+    m = re.search(r"\b(\d{5})\b", known)
     if m:
         return m.group(1)
     return None
@@ -70,6 +74,11 @@ def _to_first_person(text: str | None) -> str:
     text = re.sub(r"\bYou wish to\b", "I want to", text)
     text = re.sub(r"\bYou want to\b", "I want to", text)
     text = re.sub(r"\byour order\b", "my order", text)
+    # "Your name is X, and you live in Y, 12345." → "My name is X and I live in Y, 12345."
+    text = re.sub(
+        r"\bYour name is ([\w\s]+?), and you live in ([\w\s]+?, \d{5})\b",
+        r"My name is \1 and I live in \2", text,
+    )
     text = re.sub(r"\bYour name is\b", "My name is", text)
     text = re.sub(r"\byou'd\b", "I'd", text)
     text = re.sub(r"\bYou\b", "I", text)
