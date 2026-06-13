@@ -57,6 +57,18 @@ from app.agent.parsers import (
     parse_address,
     parse_item_replacement_pairs,
 )
+from app.agent.plan_handlers import (
+    plan_address_change,
+    plan_cancel,
+    plan_exchange,
+    plan_modify_items,
+    plan_modify_payment,
+    plan_return,
+    plan_user_address,
+    respond_with_order_lookup,
+    set_pending,
+    transfer_to_human,
+)
 from app.tools.retail_adapter import RetailAdapter, get_order_from_db
 
 SUPPORTED_PENDING_ACTIONS = WRITE_ACTION_NAMES
@@ -576,16 +588,7 @@ class AgentRuntime:
         )
 
     def _transfer_to_human(self, state: ConversationState, content: str) -> None:
-        self.gateway.execute(
-            state=state,
-            tool_name="transfer_to_human_agents",
-            arguments={"summary": content[:500]},
-        )
-        self._assistant(
-            state,
-            "YOU ARE BEING TRANSFERRED TO A HUMAN AGENT. PLEASE HOLD ON.",
-            allow_llm=False,
-        )
+        transfer_to_human(state, content, self.gateway)
 
     def _write_action_guard(self, state: ConversationState, content: str) -> None:
         state.add_step(
@@ -613,173 +616,31 @@ class AgentRuntime:
         state.add_step("run_logger", message_count=len(state.messages))
 
     def _plan_cancel(self, state: ConversationState) -> None:
-        order_id = state.slots.get("order_id")
-        reason = state.slots.get("reason")
-        if not order_id:
-            self._assistant(state, "Which order would you like to cancel?")
-            return
-        if not reason:
-            self._assistant(
-                state,
-                "Please provide a cancellation reason: no longer needed "
-                "or ordered by mistake.",
-            )
-            return
-        self._set_pending(
-            state,
-            "cancel_pending_order",
-            {"order_id": order_id, "reason": reason},
-            f"Cancel order {order_id} because {reason}. Please confirm yes or no.",
-        )
+        plan_cancel(state, self._assistant, self._set_pending)
 
     def _plan_address_change(self, state: ConversationState) -> None:
-        order_id = state.slots.get("order_id")
-        address = state.slots.get("address")
-        if not order_id:
-            self._assistant(
-                state,
-                "Which order should have its shipping address changed?",
-            )
-            return
-        if not address:
-            self._assistant(
-                state,
-                "Please provide the new address as: address to line1, line2, "
-                "city, state, country, zip.",
-            )
-            return
-        args = {"order_id": order_id, **address}
-        self._set_pending(
-            state,
-            "modify_pending_order_address",
-            args,
-            f"Modify the shipping address for order {order_id}. "
-            "Please confirm yes or no.",
-        )
+        plan_address_change(state, self._assistant, self._set_pending)
 
     def _plan_return(self, state: ConversationState) -> None:
-        required = ["order_id", "item_ids", "payment_method_id"]
-        missing = [key for key in required if not state.slots.get(key)]
-        if missing:
-            self._assistant(
-                state,
-                "Please provide return details: order id, item id, "
-                "and refund payment method.",
-            )
-            return
-        self._set_pending(
-            state,
-            "return_delivered_order_items",
-            {
-                "order_id": state.slots["order_id"],
-                "item_ids": state.slots["item_ids"],
-                "payment_method_id": state.slots["payment_method_id"],
-            },
-            f"Request a return for order {state.slots['order_id']}. "
-            "Please confirm yes or no.",
-        )
+        plan_return(state, self._assistant, self._set_pending)
 
     def _plan_exchange(self, state: ConversationState) -> None:
-        required = ["order_id", "item_ids", "new_item_ids", "payment_method_id"]
-        missing = [key for key in required if not state.slots.get(key)]
-        if missing:
-            self._assistant(
-                state,
-                "Please provide exchange details: order id, old item id, "
-                "new item id, and payment method.",
-            )
-            return
-        self._set_pending(
-            state,
-            "exchange_delivered_order_items",
-            {
-                "order_id": state.slots["order_id"],
-                "item_ids": state.slots["item_ids"],
-                "new_item_ids": state.slots["new_item_ids"],
-                "payment_method_id": state.slots["payment_method_id"],
-            },
-            f"Request an exchange for order {state.slots['order_id']}. "
-            "Please confirm yes or no.",
-        )
+        plan_exchange(state, self._assistant, self._set_pending)
 
     def _plan_modify_items(self, state: ConversationState) -> None:
-        order_id = state.slots.get("order_id")
-        item_ids = state.slots.get("item_ids")
-        new_item_ids = state.slots.get("new_item_ids")
-        if not order_id:
-            self._assistant(state, "Which order would you like to modify items for?")
-            return
-        if not item_ids:
-            self._assistant(state, "Which item would you like to replace?")
-            return
-        if not new_item_ids:
-            self._assistant(state, "Please provide the new item id for the replacement.")
-            return
-        self._set_pending(
-            state,
-            "modify_pending_order_items",
-            {
-                "order_id": order_id,
-                "item_ids": item_ids,
-                "new_item_ids": new_item_ids,
-            },
-            f"Replace items in order {order_id}. Please confirm yes or no.",
-        )
+        plan_modify_items(state, self._assistant, self._set_pending)
 
     def _plan_modify_payment(self, state: ConversationState) -> None:
-        order_id = state.slots.get("order_id")
-        payment_method_id = state.slots.get("payment_method_id")
-        if not order_id:
-            self._assistant(state, "Which order would you like to change payment for?")
-            return
-        if not payment_method_id:
-            self._assistant(state, "Which payment method would you like to use?")
-            return
-        self._set_pending(
-            state,
-            "modify_pending_order_payment",
-            {
-                "order_id": order_id,
-                "payment_method_id": payment_method_id,
-            },
-            f"Change payment for order {order_id}. Please confirm yes or no.",
-        )
+        plan_modify_payment(state, self._assistant, self._set_pending)
 
     def _plan_user_address(self, state: ConversationState) -> None:
-        address = state.slots.get("address")
-        if not address:
-            self._assistant(
-                state,
-                "Please provide the new address as: address to line1, line2, "
-                "city, state, country, zip.",
-            )
-            return
-        user_id = state.authenticated_user_id
-        if not user_id:
-            self._assistant(state, "Please verify your identity first.")
-            return
-        args = {"user_id": user_id, **address}
-        self._set_pending(
-            state,
-            "modify_user_address",
-            args,
-            "Modify your default address. Please confirm yes or no.",
-        )
+        plan_user_address(state, self._assistant, self._set_pending)
 
     def _respond_with_order_lookup(self, state: ConversationState) -> None:
-        order_id = state.slots.get("order_id")
-        if not order_id:
-            self._assistant(state, "Which order would you like me to look up?")
-            return
-        order = state.loaded_context.orders.get(order_id) or get_order_from_db(
-            self.retail_runtime.db, order_id
-        )
-        if not order:
-            self._assistant(state, f"I could not find order {order_id}.")
-            return
-        self._assistant(
+        respond_with_order_lookup(
             state,
-            f"Order {order_id} is currently {order.get('status')}.",
+            self._assistant,
+            lambda oid: get_order_from_db(self.retail_runtime.db, oid),
         )
 
     def _set_pending(
@@ -789,13 +650,7 @@ class AgentRuntime:
         arguments: Dict[str, Any],
         prompt: str,
     ) -> None:
-        state.pending_action = PendingAction(
-            action_name=action_name,
-            arguments=arguments,
-            user_facing_summary=prompt.replace(" Please confirm yes or no.", ""),
-        )
-        state.confirmation_status = "required"
-        self._assistant(state, prompt)
+        set_pending(state, action_name, arguments, prompt, self._assistant)
 
     def _llm_json(
         self,
