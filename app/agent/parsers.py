@@ -23,6 +23,7 @@ SUPPORTED_INTENTS = {
     "modify_order_address",
     "modify_order_items",
     "modify_order_payment",
+    "modify_order_shipping_method",
     "modify_user_address",
     "return_items",
     "exchange_items",
@@ -38,6 +39,12 @@ def infer_intent(lowered: str) -> str:
     # Policy questions are lookups, not operations
     if re.search(r"\b(return|exchange|cancel|refund)\s+policy\b", lowered):
         return "lookup"
+
+    # Coupon / discount / compensation → transfer (unsupported, no write)
+    if re.search(r"\b(coupon|discount|compensation)\b", lowered):
+        return "transfer"
+    if re.search(r"\brefund\b", lowered) and not re.search(r"\breturn\b", lowered):
+        return "transfer"
 
     # Explicit human transfer request — multiple patterns
     # Pattern 1: verb + human/agent/representative
@@ -78,6 +85,18 @@ def infer_intent(lowered: str) -> str:
             pass
         elif re.search(r"\bitems?\b", lowered) or ORDER_RE.search(lowered):
             return "return_items"
+
+    # Shipping method modification
+    if "shipping" in lowered and re.search(
+        r"\b(change|modify|update|upgrade|switch)\b", lowered
+    ):
+        return "modify_shipping_method"
+    if re.search(r"\b(upgrade|expedite)\b.*\bshipping\b", lowered):
+        return "modify_shipping_method"
+    if re.search(r"\b(overnight|express|standard)\b", lowered) and (
+        "shipping" in lowered or "delivery" in lowered
+    ):
+        return "modify_shipping_method"
 
     # Payment modification
     if "payment" in lowered and re.search(
@@ -205,3 +224,26 @@ def code_missing_slots(state: ConversationState) -> list[str]:
         return []
     required = spec.required_slots
     return [key for key in required if not state.slots.get(key)]
+
+
+SHIPPING_ALIASES = {
+    "standard": "standard",
+    "regular": "standard",
+    "normal": "standard",
+    "free": "standard",
+    "express": "express",
+    "expedited": "express",
+    "overnight": "overnight",
+    "next day": "overnight",
+    "next-day": "overnight",
+}
+
+
+def parse_shipping_method(content: str) -> Optional[str]:
+    """Extract canonical shipping method from user text."""
+    lowered = content.lower()
+    for alias, canonical in SHIPPING_ALIASES.items():
+        pattern = alias.replace(" ", r"\s+")
+        if re.search(rf"\b{pattern}\b", lowered):
+            return canonical
+    return None

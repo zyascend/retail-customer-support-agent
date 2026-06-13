@@ -957,5 +957,106 @@ class ActionSpecsTests(unittest.TestCase):
         self.assertEqual(result, "(see function signature)")
 
 
+class ShippingIntentParserTests(unittest.TestCase):
+    def test_detects_shipping_modification(self):
+        from app.agent.parsers import infer_intent
+
+        self.assertEqual(
+            infer_intent("change shipping to express"), "modify_shipping_method"
+        )
+        self.assertEqual(
+            infer_intent("modify shipping method to overnight"),
+            "modify_shipping_method",
+        )
+        self.assertEqual(
+            infer_intent("I want to update the shipping on my order"),
+            "modify_shipping_method",
+        )
+
+    def test_detects_upgrade_shipping(self):
+        from app.agent.parsers import infer_intent
+
+        self.assertEqual(
+            infer_intent("upgrade my shipping to express"), "modify_shipping_method"
+        )
+        self.assertEqual(
+            infer_intent("expedite shipping please"), "modify_shipping_method"
+        )
+
+    def test_detects_shipping_by_method_name(self):
+        from app.agent.parsers import infer_intent
+
+        self.assertEqual(
+            infer_intent("I want overnight shipping"), "modify_shipping_method"
+        )
+        self.assertEqual(
+            infer_intent("can I get express shipping instead"),
+            "modify_shipping_method",
+        )
+
+    def test_coupon_request_is_transfer(self):
+        from app.agent.parsers import infer_intent
+
+        self.assertEqual(infer_intent("give me a coupon"), "transfer")
+        self.assertEqual(infer_intent("can I get a discount code"), "transfer")
+        self.assertEqual(
+            infer_intent("I want a discount for my next order"), "transfer"
+        )
+
+    def test_compensation_request_is_transfer(self):
+        from app.agent.parsers import infer_intent
+
+        self.assertEqual(
+            infer_intent("I deserve compensation for this"), "transfer"
+        )
+        self.assertEqual(infer_intent("refund my money"), "transfer")
+
+    def test_return_with_refund_word_is_still_return(self):
+        from app.agent.parsers import infer_intent
+
+        self.assertEqual(
+            infer_intent("I want to return item 12345678 and get a refund"),
+            "return_items",
+        )
+
+
+class ShippingSlotParserTests(unittest.TestCase):
+    def test_parse_standard_shipping(self):
+        from app.agent.parsers import parse_shipping_method
+
+        self.assertEqual(parse_shipping_method("change to standard shipping"), "standard")
+        self.assertEqual(
+            parse_shipping_method("I want regular shipping"), "standard"
+        )
+        self.assertEqual(
+            parse_shipping_method("normal shipping please"), "standard"
+        )
+        self.assertEqual(
+            parse_shipping_method("just use free shipping"), "standard"
+        )
+
+    def test_parse_express_shipping(self):
+        from app.agent.parsers import parse_shipping_method
+
+        self.assertEqual(parse_shipping_method("upgrade to express"), "express")
+        self.assertEqual(
+            parse_shipping_method("expedited shipping please"), "express"
+        )
+
+    def test_parse_overnight_shipping(self):
+        from app.agent.parsers import parse_shipping_method
+
+        self.assertEqual(parse_shipping_method("I need overnight"), "overnight")
+        self.assertEqual(parse_shipping_method("next day delivery"), "overnight")
+        self.assertEqual(
+            parse_shipping_method("next-day shipping please"), "overnight"
+        )
+
+    def test_parse_no_shipping_returns_none(self):
+        from app.agent.parsers import parse_shipping_method
+
+        self.assertIsNone(parse_shipping_method("what's my order status"))
+
+
 if __name__ == "__main__":
     unittest.main()
