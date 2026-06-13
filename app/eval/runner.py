@@ -130,7 +130,9 @@ class CuratedEvalRunner:
         subset: str = "curated_mvp",
         trials: int = 1,
         max_workers: int = 1,
+        seed: int = 42,
     ) -> EvalRunSummary:
+        self._seed = seed
         eval_run_id = "eval-" + uuid.uuid4().hex[:12]
         cases = get_cases(subset)
         results: List[EvalCaseResult] = []
@@ -249,10 +251,19 @@ class CuratedEvalRunner:
             agent_llm_max_retries=self.config.agent_llm_max_retries,
         )
         provider = None if self.require_llm else DisabledLLMProvider()
+        # Synthetic subset: use synthetic runtime
+        if case.subset == "synthetic_seeded_v1":
+            from app.synthetic.adapter import SyntheticRetailAdapter
+            seed = getattr(self, "_seed", 42)
+            synthetic_adapter = SyntheticRetailAdapter(seed=seed)
+            synthetic_runtime = synthetic_adapter.create_runtime()
+        else:
+            synthetic_runtime = None
         runtime = AgentRuntime(
             runtime_config,
             provider=provider,
             require_llm=self.require_llm,
+            runtime=synthetic_runtime,
         )
         session_id = f"{eval_run_id}-{case.case_id}-trial-{trial}"
         order_status_before = self._order_status(runtime, case)
