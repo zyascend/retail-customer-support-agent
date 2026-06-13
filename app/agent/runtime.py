@@ -39,6 +39,13 @@ from app.agent.builders import (
     pending_action_has_required_args,
     pending_prompt,
 )
+from app.agent.llm_client import (
+    apply_llm_action_plan,
+    apply_llm_intent_slots,
+    llm_chat,
+    llm_json,
+    llm_policy_decision,
+)
 from app.agent.parsers import (
     EMAIL_RE,
     ITEM_RE,
@@ -660,113 +667,17 @@ class AgentRuntime:
         payload: Dict[str, Any],
         schema: Dict[str, Any],
     ) -> Dict[str, Any]:
-        if self.provider is None:
-            return {}
-        t0 = time.perf_counter()
-        status = "ok"
-        try:
-            result = self.provider.json(
-                [
-                    {"role": "system", "content": system_prompt},
-                    {
-                        "role": "user",
-                        "content": user_json_prompt(node_name, payload),
-                    },
-                ],
-                schema,
-            )
-        except Exception as exc:
-            status = "error"
-            state.add_step(
-                f"{node_name}_llm",
-                status="error",
-                error_type=type(exc).__name__,
-            )
-            return {}
-        finally:
-            elapsed = (time.perf_counter() - t0) * 1000
-            state.llm_call_durations.append({
-                "node": node_name,
-                "call_type": "json",
-                "duration_ms": round(elapsed, 1),
-                "status": status,
-            })
-        if not isinstance(result, dict):
-            state.add_step(
-                f"{node_name}_llm",
-                status="error",
-                error="provider returned non-object JSON",
-            )
-            return {}
-        state.add_step(f"{node_name}_llm", status="ok", result=result)
-        return result
+        return llm_json(state, node_name, system_prompt, payload, schema, self.provider)
 
     def _llm_chat(
         self, state: ConversationState, node_name: str, draft: str
     ) -> str:
-        if self.provider is None:
-            return ""
-        t0 = time.perf_counter()
-        status = "ok"
-        try:
-            response = self.provider.chat(
-                [
-                    {"role": "system", "content": RESPONSE_SYSTEM},
-                    {"role": "user", "content": f"Draft response:\n{draft}"},
-                ]
-            )
-        except Exception as exc:
-            status = "error"
-            state.add_step(
-                f"{node_name}_llm",
-                status="error",
-                error_type=type(exc).__name__,
-            )
-            return ""
-        finally:
-            elapsed = (time.perf_counter() - t0) * 1000
-            state.llm_call_durations.append({
-                "node": node_name,
-                "call_type": "chat",
-                "duration_ms": round(elapsed, 1),
-                "status": status,
-            })
-        response = response.strip()
-        if response:
-            state.add_step(f"{node_name}_llm", status="ok")
-        return response
+        return llm_chat(state, node_name, draft, self.provider)
 
     def _apply_llm_intent_slots(
         self, state: ConversationState, payload: Dict[str, Any]
     ) -> None:
-        intent = str(payload.get("intent") or "").strip()
-        if intent in SUPPORTED_INTENTS and (
-            intent != "unknown" or state.current_intent == "unknown"
-        ):
-            state.current_intent = intent
-        slots = payload.get("slots") or {}
-        if not isinstance(slots, dict):
-            return
-        for key in (
-            "order_id",
-            "payment_method_id",
-            "reason",
-        ):
-            value = self._clean_llm_scalar(slots.get(key))
-            if value:
-                state.slots[key] = value
-        for key in ("item_ids", "new_item_ids"):
-            values = self._clean_llm_list(slots.get(key))
-            if values:
-                state.slots[key] = values
-        address = slots.get("address")
-        if isinstance(address, dict):
-            cleaned_address = {
-                key: self._clean_llm_scalar(address.get(key)) or ""
-                for key in ("address1", "address2", "city", "state", "country", "zip")
-            }
-            if cleaned_address["address1"] and cleaned_address["zip"]:
-                state.slots["address"] = cleaned_address
+        apply_llm_intent_slots(state, payload)
 
     def _merge_slots(
         self,
@@ -783,99 +694,31 @@ class AgentRuntime:
     def _llm_policy_decision(
         self, state: ConversationState, content: str, fallback_decision: str
     ) -> Dict[str, Any]:
-        payload = self._llm_json(
+        return llm_policy_decision(
             state,
-            "policy_reasoner",
-            POLICY_SYSTEM,
-            {
-                "user_message": content,
-                "policy_excerpt": self.retail_runtime.policy[:6000],
-                "current_intent": state.current_intent,
-                "slots": state.slots,
-                "loaded_context": state.loaded_context.model_dump(),
-                "authenticated_user_id": state.authenticated_user_id,
-                "fallback_decision": fallback_decision,
-            },
-            {
-                "type": "object",
-                "properties": {
-                    "decision": {"type": "string"},
-                    "intent": {"type": "string"},
-                    "missing_slots": {"type": "array"},
-                    "user_confirmation_required": {"type": "boolean"},
-                    "explanation_for_user": {"type": "string"},
-                    "internal_reasoning_summary": {"type": "string"},
-                },
-            },
+            content,
+            fallback_decision,
+            self.retail_runtime.policy,
+            self._llm_json,
         )
-        decision = payload.get("decision")
-        if decision not in {"allow", "ask_clarification", "deny", "transfer"}:
-            return {}
-        if payload.get("intent") not in SUPPORTED_INTENTS:
-            payload["intent"] = state.current_intent
-        missing_slots = payload.get("missing_slots")
-        if not isinstance(missing_slots, list):
-            payload["missing_slots"] = []
-        return payload
 
     def _apply_llm_action_plan(
         self, state: ConversationState, content: str
     ) -> bool:
-        plan = self._llm_json(
+        return apply_llm_action_plan(
             state,
-            "action_planner",
-            ACTION_PLANNER_SYSTEM,
-            {
-                "user_message": content,
-                "policy_decision": (
-                    state.policy_decision.model_dump()
-                    if state.policy_decision
-                    else None
-                ),
-                "current_intent": state.current_intent,
-                "slots": state.slots,
-                "loaded_context": state.loaded_context.model_dump(),
-                "tool_catalog": self.gateway.registry.tool_catalog_for_llm(),
-            },
-            {
-                "type": "object",
-                "properties": {
-                    "plan_type": {"type": "string"},
-                    "action_name": {"type": "string"},
-                    "arguments": {"type": "object"},
-                    "response": {"type": "string"},
-                },
-            },
+            content,
+            llm_json_fn=self._llm_json,
+            clean_llm_scalar_fn=self._clean_llm_scalar,
+            normalize_fn=self._normalize_llm_action_arguments,
+            has_required_args_fn=self._pending_action_has_required_args,
+            pending_prompt_fn=self._pending_prompt,
+            set_pending_fn=self._set_pending,
+            transfer_fn=self._transfer_to_human,
+            order_lookup_fn=self._respond_with_order_lookup,
+            assistant_fn=self._assistant,
+            tool_catalog=self.gateway.registry.tool_catalog_for_llm(),
         )
-        if not plan:
-            return False
-        plan_type = plan.get("plan_type") or plan.get("type")
-        response = self._clean_llm_scalar(plan.get("response")) or ""
-        if plan_type == "lookup_order":
-            self._respond_with_order_lookup(state)
-            return True
-        if plan_type == "transfer":
-            self._transfer_to_human(state, content)
-            return True
-        if plan_type in {"ask_clarification", "respond"} and response:
-            self._assistant(state, response)
-            return True
-        if plan_type != "pending_write":
-            return False
-        action_name = self._clean_llm_scalar(plan.get("action_name")) or ""
-        arguments = plan.get("arguments") or {}
-        if action_name not in SUPPORTED_PENDING_ACTIONS:
-            return False
-        if not isinstance(arguments, dict):
-            return False
-        arguments = self._normalize_llm_action_arguments(action_name, arguments)
-        if not self._pending_action_has_required_args(action_name, arguments):
-            return False
-        prompt = response or self._pending_prompt(action_name, arguments)
-        if "confirm" not in prompt.lower():
-            prompt = prompt.rstrip(".") + ". Please confirm yes or no."
-        self._set_pending(state, action_name, arguments, prompt)
-        return True
 
     def _pending_action_has_required_args(
         self, action_name: str, arguments: Dict[str, Any]
