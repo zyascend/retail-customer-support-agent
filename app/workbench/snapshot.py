@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from app.agent.models import ConversationState
+from app.agent.models import SessionState
 from app.ops.serialization import to_plain_data
 
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
@@ -19,7 +19,7 @@ def snapshot_from_state(
     session_id: str,
     mode: str,
     llm_available: bool,
-    state: ConversationState,
+    state: SessionState,
     initial_db_hash: Optional[str],
     current_db_hash: Optional[str],
     trace_artifact_path: Optional[str],
@@ -50,9 +50,9 @@ def snapshot_from_state(
             "authenticated_user_id": state.authenticated_user_id,
             "auth_method": state.auth_method,
             "active_user_identity": redact_value(state.active_user_identity),
-            "active_order_id": state.slots.get("order_id"),
-            "current_intent": state.current_intent,
-            "slots": redact_value(state.slots),
+            "active_order_id": None,
+            "current_intent": "unknown",
+            "slots": {},
             "confirmation_status": state.confirmation_status,
             "db_changed": initial_db_hash != current_db_hash,
             "initial_db_hash": initial_db_hash,
@@ -64,11 +64,7 @@ def snapshot_from_state(
             if state.pending_action is not None
             else None
         ),
-        "policy_decision": (
-            redact_value(to_plain_data(state.policy_decision))
-            if state.policy_decision is not None
-            else None
-        ),
+        "policy_decision": None,
         "tool_results": tool_results,
         "timeline": build_timeline(state),
         "audit_logs": audit_logs,
@@ -85,7 +81,7 @@ def _step_weight(node: str) -> str:
     return "primary" if node in _PRIMARY_STEPS else "secondary"
 
 
-def build_timeline(state: ConversationState) -> List[Dict[str, Any]]:
+def build_timeline(state: SessionState) -> List[Dict[str, Any]]:
     timeline: List[tuple[tuple[int, int, int], Dict[str, Any]]] = []
 
     for index, message in enumerate(state.messages):
@@ -180,7 +176,7 @@ def build_timeline(state: ConversationState) -> List[Dict[str, Any]]:
     return [event for _, event in sorted(timeline, key=lambda item: item[0])]
 
 
-def build_guard_blocks(state: ConversationState) -> List[Dict[str, Any]]:
+def build_guard_blocks(state: SessionState) -> List[Dict[str, Any]]:
     guard_blocks = [
         redact_value(to_plain_data(record))
         for record in state.tool_results
@@ -292,7 +288,7 @@ def _step_turn_index(steps: List[Any]) -> int:
     return max(receive_count - 1, 0)
 
 
-def _wrong_user_guard_blocks(state: ConversationState) -> List[Dict[str, Any]]:
+def _wrong_user_guard_blocks(state: SessionState) -> List[Dict[str, Any]]:
     if not state.authenticated_user_id:
         return []
 

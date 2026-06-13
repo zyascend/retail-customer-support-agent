@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from app.agent.prompts import prompt_metadata
-from app.agent.providers import DisabledLLMProvider
+from app.agent.providers import DeterministicProvider
 from app.agent.runtime import AgentRuntime
 from app.config import AppConfig
 from app.eval.cases import EvalCase, get_cases
@@ -293,13 +293,13 @@ class CuratedEvalRunner:
             agent_llm_timeout_seconds=self.config.agent_llm_timeout_seconds,
             agent_llm_max_retries=self.config.agent_llm_max_retries,
         )
-        # Phase 5: live mode uses real LLM provider, scripted uses disabled
+        # Phase 5: live mode uses real LLM provider, scripted uses deterministic
         if self.live:
             provider = None  # let AgentRuntime build real DeepSeekProvider
         elif self.require_llm:
             provider = None
         else:
-            provider = DisabledLLMProvider()
+            provider = DeterministicProvider()
         # Synthetic subset: use synthetic runtime
         if case.subset in (
             "synthetic_seeded_v1",

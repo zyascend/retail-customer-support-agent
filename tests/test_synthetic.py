@@ -253,9 +253,9 @@ class SyntheticGuardTests(unittest.TestCase):
         cls.db = cls.world
 
     def _make_state(self, user_id=None, loaded_order_ids=None):
-        from app.agent.models import ConversationState
+        from app.agent.models import SessionState
 
-        state = ConversationState(session_id="test-session", task_id="test")
+        state = SessionState(session_id="test-session", task_id="test")
         state.authenticated_user_id = user_id
         if loaded_order_ids:
             for oid in loaded_order_ids:

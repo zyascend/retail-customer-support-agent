@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from app.agent.confirmation import ConfirmationResolver
 from app.agent.guard import WriteActionGuard
-from app.agent.models import ConversationState, ToolCall
+from app.agent.models import SessionState, ToolCall
 from app.config import resolve_config
 from app.ops.tracing import TraceWriter
 from app.tools.gateway import ToolGateway
@@ -192,7 +192,7 @@ class WriteGuardTests(unittest.TestCase):
         self.guard = WriteActionGuard()
 
     def test_blocks_unauthenticated_write(self):
-        state = ConversationState(session_id="test")
+        state = SessionState(session_id="test")
         result = self.guard.check(
             state=state,
             db=self.runtime.db,
@@ -207,7 +207,7 @@ class WriteGuardTests(unittest.TestCase):
         self.assertEqual(result.block_reason, "authentication_required")
 
     def test_blocks_wrong_user_order_mutation(self):
-        state = ConversationState(
+        state = SessionState(
             session_id="test", authenticated_user_id=DELIVERED_USER
         )
         state.loaded_context.orders[PENDING_ORDER] = {"order_id": PENDING_ORDER}
@@ -226,7 +226,7 @@ class WriteGuardTests(unittest.TestCase):
         self.assertEqual(result.block_reason, "ownership_violation")
 
     def test_blocks_invalid_order_statuses(self):
-        cancel_state = ConversationState(
+        cancel_state = SessionState(
             session_id="test", authenticated_user_id=DELIVERED_USER
         )
         cancel_state.loaded_context.orders[DELIVERED_ORDER] = {
@@ -242,7 +242,7 @@ class WriteGuardTests(unittest.TestCase):
             confirmed=True,
         )
 
-        return_state = ConversationState(
+        return_state = SessionState(
             session_id="test", authenticated_user_id=PENDING_USER
         )
         return_state.loaded_context.orders[PENDING_ORDER] = {"order_id": PENDING_ORDER}
@@ -268,7 +268,7 @@ class WriteGuardTests(unittest.TestCase):
         )
 
     def test_idempotency_key_changes_with_arguments(self):
-        state = ConversationState(session_id="test", authenticated_user_id=PENDING_USER)
+        state = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
         state.loaded_context.orders[PENDING_ORDER] = {"order_id": PENDING_ORDER}
 
         first = self.guard.check(
@@ -295,7 +295,7 @@ class WriteGuardTests(unittest.TestCase):
         self.assertNotEqual(first.idempotency_key, second.idempotency_key)
 
     def test_blocks_item_replacement_across_products(self):
-        state = ConversationState(session_id="test", authenticated_user_id=PENDING_USER)
+        state = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
         state.loaded_context.orders[PENDING_ORDER] = {"order_id": PENDING_ORDER}
 
         result = self.guard.check(
@@ -316,7 +316,7 @@ class WriteGuardTests(unittest.TestCase):
         self.assertEqual(result.block_reason, "replacement_item_product_mismatch")
 
     def test_blocks_payment_method_not_owned(self):
-        state = ConversationState(session_id="test", authenticated_user_id=PENDING_USER)
+        state = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
         state.loaded_context.orders[PENDING_ORDER] = {"order_id": PENDING_ORDER}
 
         result = self.guard.check(
@@ -336,7 +336,7 @@ class WriteGuardTests(unittest.TestCase):
         self.assertEqual(result.block_reason, "payment_method_not_owned")
 
     def test_blocks_exchange_across_products(self):
-        state = ConversationState(
+        state = SessionState(
             session_id="test", authenticated_user_id=DELIVERED_USER
         )
         state.loaded_context.orders[DELIVERED_ORDER] = {"order_id": DELIVERED_ORDER}
@@ -364,7 +364,7 @@ class GatewayAndTraceTests(unittest.TestCase):
     def test_gateway_blocks_write_without_confirmation(self):
         runtime = RetailAdapter(resolve_config()).create_runtime()
         gateway = ToolGateway(registry=ToolRegistry(runtime.tools), runtime=runtime)
-        state = ConversationState(session_id="test", authenticated_user_id=PENDING_USER)
+        state = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
         state.loaded_context.orders[PENDING_ORDER] = {"order_id": PENDING_ORDER}
 
         record = gateway.execute(
@@ -379,7 +379,7 @@ class GatewayAndTraceTests(unittest.TestCase):
 
     def test_trace_writer_outputs_valid_json(self):
         with tempfile.TemporaryDirectory() as tmp:
-            state = ConversationState(session_id="trace-test")
+            state = SessionState(session_id="trace-test")
             path = TraceWriter(Path(tmp)).write(
                 run_id="trace-test",
                 state=state,

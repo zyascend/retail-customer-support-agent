@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from app.agent.models import SessionState
 
 
@@ -20,103 +18,34 @@ class ContextBuilder:
     def policy_text(self) -> str:
         return self._policy_text
 
-    def build(self, session: SessionState) -> str:
-        parts: list[str] = [self._auth_summary(session)]
+    def build(self, session: SessionState) -> str:  # noqa: C901
+        parts: list[str] = []
+
+        if session.authenticated_user_id:
+            user_line = f"User: user_id={session.authenticated_user_id}"
+            if session.auth_method:
+                user_line += f" ({session.auth_method})"
+            parts.append(user_line)
+
         if session.loaded_context.orders:
-            parts.append(self._orders_summary(session))
+            order_parts = []
+            for oid, order in session.loaded_context.orders.items():
+                status = order.get("status", "?")
+                items = order.get("items", [])
+                item_count = len(items) if isinstance(items, list) else 0
+                order_parts.append(f"#{oid}={status} ({item_count} items)")
+            parts.append("Orders: " + ", ".join(order_parts))
+
         if session.pending_action:
-            parts.append(self._pending_summary(session))
+            parts.append(
+                f"Pending: {session.pending_action.action_name} "
+                f"— waiting for user confirmation"
+            )
+
         if session.write_locks:
-            parts.append(self._locks_summary(session))
-        if session.tool_results:
-            parts.append(self._tool_results_summary(session))
-        if session.messages:
-            parts.append(self._messages_summary(session))
-        parts.append(self._policy_summary())
-        return "\n\n".join(parts)
+            parts.append(f"Locks: {', '.join(session.write_locks)}")
+
+        return "\n".join(parts)
 
     def estimate_tokens(self, text: str) -> int:
         return max(1, int(len(text.split()) / 0.75))
-
-    # ── Private helpers ──
-
-    def _auth_summary(self, session: SessionState) -> str:
-        if not session.authenticated_user_id:
-            return "## Session\nUser: not authenticated"
-        identity = session.active_user_identity
-        name = identity.get("name", "Unknown")
-        email = str(identity.get("email", ""))
-        lines = [
-            "## Session",
-            f"User: {name} (ID: {session.authenticated_user_id})",
-            f"Auth: {session.auth_method or 'unknown'}",
-        ]
-        if email and "@" in email:
-            lines.append(f"Email domain: {email.split('@')[1]}")
-        return "\n".join(lines)
-
-    def _orders_summary(self, session: SessionState) -> str:
-        lines = ["## Loaded Orders"]
-        for oid, order in session.loaded_context.orders.items():
-            status = order.get("status", "unknown")
-            items = order.get("items", [])
-            count = len(items) if isinstance(items, list) else 0
-            owner = order.get("user_id", "")
-            flags = ""
-            if status == "pending" and owner == session.authenticated_user_id:
-                flags = " [writable]"
-            lines.append(f"- {oid}: {status}, {count} items{flags}")
-        return "\n".join(lines)
-
-    def _pending_summary(self, session: SessionState) -> str:
-        pa = session.pending_action
-        return (
-            "## Pending Action\n"
-            f"Action: {pa.action_name}\n"
-            f"Arguments: {self._brief_args(pa.arguments)}\n"
-            f"Summary: {pa.user_facing_summary}"
-        )
-
-    def _locks_summary(self, session: SessionState) -> str:
-        return "## Write Locks\n" + "\n".join(f"- {lk}" for lk in session.write_locks)
-
-    def _tool_results_summary(self, session: SessionState) -> str:
-        recent = session.tool_results[-3:]
-        lines = ["## Recent Tool Calls"]
-        for r in recent:
-            obs = self._summarize_observation(r.observation)
-            lines.append(f"- {r.tool_name}: {r.status} — {obs}")
-        return "\n".join(lines)
-
-    def _messages_summary(self, session: SessionState) -> str:
-        recent = session.messages[-self._max_recent_messages :]
-        lines = ["## Recent Messages"]
-        for msg in recent:
-            lines.append(f"- [{msg.role}] {msg.content[:200]}")
-        return "\n".join(lines)
-
-    def _policy_summary(self) -> str:
-        return f"## Policy\n{self._policy_text[:500].strip()}"
-
-    @staticmethod
-    def _brief_args(args: dict[str, Any]) -> str:
-        parts = []
-        for k, v in args.items():
-            s = str(v)
-            parts.append(f"{k}={s[:37] + '...' if len(s) > 40 else s}")
-        return ", ".join(parts)
-
-    @staticmethod
-    def _summarize_observation(obs: Any) -> str:
-        if obs is None:
-            return "(none)"
-        if isinstance(obs, dict):
-            fields = []
-            for f in ("order_id", "status", "user_id", "item_count", "name", "email"):
-                if f in obs:
-                    fields.append(f"{f}={obs[f]}")
-            return ", ".join(fields[:4]) if fields else f"dict({len(obs)} keys)"
-        if isinstance(obs, list):
-            return f"list({len(obs)} items)"
-        s = str(obs)
-        return s[:77] + "..." if len(s) > 80 else s

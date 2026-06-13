@@ -186,3 +186,7 @@ class ConversationState(BaseModel):
 
     def add_step(self, node: str, **detail: Any) -> None:
         self.steps.append(AgentStep(node=node, detail=detail))
+
+
+# ── Phase 7: backward-compatible alias ──
+ConversationState = SessionState
