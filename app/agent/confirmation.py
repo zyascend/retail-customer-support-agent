@@ -45,19 +45,37 @@ _CN_NEGATION_RE = re.compile(
 )
 
 _CHANGE_PATTERN = re.compile(
-    r"\b(?:change|instead|different|replace|switch|modify|update|adjust"
-    r"|改|换|换成|替代)\b",
+    r"(?:\b(?:change|instead|different|replace|switch|modify|update|adjust)\b"
+    r"|改|换|换成|替代)",
     re.IGNORECASE,
 )
 
 
 def _score(text_lower: str, keywords: dict[str, int]) -> int:
-    """Sum weights of keywords found in text. Multi-word keys checked first."""
+    """Sum weights of keywords found in text.
+    Uses word-boundary matching for English, substring for Chinese.
+    Multi-word keys checked first; after a longer match, skip shorter substrings.
+    """
     total = 0
-    # Sort by length descending so "go ahead" matches before "go" or "ahead"
+    matched_spans: list[tuple[int, int]] = []
+
+    # Sort by length descending so longer phrases match first
     for phrase, weight in sorted(keywords.items(), key=lambda x: -len(x[0])):
-        if phrase in text_lower:
-            total += weight
+        # For English-only phrases, use word boundary matching
+        if phrase.isascii() and phrase.isalpha():
+            pattern = re.compile(r'\b' + re.escape(phrase) + r'\b', re.IGNORECASE)
+            if pattern.search(text_lower):
+                total += weight
+        else:
+            # For Chinese/mixed, find all occurrences
+            idx = text_lower.find(phrase)
+            if idx >= 0:
+                # Check this match doesn't overlap with a previously-matched longer phrase
+                span = (idx, idx + len(phrase))
+                if not any(s[0] <= span[0] < s[1] or s[0] < span[1] <= s[1]
+                          for s in matched_spans):
+                    total += weight
+                    matched_spans.append(span)
     return total
 
 
