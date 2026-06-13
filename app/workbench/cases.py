@@ -10,6 +10,7 @@ DEMO_CASE_IDS = [
     "return_delivered_order_item",
     "modify_pending_order_items_success",
     "modify_pending_order_payment_success",
+    "synthetic_shipping_express_success",
     "block_wrong_user_order_access",
     "block_item_product_mismatch",
     "block_payment_insufficient_gift_card",
@@ -57,6 +58,12 @@ CASE_GROUPS = [
         "emoji": "📞",
         "case_ids": ["transfer_to_human"],
     },
+    {
+        "key": "synthetic",
+        "label": "Synthetic 世界",
+        "emoji": "🧪",
+        "case_ids": ["synthetic_shipping_express_success"],
+    },
 ]
 
 CASE_TITLES = {
@@ -89,12 +96,19 @@ CASE_TITLES = {
     "deny_modify_payment_confirmation": "拒绝支付方式修改确认",
     "changed_modify_items_confirmation": "变更商品修改确认",
     "deny_modify_address_confirmation": "拒绝地址修改确认",
+    "synthetic_shipping_express_success": "Synthetic 世界：升级配送方式",
 }
 
 
 def build_case_catalog(subset: str = "curated_mvp") -> Dict[str, Any]:
     cases = get_cases(subset)
-    serialized = [_serialize_case(case) for case in cases]
+    # Also load synthetic cases
+    try:
+        synthetic_cases = get_cases("synthetic_seeded_v1")
+    except Exception:
+        synthetic_cases = []
+    all_cases_list = list(cases) + list(synthetic_cases)
+    serialized = [_serialize_case(case) for case in all_cases_list]
     by_id = {case["case_id"]: case for case in serialized}
     demo_cases = [by_id[case_id] for case_id in DEMO_CASE_IDS if case_id in by_id]
     return {
@@ -107,9 +121,17 @@ def build_case_catalog(subset: str = "curated_mvp") -> Dict[str, Any]:
 
 
 def get_case_by_id(case_id: str, subset: str = "curated_mvp") -> EvalCase:
+    # Try primary subset first
     for case in get_cases(subset):
         if case.case_id == case_id:
             return case
+    # Fall back to synthetic subset
+    try:
+        for case in get_cases("synthetic_seeded_v1"):
+            if case.case_id == case_id:
+                return case
+    except Exception:
+        pass
     raise ValueError(f"unknown case: {case_id}")
 
 

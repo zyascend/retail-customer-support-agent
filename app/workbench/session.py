@@ -165,10 +165,19 @@ class WorkbenchSession:
         selected_case: Optional[EvalCase],
     ) -> tuple[AgentRuntime, ConversationState, str]:
         provider = DisabledLLMProvider() if mode == "deterministic" else None
+
+        # If this is a synthetic case, use SyntheticRetailAdapter
+        runtime_kwargs = {}
+        if selected_case is not None and selected_case.subset == "synthetic_seeded_v1":
+            from app.synthetic.adapter import SyntheticRetailAdapter
+            synthetic_adapter = SyntheticRetailAdapter(seed=42)
+            runtime_kwargs["runtime"] = synthetic_adapter.create_runtime()
+
         runtime = AgentRuntime(
             self.config,
             provider=provider,
             require_llm=mode == "llm",
+            **runtime_kwargs,
         )
         state = ConversationState(
             session_id=self.session_id,
