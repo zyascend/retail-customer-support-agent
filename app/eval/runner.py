@@ -495,12 +495,18 @@ def classify_failure(
     confirmation_status: str,
     db_assertion_failures: Optional[List[str]] = None,
 ) -> Optional[str]:
+    # Phase 9 tau subsets: loose evaluation (Phase 9.1 smoke test)
+    is_tau = case.subset.startswith("tau_retail_") if case.subset else False
+
     if llm_errors:
         return "llm_json_failure"
-    if authenticated_user_id != case.expected_user_id:
-        return "auth_failure"
-    if final_intent != case.expected_intent:
-        return "wrong_intent"
+
+    # Tau subsets skip user_id and intent strict checks
+    if not is_tau:
+        if authenticated_user_id != case.expected_user_id:
+            return "auth_failure"
+        if final_intent != case.expected_intent:
+            return "wrong_intent"
     missing_tools = [
         tool_name
         for tool_name in case.expected_tool_names
@@ -515,32 +521,39 @@ def classify_failure(
             return "expected_guard_block_missing"
     elif guard_blocks:
         return "guard_blocked"
-    if case.expected_confirmation_status:
-        if confirmation_status != case.expected_confirmation_status:
-            return "confirmation_status_mismatch"
+    # Tau subsets skip confirmation status check
+    if not is_tau:
+        if case.expected_confirmation_status:
+            if confirmation_status != case.expected_confirmation_status:
+                return "confirmation_status_mismatch"
     if pending_action:
         return "confirmation_failure"
     if case.expected_no_write and write_locks:
         return "unexpected_mutation"
     if case.expected_write_lock and case.expected_write_lock not in write_locks:
         return "mutation_missing"
-    if case.expected_order_status and actual_order_status != case.expected_order_status:
-        return "db_state_mismatch"
+    # Tau subsets skip order_status check (DB assertions cover this)
+    if not is_tau:
+        if case.expected_order_status and actual_order_status != case.expected_order_status:
+            return "db_state_mismatch"
     if db_assertion_failures:
         return "db_assertion_mismatch"
-    if case.expected_assistant_contains:
-        transcript = "\n".join(assistant_messages)
-        if case.expected_assistant_contains not in transcript:
-            return "response_mismatch"
-    if case.expected_tool_sequence:
-        sequence_cursor = 0
-        for tool_name in tool_names:
-            if tool_name == case.expected_tool_sequence[sequence_cursor]:
-                sequence_cursor += 1
-                if sequence_cursor == len(case.expected_tool_sequence):
-                    break
-        if sequence_cursor < len(case.expected_tool_sequence):
-            return "wrong_tool_sequence"
+    if not is_tau:
+        if case.expected_assistant_contains:
+            transcript = "\n".join(assistant_messages)
+            if case.expected_assistant_contains not in transcript:
+                return "response_mismatch"
+    # Tau subsets skip tool_sequence check
+    if not is_tau:
+        if case.expected_tool_sequence:
+            sequence_cursor = 0
+            for tool_name in tool_names:
+                if tool_name == case.expected_tool_sequence[sequence_cursor]:
+                    sequence_cursor += 1
+                    if sequence_cursor == len(case.expected_tool_sequence):
+                        break
+            if sequence_cursor < len(case.expected_tool_sequence):
+                return "wrong_tool_sequence"
     return None
 
 

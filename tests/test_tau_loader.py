@@ -1,14 +1,11 @@
 """Tests for tau3 task loader and EvalCase converter."""
 
-from pathlib import Path
-
+from app.eval.cases import EvalCase
+from app.eval.runner import classify_failure
 from app.eval.tau_loader import (
-    convert_task_to_eval_case,
-    load_tau_tasks_from_dir,
-    get_tau_smoke_cases,
     _build_user_message,
     _derive_db_assertions,
-    _primary_capability_from_actions,
+    convert_task_to_eval_case,
 )
 
 # Sample tau3 task matching the real format
@@ -144,3 +141,81 @@ class TestConvertTaskToEvalCase:
         assert case.case_id == "tau_10"
         assert case.expected_no_write is True
         assert "get_order_details" in case.expected_tool_names
+
+
+class TestTauLooseEvaluation:
+    def test_tau_subset_skips_user_id_check(self):
+        """For tau subsets, auth mismatch does not trigger auth_failure."""
+        result = classify_failure(
+            case=_make_tau_case(expected_user_id=""),
+            authenticated_user_id="some_other_user",
+            final_intent="lookup",
+            write_locks=[],
+            actual_order_status=None,
+            assistant_messages=["Here is your order status."],
+            tool_names=["find_user_id_by_email", "get_order_details"],
+            guard_block_reasons=[],
+            tool_errors=0,
+            guard_blocks=0,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="",
+            db_assertion_failures=None,
+        )
+        # Should NOT be auth_failure for tau subsets
+        assert result != "auth_failure"
+
+    def test_tau_subset_still_checks_tools(self):
+        """For tau subsets, missing core tools still triggers wrong_tool."""
+        result = classify_failure(
+            case=_make_tau_case(expected_tool_names=["get_order_details"]),
+            authenticated_user_id="",
+            final_intent="lookup",
+            write_locks=[],
+            actual_order_status=None,
+            assistant_messages=["Sorry, I cannot help."],
+            tool_names=[],  # nothing called
+            guard_block_reasons=[],
+            tool_errors=0,
+            guard_blocks=0,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="",
+            db_assertion_failures=None,
+        )
+        assert result == "wrong_tool"
+
+    def test_tau_subset_still_checks_unexpected_mutation(self):
+        """For tau subsets, no-write tasks with write locks trigger unexpected_mutation."""
+        result = classify_failure(
+            case=_make_tau_case(expected_no_write=True),
+            authenticated_user_id="",
+            final_intent="lookup",
+            actual_order_status=None,
+            write_locks=["order:123:cancel"],  # unexpected write!
+            assistant_messages=["Done."],
+            tool_names=["cancel_pending_order"],
+            guard_block_reasons=[],
+            tool_errors=0,
+            guard_blocks=0,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="",
+            db_assertion_failures=None,
+        )
+        assert result == "unexpected_mutation"
+
+
+def _make_tau_case(**overrides) -> EvalCase:
+    """Helper to create a minimal tau EvalCase for testing."""
+    from dataclasses import replace
+
+    base = EvalCase(
+        case_id="tau_test",
+        category="lookup",
+        messages=[{"role": "user", "content": "test"}],
+        expected_user_id="",
+        expected_intent="lookup",
+        subset="tau_retail_smoke",
+    )
+    return replace(base, **overrides)
