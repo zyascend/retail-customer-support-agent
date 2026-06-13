@@ -75,7 +75,7 @@ from app.config import AppConfig
 from app.ops.tracing import TraceWriter, final_state_summary
 from app.tools.gateway import ToolGateway
 from app.tools.registry import ToolRegistry
-from app.tools.retail_adapter import RetailAdapter, get_order_from_db
+from app.tools.retail_adapter import RetailAdapter, RetailRuntime, get_order_from_db
 
 GUARD_USER_MESSAGES = {
     "replacement_item_product_mismatch": "I can only replace an item with another available option from the same product.",
@@ -103,6 +103,9 @@ GUARD_USER_MESSAGES = {
     "unsupported_in_mvp": "That write operation is not yet supported.",
     "unknown_write_action": "That update type is not recognised.",
     "explicit_confirmation_required": "Please confirm the requested update before proceeding.",
+    "same_shipping_method": "That is already the current shipping method for this order.",
+    "unknown_shipping_method": "That shipping method is not available. We offer standard, express, and overnight.",
+    "payment_method_required_for_upgrade": "Upgrading to a faster shipping method requires a payment method. Please provide one.",
     "order_not_found": "That order could not be found.",
 }
 
@@ -136,9 +139,13 @@ class AgentRuntime:
         config: AppConfig,
         provider: Optional[LLMProvider] = None,
         require_llm: bool = False,
+        runtime: Optional[RetailRuntime] = None,
     ) -> None:
         self.config = config
-        self.retail_runtime = RetailAdapter(config).create_runtime()
+        if runtime is not None:
+            self.retail_runtime = runtime
+        else:
+            self.retail_runtime = RetailAdapter(config).create_runtime()
         self.registry = ToolRegistry(self.retail_runtime.tools)
         self.gateway = ToolGateway(registry=self.registry, runtime=self.retail_runtime)
         self.confirmation_resolver = ConfirmationResolver()
