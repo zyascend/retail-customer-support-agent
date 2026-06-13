@@ -1,89 +1,89 @@
-# LLM Agent Tool-Calling Architecture Implementation Plan
+# LLM Agent Tool-Calling 架构实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **给 agentic workers：** 必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans` 按任务逐步执行本计划。步骤使用 checkbox（`- [ ]`）语法跟踪进度。
 
-**Goal:** Move the retail support agent toward a single LLM tool-calling runtime while preserving deterministic testability through harnesses instead of a parallel deterministic runtime.
+**目标：** 将 retail support agent 逐步迁移到单一 LLM tool-calling runtime，同时用 harness 保留确定性测试能力，而不是维护一套并行 deterministic runtime。
 
-**Architecture:** This is a multi-phase path. Phase 1 adds tool-calling contracts, JSON schemas, and deterministic harnesses without changing the current runtime. Later phases split state, add context building, introduce the LLM loop, switch `AgentRuntime`, remove the old pipeline, and adapt eval/live benchmark reporting.
+**架构：** 这是一个多阶段长期路径。Phase 1 先增加 tool-calling contract、JSON Schema 和 deterministic harness，不切换当前 runtime；后续阶段依次拆分 state、增加 context builder、实现 LLM loop、切换 `AgentRuntime`、删除旧 pipeline，并适配 eval/live benchmark。
 
-**Tech Stack:** Python, Pydantic compatibility layer, pytest, OpenAI-compatible chat completions through the existing `openai` package, existing retail tool registry/gateway/guard/eval modules.
+**技术栈：** Python、项目现有 Pydantic 兼容层、pytest、现有 OpenAI-compatible `openai` package、现有 retail tool registry/gateway/guard/eval 模块。
 
 ---
 
-## Source Spec
+## 来源文档
 
-Primary spec:
+主 spec：
 
 `docs/superpowers/specs/2026-06-13-llm-agent-tool-calling-architecture-design.md`
 
-Architecture discussion:
+架构讨论文档：
 
 `docs/design-llm-agent-tool-calling.md`
 
-## Long-Term Phases
+## 长期阶段
 
-This work should not be treated as one session. Each phase must leave the repository in a working, testable state.
+这项工作不要当成一个 session 内完成。每个阶段结束时，仓库都必须保持可运行、可测试、可继续接手。
 
-| Phase | Name | Runtime impact | Exit condition |
-|-------|------|----------------|----------------|
-| 1 | Tool-calling contract, schema, harness | No runtime switch | Existing tests pass; provider/harness/schema tests pass |
-| 2 | State split and context builder | Current runtime still works through compatibility | Trace and summary tests pass; existing eval still runs |
-| 3 | LLM agent loop in isolation | New loop exists, not yet primary runtime | Scripted loop tests pass for read, write pending, guard block, failures |
-| 4 | Runtime switch and old pipeline removal | `AgentRuntime` uses LLM runtime only | Scripted curated/generalized/synthetic smoke pass; no deterministic runtime mode |
-| 5 | Eval adaptation and live benchmark | Eval supports scripted/live split | Reports include backend, token/tool metrics, failure categories |
-| 6 | Deferred replay/debugging | Adds replay harness | Trace replay can reproduce a recorded turn |
+| 阶段 | 名称 | Runtime 影响 | 退出条件 |
+|------|------|--------------|----------|
+| Phase 1 | Tool-calling contract、schema、harness | 不切换 runtime | 现有测试通过；provider/harness/schema 测试通过 |
+| Phase 2 | State 拆分与 context builder | 当前 runtime 通过兼容层继续工作 | trace 和 summary 测试通过；现有 eval 仍可运行 |
+| Phase 3 | 独立 LLM agent loop | 新 loop 存在，但还不是主 runtime | scripted loop 测试覆盖 read、write pending、guard block、失败路径 |
+| Phase 4 | Runtime 切换与旧 pipeline 删除 | `AgentRuntime` 只走 LLM runtime | scripted curated/generalized/synthetic smoke 通过；无 deterministic runtime mode |
+| Phase 5 | Eval 适配与 live benchmark | Eval 支持 scripted/live 分层 | report 包含 backend、token/tool 指标、failure category |
+| Phase 6 | 延后 replay/debugging | 新增 replay harness | trace replay 能复现一次已记录 turn |
 
-Phase 1 is fully expanded below. Before starting Phase 2, create a new phase-specific plan from the same spec and the state of the code after Phase 1.
+下面只把 **Phase 1** 展开到可直接执行的粒度。开始 Phase 2 前，必须基于 Phase 1 完成后的代码状态重新生成阶段专用计划。
 
 ---
 
-## File Structure
+## 文件结构
 
-Phase 1 creates the stable contracts other phases will depend on.
+Phase 1 创建后续阶段依赖的稳定契约。
 
 ```
 app/agent/
-  models.py              ← add ToolCallRequest, ToolCallResponse, ToolExecutionError
-  providers.py           ← add chat_with_tools protocol method and provider/harness implementations
+  models.py              ← 新增 ToolCallRequest、ToolCallResponse、ToolExecutionError
+  providers.py           ← 新增 chat_with_tools protocol method 和 provider/harness 实现
 
 app/tools/
-  registry.py            ← add tool_schemas_for_llm()
+  registry.py            ← 新增 tool_schemas_for_llm()
 
 tests/
-  test_tool_calling_provider.py  ← new provider/harness tests
-  test_tool_schema.py            ← new registry JSON schema tests
+  test_tool_calling_provider.py  ← 新增 provider/harness 测试
+  test_tool_schema.py            ← 新增 registry JSON Schema 测试
 ```
 
-Phase 2 and beyond will use these files:
+Phase 2 以后会涉及这些文件：
 
 ```
 app/agent/
-  context_builder.py     ← new in Phase 2
-  llm_agent.py           ← new in Phase 3
-  runtime.py             ← switched in Phase 4
-  guard.py               ← block_context in Phase 3 or 4
+  context_builder.py     ← Phase 2 新增
+  llm_agent.py           ← Phase 3 新增
+  runtime.py             ← Phase 4 切换
+  guard.py               ← Phase 3 或 Phase 4 增加 block_context
 
 app/tools/
-  gateway.py             ← structured tool errors in Phase 3 or 4
+  gateway.py             ← Phase 3 或 Phase 4 增加结构化 tool error
 
 app/eval/
-  cases.py               ← required_tools / forbidden_tools in Phase 5
-  runner.py              ← eval_backend and live/scripted reporting in Phase 5
+  cases.py               ← Phase 5 增加 required_tools / forbidden_tools
+  runner.py              ← Phase 5 增加 eval_backend 和 scripted/live report
 ```
 
 ---
 
-## Phase 1: Tool-Calling Contract, Schema, Harness
+## Phase 1：Tool-Calling Contract、Schema、Harness
 
-### Task 1: Add Tool-Calling Models
+### Task 1：新增 Tool-Calling Models
 
-**Files:**
-- Modify: `app/agent/models.py`
-- Create: `tests/test_tool_calling_provider.py`
+**文件：**
+- 修改：`app/agent/models.py`
+- 新增：`tests/test_tool_calling_provider.py`
 
-- [ ] **Step 1: Write failing model tests**
+- [ ] **Step 1：编写失败测试**
 
-Create `tests/test_tool_calling_provider.py`:
+创建 `tests/test_tool_calling_provider.py`：
 
 ```python
 from __future__ import annotations
@@ -127,19 +127,19 @@ def test_tool_execution_error_has_retry_metadata() -> None:
     assert error.missing_args == ["order_id"]
 ```
 
-- [ ] **Step 2: Run model tests to verify they fail**
+- [ ] **Step 2：运行测试，确认失败**
 
-Run:
+运行：
 
 ```bash
 uv run python -m pytest tests/test_tool_calling_provider.py -q
 ```
 
-Expected: FAIL with import errors for `ToolCallRequest`, `ToolCallResponse`, and `ToolExecutionError`.
+预期：失败，报 `ToolCallRequest`、`ToolCallResponse`、`ToolExecutionError` import error。
 
-- [ ] **Step 3: Add models**
+- [ ] **Step 3：新增 models**
 
-Modify `app/agent/models.py` by adding these models after `ToolCall`:
+在 `app/agent/models.py` 的 `ToolCall` 后增加：
 
 ```python
 class ToolCallRequest(BaseModel):
@@ -172,46 +172,46 @@ class ToolExecutionError(BaseModel):
     allowed_tools: Optional[List[str]] = None
 ```
 
-- [ ] **Step 4: Run model tests**
+- [ ] **Step 4：运行 model 测试**
 
-Run:
+运行：
 
 ```bash
 uv run python -m pytest tests/test_tool_calling_provider.py -q
 ```
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 5: Run focused lint**
+- [ ] **Step 5：运行 focused lint**
 
-Run:
+运行：
 
 ```bash
 uv run ruff check app/agent/models.py tests/test_tool_calling_provider.py
 ```
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6：提交**
 
-Run:
+运行：
 
 ```bash
 git add app/agent/models.py tests/test_tool_calling_provider.py
 git commit -m "feat: add tool-calling response models"
 ```
 
-Expected: commit succeeds.
+预期：提交成功。
 
-### Task 2: Add Scripted and Failing Tool-Calling Providers
+### Task 2：新增 Scripted 和 Failing Tool-Calling Providers
 
-**Files:**
-- Modify: `app/agent/providers.py`
-- Modify: `tests/test_tool_calling_provider.py`
+**文件：**
+- 修改：`app/agent/providers.py`
+- 修改：`tests/test_tool_calling_provider.py`
 
-- [ ] **Step 1: Extend provider tests**
+- [ ] **Step 1：扩展 provider 测试**
 
-Append to `tests/test_tool_calling_provider.py`:
+追加到 `tests/test_tool_calling_provider.py`：
 
 ```python
 import pytest
@@ -284,25 +284,25 @@ def test_fake_failing_provider_malformed_arguments_response() -> None:
     assert response.tool_calls[0].raw_arguments == "{not-json"
 ```
 
-- [ ] **Step 2: Run provider tests to verify they fail**
+- [ ] **Step 2：运行 provider 测试，确认失败**
 
-Run:
+运行：
 
 ```bash
 uv run python -m pytest tests/test_tool_calling_provider.py -q
 ```
 
-Expected: FAIL with import errors for `ScriptedToolCallingProvider` and `FakeFailingProvider`.
+预期：失败，报 `ScriptedToolCallingProvider` 和 `FakeFailingProvider` import error。
 
-- [ ] **Step 3: Update provider protocol and add harness providers**
+- [ ] **Step 3：更新 provider protocol 并新增 harness providers**
 
-Modify imports in `app/agent/providers.py`:
+在 `app/agent/providers.py` 中增加 import：
 
 ```python
 from app.agent.models import ToolCallRequest, ToolCallResponse
 ```
 
-Modify `LLMProvider`:
+修改 `LLMProvider`：
 
 ```python
 class LLMProvider(Protocol):
@@ -317,7 +317,7 @@ class LLMProvider(Protocol):
     ) -> ToolCallResponse: ...
 ```
 
-Add these classes near `DeterministicProvider`:
+在 `DeterministicProvider` 附近新增：
 
 ```python
 class ScriptedToolCallingProvider:
@@ -401,9 +401,9 @@ class FakeFailingProvider:
         raise RuntimeError(f"Unsupported fake failure type: {self.error_type}")
 ```
 
-- [ ] **Step 4: Add deterministic provider tool-calling compatibility**
+- [ ] **Step 4：给 DeterministicProvider 增加 tool-calling 兼容方法**
 
-Modify `DeterministicProvider` in `app/agent/providers.py`:
+修改 `app/agent/providers.py` 中的 `DeterministicProvider`：
 
 ```python
 class DeterministicProvider:
@@ -425,46 +425,46 @@ class DeterministicProvider:
         )
 ```
 
-- [ ] **Step 5: Run provider tests**
+- [ ] **Step 5：运行 provider 测试**
 
-Run:
+运行：
 
 ```bash
 uv run python -m pytest tests/test_tool_calling_provider.py -q
 ```
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 6: Run focused lint**
+- [ ] **Step 6：运行 focused lint**
 
-Run:
+运行：
 
 ```bash
 uv run ruff check app/agent/providers.py tests/test_tool_calling_provider.py
 ```
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7：提交**
 
-Run:
+运行：
 
 ```bash
 git add app/agent/providers.py tests/test_tool_calling_provider.py
 git commit -m "feat: add deterministic tool-calling harness providers"
 ```
 
-Expected: commit succeeds.
+预期：提交成功。
 
-### Task 3: Add DeepSeek Tool-Calling Adapter
+### Task 3：新增 DeepSeek Tool-Calling Adapter
 
-**Files:**
-- Modify: `app/agent/providers.py`
-- Modify: `tests/test_tool_calling_provider.py`
+**文件：**
+- 修改：`app/agent/providers.py`
+- 修改：`tests/test_tool_calling_provider.py`
 
-- [ ] **Step 1: Add response normalization tests**
+- [ ] **Step 1：新增 response normalization 测试**
 
-Append to `tests/test_tool_calling_provider.py`:
+追加到 `tests/test_tool_calling_provider.py`：
 
 ```python
 from app.agent.providers import normalize_tool_calling_message
@@ -536,25 +536,25 @@ def test_normalize_final_assistant_message() -> None:
     assert response.tool_calls == []
 ```
 
-- [ ] **Step 2: Run normalization tests to verify they fail**
+- [ ] **Step 2：运行 normalization 测试，确认失败**
 
-Run:
+运行：
 
 ```bash
 uv run python -m pytest tests/test_tool_calling_provider.py -q
 ```
 
-Expected: FAIL with import error for `normalize_tool_calling_message`.
+预期：失败，报 `normalize_tool_calling_message` import error。
 
-- [ ] **Step 3: Add normalization helper**
+- [ ] **Step 3：新增 normalization helper**
 
-Keep the existing typing imports in `app/agent/providers.py`:
+保持 `app/agent/providers.py` 现有 typing imports：
 
 ```python
 from typing import Any, Dict, List, Optional, Protocol
 ```
 
-Add below `_extract_json_block`:
+在 `_extract_json_block` 下方新增：
 
 ```python
 def normalize_tool_calling_message(
@@ -595,9 +595,9 @@ def normalize_tool_calling_message(
     )
 ```
 
-- [ ] **Step 4: Implement DeepSeekProvider.chat_with_tools**
+- [ ] **Step 4：实现 DeepSeekProvider.chat_with_tools**
 
-Add this method to `DeepSeekProvider`:
+在 `DeepSeekProvider` 中新增：
 
 ```python
 def chat_with_tools(
@@ -641,46 +641,46 @@ def chat_with_tools(
     )
 ```
 
-- [ ] **Step 5: Run provider tests**
+- [ ] **Step 5：运行 provider 测试**
 
-Run:
+运行：
 
 ```bash
 uv run python -m pytest tests/test_tool_calling_provider.py -q
 ```
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 6: Run focused lint**
+- [ ] **Step 6：运行 focused lint**
 
-Run:
+运行：
 
 ```bash
 uv run ruff check app/agent/providers.py tests/test_tool_calling_provider.py
 ```
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7：提交**
 
-Run:
+运行：
 
 ```bash
 git add app/agent/providers.py tests/test_tool_calling_provider.py
 git commit -m "feat: add DeepSeek tool-calling adapter"
 ```
 
-Expected: commit succeeds.
+预期：提交成功。
 
-### Task 4: Generate Tool Schemas From Registry
+### Task 4：从 Registry 生成 Tool Schemas
 
-**Files:**
-- Modify: `app/tools/registry.py`
-- Create: `tests/test_tool_schema.py`
+**文件：**
+- 修改：`app/tools/registry.py`
+- 新增：`tests/test_tool_schema.py`
 
-- [ ] **Step 1: Write failing schema tests**
+- [ ] **Step 1：编写失败 schema 测试**
 
-Create `tests/test_tool_schema.py`:
+创建 `tests/test_tool_schema.py`：
 
 ```python
 from __future__ import annotations
@@ -763,25 +763,25 @@ def test_shipping_method_schema_has_enum() -> None:
     ]
 ```
 
-- [ ] **Step 2: Run schema tests to verify they fail**
+- [ ] **Step 2：运行 schema 测试，确认失败**
 
-Run:
+运行：
 
 ```bash
 uv run python -m pytest tests/test_tool_schema.py -q
 ```
 
-Expected: FAIL because `tool_schemas_for_llm` does not exist.
+预期：失败，因为 `tool_schemas_for_llm` 尚不存在。
 
-- [ ] **Step 3: Add schema generation helpers**
+- [ ] **Step 3：新增 schema 生成 helpers**
 
-Modify `app/tools/registry.py` by adding imports:
+在 `app/tools/registry.py` 增加 import：
 
 ```python
 import inspect
 ```
 
-Add these methods to `ToolRegistry`:
+在 `ToolRegistry` 中新增：
 
 ```python
 def tool_schemas_for_llm(self) -> list[dict[str, Any]]:
@@ -851,122 +851,122 @@ def _property_schema(self, tool_name: str, arg_name: str) -> dict[str, Any]:
     return {"type": "string"}
 ```
 
-- [ ] **Step 4: Run schema tests**
+- [ ] **Step 4：运行 schema 测试**
 
-Run:
+运行：
 
 ```bash
 uv run python -m pytest tests/test_tool_schema.py -q
 ```
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 5: Run focused lint**
+- [ ] **Step 5：运行 focused lint**
 
-Run:
+运行：
 
 ```bash
 uv run ruff check app/tools/registry.py tests/test_tool_schema.py
 ```
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6：提交**
 
-Run:
+运行：
 
 ```bash
 git add app/tools/registry.py tests/test_tool_schema.py
 git commit -m "feat: generate LLM tool schemas from registry"
 ```
 
-Expected: commit succeeds.
+预期：提交成功。
 
-### Task 5: Phase 1 Regression Check
+### Task 5：Phase 1 回归检查
 
-**Files:**
-- No source file changes expected.
+**文件：**
+- 预期不修改源码文件。
 
-- [ ] **Step 1: Run focused tests**
+- [ ] **Step 1：运行 focused tests**
 
-Run:
+运行：
 
 ```bash
 uv run python -m pytest tests/test_tool_calling_provider.py tests/test_tool_schema.py -q
 ```
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 2: Run full tests**
+- [ ] **Step 2：运行完整测试**
 
-Run:
+运行：
 
 ```bash
 uv run python -m pytest tests/ -q
 ```
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 3: Run lint**
+- [ ] **Step 3：运行 lint**
 
-Run:
+运行：
 
 ```bash
 uv run ruff check .
 ```
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 4: Record phase status**
+- [ ] **Step 4：记录阶段状态**
 
-Append this section to the top of `docs/superpowers/plans/2026-06-13-llm-agent-tool-calling-architecture.md` under the long-term phase table:
+在 `docs/superpowers/plans/2026-06-13-llm-agent-tool-calling-architecture.md` 的长期阶段表格下方追加：
 
 ```markdown
 ## Phase Status
 
-- Phase 1: complete after provider/harness/schema tests, full pytest, and ruff pass.
-- Phase 2: ready to plan after Phase 1 completion.
+- Phase 1：provider/harness/schema 测试、完整 pytest、ruff 全部通过后完成。
+- Phase 2：Phase 1 完成后可以开始单独规划。
 ```
 
-- [ ] **Step 5: Commit status update**
+- [ ] **Step 5：提交状态更新**
 
-Run:
+运行：
 
 ```bash
 git add docs/superpowers/plans/2026-06-13-llm-agent-tool-calling-architecture.md
 git commit -m "docs: mark LLM tool-calling phase 1 complete"
 ```
 
-Expected: commit succeeds.
+预期：提交成功。
 
 ---
 
-## Phase 2 Planning Brief: State Split and Context Builder
+## Phase 2 规划摘要：State 拆分与 Context Builder
 
-Do not start Phase 2 until Phase 1 is complete. Generate a dedicated Phase 2 plan before touching code.
+Phase 1 完成前不要开始 Phase 2。动代码前必须先生成 Phase 2 专用计划。
 
-Phase 2 must cover:
+Phase 2 必须覆盖：
 
-- `ConversationState` compatibility strategy while introducing `SessionState` and `TurnContext`
-- trace serialization updates
+- 引入 `SessionState` 和 `TurnContext` 时的 `ConversationState` 兼容策略
+- trace serialization 更新
 - `app/agent/context_builder.py`
-- tests for auth summary, loaded order summary, pending action summary, write lock summary, and token budget behavior
-- preservation of existing runtime behavior until Phase 4
+- auth summary、loaded order summary、pending action summary、write lock summary、token budget 行为测试
+- 在 Phase 4 前保持现有 runtime 行为不变
 
-Exit condition:
+退出条件：
 
 ```bash
 uv run python -m pytest tests/ -q
 uv run ruff check .
 ```
 
-Both commands pass, and existing eval commands still run with the current runtime.
+两个命令都通过，且现有 eval 命令仍能用当前 runtime 运行。
 
-## Phase 3 Planning Brief: LLM Agent Loop in Isolation
+## Phase 3 规划摘要：独立 LLM Agent Loop
 
-Do not start Phase 3 until Phase 2 is complete. Generate a dedicated Phase 3 plan before touching code.
+Phase 2 完成前不要开始 Phase 3。动代码前必须先生成 Phase 3 专用计划。
 
-Phase 3 must cover:
+Phase 3 必须覆盖：
 
 - `app/agent/llm_agent.py`
 - `AgentTurnResult`
@@ -977,9 +977,9 @@ Phase 3 must cover:
 - max iteration guard
 - consecutive failure guard
 - structured tool observations
-- scripted tests for read, write pending, guard block, unknown tool, malformed args, provider timeout
+- scripted tests 覆盖 read、write pending、guard block、unknown tool、malformed args、provider timeout
 
-Exit condition:
+退出条件：
 
 ```bash
 uv run python -m pytest tests/test_llm_agent.py -q
@@ -987,45 +987,45 @@ uv run python -m pytest tests/ -q
 uv run ruff check .
 ```
 
-All commands pass.
+所有命令都通过。
 
-## Phase 4 Planning Brief: Runtime Switch and Old Runtime Removal
+## Phase 4 规划摘要：Runtime 切换与旧 Runtime 删除
 
-Do not start Phase 4 until Phase 3 is complete. Generate a dedicated Phase 4 plan before touching code.
+Phase 3 完成前不要开始 Phase 4。动代码前必须先生成 Phase 4 专用计划。
 
-Phase 4 must cover:
+Phase 4 必须覆盖：
 
-- switching `AgentRuntime.handle_user_message()` to pre-flight → LLM loop → post-processing
-- removing `--mode deterministic`
-- deleting `pipeline.py`, `plan_handlers.py`, and `graph.py`
-- pruning parser/builder functions that only supported old intent/slot routing
-- safe failure when provider is unavailable
-- scripted smoke coverage for curated, generalized, synthetic, and pending confirmation flows
+- 将 `AgentRuntime.handle_user_message()` 切到 pre-flight → LLM loop → post-processing
+- 删除 `--mode deterministic`
+- 删除 `pipeline.py`、`plan_handlers.py`、`graph.py`
+- 裁剪只服务旧 intent/slot routing 的 parser/builder 函数
+- provider 不可用时安全失败
+- scripted smoke 覆盖 curated、generalized、synthetic、pending confirmation flows
 
-Exit condition:
+退出条件：
 
 ```bash
 uv run python -m pytest tests/ -q
 uv run ruff check .
 ```
 
-All commands pass, and no runtime code path imports the deleted pipeline modules.
+所有命令都通过，并且 runtime code path 不再 import 被删除的 pipeline 模块。
 
-## Phase 5 Planning Brief: Eval and Live Benchmark
+## Phase 5 规划摘要：Eval 与 Live Benchmark
 
-Do not start Phase 5 until Phase 4 is complete. Generate a dedicated Phase 5 plan before touching code.
+Phase 4 完成前不要开始 Phase 5。动代码前必须先生成 Phase 5 专用计划。
 
-Phase 5 must cover:
+Phase 5 必须覆盖：
 
 - `required_tools`
 - `forbidden_tools`
 - `eval_backend`
 - LLM token/tool/loop metrics
-- scripted/live report split
+- scripted/live report 分层
 - failure category reporting
-- live LLM eval as manual or nightly, not regular CI
+- live LLM eval 作为手动或 nightly，不进入常规 CI
 
-Exit condition:
+退出条件：
 
 ```bash
 uv run python -m pytest tests/test_eval_runner.py -q
@@ -1033,20 +1033,20 @@ uv run python -m pytest tests/ -q
 uv run ruff check .
 ```
 
-All commands pass, and live reports clearly label backend and failure category.
+所有命令都通过，且 live report 清楚标记 backend 和 failure category。
 
-## Phase 6 Planning Brief: Trace Replay Harness
+## Phase 6 规划摘要：Trace Replay Harness
 
-Do not start Phase 6 until Phase 5 is complete. Generate a dedicated Phase 6 plan before touching code.
+Phase 5 完成前不要开始 Phase 6。动代码前必须先生成 Phase 6 专用计划。
 
-Phase 6 must cover:
+Phase 6 必须覆盖：
 
-- trace artifact input format
-- replaying rendered messages and tool observations
-- reproduction of one recorded turn using a scripted provider
+- trace artifact 输入格式
+- 回放 rendered messages 和 tool observations
+- 使用 scripted provider 复现一次已记录 turn
 - replay test fixtures
 
-Exit condition:
+退出条件：
 
 ```bash
 uv run python -m pytest tests/test_trace_replay_harness.py -q
@@ -1054,26 +1054,26 @@ uv run python -m pytest tests/ -q
 uv run ruff check .
 ```
 
-All commands pass.
+所有命令都通过。
 
 ---
 
-## Self-Review
+## 自审记录
 
-Spec coverage:
+Spec 覆盖：
 
-- Runtime single path is planned across Phases 1-4.
-- Harness-first determinism is implemented in Phase 1.
-- Tool schema generation is implemented in Phase 1.
-- State split and context builder are isolated into Phase 2.
-- LLM loop is isolated into Phase 3.
-- Runtime switch and old pipeline deletion are isolated into Phase 4.
-- Eval adaptation and live benchmark split are isolated into Phase 5.
-- Trace replay remains deferred to Phase 6, matching the spec.
+- 单 runtime 路线覆盖在 Phase 1-4。
+- harness-first determinism 在 Phase 1 实现。
+- tool schema generation 在 Phase 1 实现。
+- state split 与 context builder 独立到 Phase 2。
+- LLM loop 独立到 Phase 3。
+- runtime switch 与旧 pipeline 删除独立到 Phase 4。
+- eval adaptation 与 live benchmark 分层独立到 Phase 5。
+- trace replay 延后到 Phase 6，符合 spec。
 
-Ambiguity resolution:
+歧义处理：
 
-- Phase 1 does not change runtime behavior.
-- Later phases require fresh phase-specific plans before code edits.
-- Live LLM eval is never part of regular CI.
-- Old deterministic runtime is removed only in Phase 4, after the new loop has scripted coverage.
+- Phase 1 不改变 runtime 行为。
+- 后续每个阶段动代码前都必须重新生成阶段专用计划。
+- live LLM eval 永远不作为常规 CI。
+- 旧 deterministic runtime 只在 Phase 4 删除，且必须等新 loop 已有 scripted coverage。
