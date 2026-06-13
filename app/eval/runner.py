@@ -556,6 +556,19 @@ def classify_failure(
         ]
         if missing_tools:
             return "wrong_tool"
+    # Phase 5: required_tools / forbidden_tools
+    if case.required_tools:
+        missing_required = [
+            t for t in case.required_tools if t not in tool_names
+        ]
+        if missing_required:
+            return "required_tool_missing"
+    if case.forbidden_tools:
+        violated = [
+            t for t in case.forbidden_tools if t in tool_names
+        ]
+        if violated:
+            return "forbidden_tool_called"
     if tool_errors:
         return "tool_exception"
     if case.expected_guard_block_reason:

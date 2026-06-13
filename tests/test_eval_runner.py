@@ -431,6 +431,91 @@ class CuratedEvalTests(unittest.TestCase):
             self.assertEqual(summary.metrics["mutation_error_rate"], 0.0)
             self.assertEqual(summary.metrics["tool_error_rate"], 0.0)
 
+    def test_required_tool_missing_fails_classify(self):
+        case = EvalCase(
+            case_id="req_test",
+            category="test",
+            messages=[],
+            expected_user_id="user",
+            expected_intent="lookup",
+            required_tools={"must_have_tool"},
+        )
+
+        label = classify_failure(
+            case=case,
+            authenticated_user_id="user",
+            final_intent="lookup",
+            write_locks=[],
+            actual_order_status=None,
+            assistant_messages=[],
+            tool_names=["other_tool"],
+            guard_block_reasons=[],
+            tool_errors=0,
+            guard_blocks=0,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="not_required",
+        )
+
+        self.assertEqual(label, "required_tool_missing")
+
+    def test_forbidden_tool_called_fails_classify(self):
+        case = EvalCase(
+            case_id="forbid_test",
+            category="test",
+            messages=[],
+            expected_user_id="user",
+            expected_intent="lookup",
+            forbidden_tools={"dangerous_tool"},
+        )
+
+        label = classify_failure(
+            case=case,
+            authenticated_user_id="user",
+            final_intent="lookup",
+            write_locks=[],
+            actual_order_status=None,
+            assistant_messages=[],
+            tool_names=["dangerous_tool", "other_tool"],
+            guard_block_reasons=[],
+            tool_errors=0,
+            guard_blocks=0,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="not_required",
+        )
+
+        self.assertEqual(label, "forbidden_tool_called")
+
+    def test_required_and_forbidden_pass_when_satisfied(self):
+        case = EvalCase(
+            case_id="both_test",
+            category="test",
+            messages=[],
+            expected_user_id="user",
+            expected_intent="lookup",
+            required_tools={"good_tool"},
+            forbidden_tools={"bad_tool"},
+        )
+
+        label = classify_failure(
+            case=case,
+            authenticated_user_id="user",
+            final_intent="lookup",
+            write_locks=[],
+            actual_order_status=None,
+            assistant_messages=[],
+            tool_names=["good_tool", "neutral_tool"],
+            guard_block_reasons=[],
+            tool_errors=0,
+            guard_blocks=0,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="not_required",
+        )
+
+        self.assertIsNone(label)
+
 
 def _result(
     case_id: str,
