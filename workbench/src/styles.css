@@ -591,6 +591,64 @@ pre {
   }
 }
 
+/* Timeline weight hierarchy */
+.timeline-row.weight-secondary {
+  opacity: 0.62;
+  border-left: 3px solid transparent;
+}
+
+.timeline-row:not(.weight-secondary) {
+  border-left: 3px solid #2563eb;
+}
+
+.timeline-row.selected:not(.weight-secondary) {
+  border-left: 3px solid #1d4ed8;
+}
+
+.timeline-row.weight-secondary .timeline-title {
+  font-weight: 600;
+}
+
+.timeline-row:not(.weight-secondary) .timeline-title {
+  font-weight: 800;
+}
+
+/* Pending action banner */
+.pending-action-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -12px -12px 10px -12px;
+  border-radius: 8px 8px 0 0;
+  background: #f59e0b;
+  color: #ffffff;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.pending-action-icon {
+  font-size: 16px;
+}
+
+.pending-action-prompt {
+  letter-spacing: 0.02em;
+}
+
+/* Override pending-action border when banner is present */
+.pending-action {
+  border-color: #f59e0b;
+}
+
+/* optgroup labels in case selector */
+select optgroup {
+  font-weight: 800;
+  color: #667085;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 @media (max-width: 720px) {
   .topbar {
     align-items: flex-start;
