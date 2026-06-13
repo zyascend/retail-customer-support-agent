@@ -131,11 +131,29 @@ export function RunControl({
           {selectedCaseId && !hasSelectedCaseOption ? (
             <option value={selectedCaseId}>{selectedCaseId}</option>
           ) : null}
-          {caseOptions.map((workbenchCase) => (
-            <option key={workbenchCase.case_id} value={workbenchCase.case_id}>
-              {workbenchCase.title}
-            </option>
-          ))}
+          {showAll
+            ? caseOptions.map((workbenchCase) => (
+                <option key={workbenchCase.case_id} value={workbenchCase.case_id}>
+                  {workbenchCase.title}
+                </option>
+              ))
+            : catalog.groups.map((group) => (
+                <optgroup key={group.key} label={`${group.emoji} ${group.label}`}>
+                  {group.case_ids.map((caseId) => {
+                    const workbenchCase = caseOptions.find(
+                      (c) => c.case_id === caseId,
+                    );
+                    if (!workbenchCase) {
+                      return null;
+                    }
+                    return (
+                      <option key={caseId} value={caseId}>
+                        {workbenchCase.title}
+                      </option>
+                    );
+                  })}
+                </optgroup>
+              ))}
         </select>
       </label>
 
