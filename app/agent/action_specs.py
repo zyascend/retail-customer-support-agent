@@ -102,6 +102,17 @@ WRITE_ACTION_REGISTRY: tuple[WriteActionSpec, ...] = (
         resource_type="user",
         risk="medium",
     ),
+    WriteActionSpec(
+        name="modify_pending_order_shipping_method",
+        display="Modify Shipping Method",
+        tool_name="modify_pending_order_shipping_method",
+        intent="modify_shipping_method",
+        required_args=("order_id", "shipping_method"),
+        required_slots=("order_id", "shipping_method"),
+        order_status_check="pending",
+        resource_type="order",
+        risk="medium",
+    ),
 )
 
 # ── Convenience lookups computed once at module load ──
@@ -172,6 +183,13 @@ def tool_constraints_for_llm(name: str) -> str:
             "order must be delivered; old and new item counts must match; "
             "new items must be same product as old; new items must be available; "
             "payment method must belong to user; requires user confirmation"
+        ),
+        "modify_pending_order_shipping_method": (
+            "order must be pending; new shipping method must differ from current; "
+            "must be a valid shipping method (standard/express/overnight); "
+            "paid upgrades require valid payment method; "
+            "gift card must have sufficient balance for upgrade fee; "
+            "requires user confirmation"
         ),
     }
     return constraints.get(name, "requires user confirmation")
