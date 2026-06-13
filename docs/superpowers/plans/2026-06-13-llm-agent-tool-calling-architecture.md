@@ -39,6 +39,7 @@
 
 - Phase 1：✅ 完成 — provider/harness/schema 测试（15 新增）、完整 pytest（243 existing + 15 new = 258 passed）、ruff 全部通过（2026-06-13）。
 - Phase 2：✅ 完成 — SessionState/TurnContext 模型、ContextBuilder、259 测试通过、eval 11/11 通过（2026-06-13）。
+- Phase 3：✅ 完成 — AgentLoop 类 + 4 个 step 方法、SessionState/Gateway/Guard 迁移、16 测试覆盖 read/write pending/guard block/tool error/safety guards/integration、278 测试通过、ruff 全部通过（2026-06-13）。
 
 ---
 
