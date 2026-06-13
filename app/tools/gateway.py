@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from app.agent.guard import WriteActionGuard
-from app.agent.models import ConversationState, ToolCall, ToolCallRecord
+from app.agent.models import SessionState, ToolCall, ToolCallRecord
 from app.ops.serialization import to_plain_data
 from app.tools.registry import ToolRegistry
 
@@ -23,7 +23,7 @@ class ToolGateway:
     def execute(
         self,
         *,
-        state: ConversationState,
+        state: SessionState,
         tool_name: str,
         arguments: Dict[str, Any],
         confirmed: bool = False,
