@@ -408,7 +408,7 @@ class CuratedEvalRunner:
             seed=getattr(case, "seed", None),
             passed=failure_label is None,
             failure_label=failure_label,
-            eval_backend="scripted",
+            eval_backend="live" if self.live else "scripted",
             llm_token_usage=total_tokens,
             llm_loop_iterations=total_loop_iterations,
             trace_artifact_path=str(run_result.trace_artifact_path),
