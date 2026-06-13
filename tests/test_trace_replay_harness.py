@@ -166,6 +166,8 @@ class TraceReplayHarnessTests(unittest.TestCase):
             from app.agent.replay import TraceReplayHarness
             harness = TraceReplayHarness(trace_path, registry)
             self.assertIsNotNone(harness)
+            self.assertEqual(len(harness._responses), 0)
+            self.assertEqual(len(harness._tool_results), 0)
 
     def test_replay_read_turn_smoke(self):
         with tempfile.TemporaryDirectory() as tmp:
