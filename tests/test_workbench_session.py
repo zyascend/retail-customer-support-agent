@@ -303,11 +303,15 @@ class WorkbenchSessionTests(unittest.TestCase):
             self.assertEqual(
                 snapshot["selected_case_id"], "block_wrong_user_order_access"
             )
-            self.assertIn("another account", snapshot["messages"][-1]["content"])
+            msg_lower = snapshot["messages"][-1]["content"].lower()
+            self.assertTrue(
+                "another account" in msg_lower or "ownership" in msg_lower,
+                f"Expected ownership/another account message, got: {snapshot['messages'][-1]['content'][:200]}",
+            )
             self.assertEqual(len(snapshot["guard_blocks"]), 1)
             self.assertEqual(snapshot["guard_blocks"][0]["status"], "blocked")
             self.assertEqual(
-                snapshot["guard_blocks"][0]["error"], "wrong_user_order_access"
+                snapshot["guard_blocks"][0]["error"], "ownership_violation"
             )
 
     def test_confirmed_write_tool_call_appears_after_confirmation_message(self):

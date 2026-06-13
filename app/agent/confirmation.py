@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-ConfirmationIntent = Literal["confirm", "deny", "changed", "unknown"]
+ConfirmationIntent = Literal["confirmed", "denied", "changed", "unknown"]
 
 # ── Weighted keyword dictionaries ──
 
@@ -132,7 +132,7 @@ class ConfirmationResolver:
 
         # 1. Negated change gets highest priority: "don't change" → denied
         if _has_negated_change(text_lower):
-            return "deny"
+            return "denied"
 
         # 2. Compute confidence scores
         confirm = _score(text_lower, _CONFIRM_KEYWORDS)
@@ -141,7 +141,7 @@ class ConfirmationResolver:
 
         # 3. Clear deny signal
         if deny > confirm + change and deny >= 2:
-            return "deny"
+            return "denied"
 
         # 4. User wants to change the request (even if "no" appears)
         if change > confirm and change >= 2:
@@ -149,7 +149,7 @@ class ConfirmationResolver:
 
         # 5. Clear confirm signal
         if confirm > deny and confirm >= 2:
-            return "confirm"
+            return "confirmed"
 
         # 6. Ambiguous — require clarification
         return "unknown"

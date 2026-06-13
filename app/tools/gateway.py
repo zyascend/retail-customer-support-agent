@@ -91,6 +91,8 @@ class ToolGateway:
                         "resource_lock": resource_lock,
                     }
                 )
+            # Update loaded_context for read tools that load context
+            self._update_loaded_context(state, tool_name, normalized_args, result)
             state.tool_results.append(record)
             state.add_step(
                 "tool_executor",
@@ -120,3 +122,32 @@ class ToolGateway:
                 error_type=type(exc).__name__,
             )
             return record
+
+    @staticmethod
+    def _update_loaded_context(
+        state: SessionState,
+        tool_name: str,
+        args: Dict[str, Any],
+        result: Any,
+    ) -> None:
+        """Update loaded_context when a read tool populates orders/users.
+
+        This ensures the guard's read_before_write check passes
+        without requiring the LLM to explicitly load context.
+        """
+        if tool_name == "get_order_details" and isinstance(result, dict):
+            order_id = str(args.get("order_id", ""))
+            clean_id = order_id.lstrip("#")
+            state.loaded_context.orders[clean_id] = result
+            state.loaded_context.orders[f"#{clean_id}"] = result
+            if order_id not in (clean_id, f"#{clean_id}"):
+                state.loaded_context.orders[order_id] = result
+        elif tool_name == "get_user_details" and isinstance(result, dict):
+            user_id = str(args.get("user_id", ""))
+            state.loaded_context.users.setdefault(user_id, result)
+        elif tool_name == "get_product_details" and isinstance(result, dict):
+            product_id = str(args.get("product_id", ""))
+            state.loaded_context.products[product_id] = result
+        elif tool_name == "get_item_details" and isinstance(result, dict):
+            item_id = str(args.get("item_id", ""))
+            state.loaded_context.items[item_id] = result

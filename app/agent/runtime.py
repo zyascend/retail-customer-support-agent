@@ -226,7 +226,7 @@ class AgentRuntime:
         session.confirmation_status = resolution
         session.add_step("preflight_confirmation", resolution=resolution)
 
-        if resolution == "confirm":
+        if resolution == "confirmed":
             action = session.pending_action
             record = self.gateway.execute(
                 state=session,
@@ -241,7 +241,7 @@ class AgentRuntime:
                 msg = _map_guard_error_to_user_message(str(record.error))
             session.messages.append(Message(role="assistant", content=msg))
             return msg
-        elif resolution == "deny":
+        elif resolution == "denied":
             session.pending_action = None
             msg = "No changes were made."
             session.messages.append(Message(role="assistant", content=msg))

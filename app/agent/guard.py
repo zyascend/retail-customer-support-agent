@@ -56,15 +56,18 @@ class WriteActionGuard:
         read_reason = self._validate_read_before_write(state, normalized)
         if read_reason:
             return self._blocked(read_reason, missing=["read_before_write"])
-        policy_reason = self._validate_policy(db, normalized)
-        if policy_reason:
-            return self._blocked(policy_reason)
 
+        # Check confirmation before policy — users should confirm intent
+        # before we check whether the operation is even possible.
         if not confirmed:
             return self._blocked(
                 "explicit_confirmation_required",
                 missing=["explicit_user_confirmation"],
             )
+
+        policy_reason = self._validate_policy(db, normalized)
+        if policy_reason:
+            return self._blocked(policy_reason)
 
         lock = self._resource_lock(normalized)
         conflict = self._lock_conflict(state.write_locks, lock, normalized.tool_name)
@@ -96,11 +99,16 @@ class WriteActionGuard:
             missing_requirements=missing or [],
         )
 
+    _LIST_PARAM_KEYS = {"item_ids", "new_item_ids"}
+
     def _normalize_args(self, args: Dict[str, Any]) -> Dict[str, Any]:
         normalized: Dict[str, Any] = {}
         for key, value in args.items():
             if isinstance(value, list):
                 normalized[key] = [str(item) for item in value]
+            elif key in self._LIST_PARAM_KEYS and isinstance(value, str):
+                # LLM may pass a single item id as a string instead of a list
+                normalized[key] = [str(value)]
             elif value is None:
                 normalized[key] = value
             else:

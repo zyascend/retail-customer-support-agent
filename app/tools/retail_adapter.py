@@ -225,11 +225,11 @@ class LocalRetailTools:
         self,
         order_id: str,
         address1: str,
-        address2: str,
         city: str,
         state: str,
         country: str,
         zip: str,
+        address2: str = "",
     ) -> Dict[str, Any]:
         order = self._get_order(order_id)
         assert "pending" in order["status"], (
