@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, Iterable, Optional
 from app.agent.confirmation import ConfirmationResolver
 from app.agent.context_builder import ContextBuilder
 from app.agent.llm_agent import AgentLoop
-from app.agent.models import Message, SessionState, TurnContext
+from app.agent.models import Message, SessionState
 from app.agent.parsers import EMAIL_RE, NAME_ZIP_RE
 from app.agent.prompts import prompt_metadata
 from app.agent.providers import DisabledLLMProvider, LLMProvider, build_default_provider
