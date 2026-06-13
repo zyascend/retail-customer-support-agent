@@ -8,6 +8,7 @@ from app.agent.models import (
     AgentTurnResult,
     SessionState,
     ToolCallResponse,
+    ToolExecutionError,
     TurnContext,
 )
 from app.agent.providers import LLMProvider
@@ -57,12 +58,65 @@ class AgentLoop:
             if not response.tool_calls:
                 return self._step_finalize(response, turn)
 
-            # Tool execution placeholder (to be implemented in next tasks)
-            turn.termination = "max_iterations"
-            return AgentTurnResult(
-                assistant_message="I'm sorry, I couldn't process your request.",
-                turn=turn,
-            )
+            # Execute each tool call
+            assistant_msg = self._assistant_message_dict(response)
+            messages.append(assistant_msg)
+
+            all_failed = True
+            for tc in response.tool_calls:
+                t0 = time.perf_counter()
+                record = self._gateway.execute(
+                    state=session,
+                    tool_name=tc.tool_name,
+                    arguments=tc.arguments,
+                )
+                turn.step_durations[f"tool_{tc.tool_name}"] = round(
+                    (time.perf_counter() - t0) * 1000, 1
+                )
+                turn.add_step(
+                    "tool_execute",
+                    tool_name=tc.tool_name,
+                    status=record.status,
+                )
+
+                if record.status == "success":
+                    all_failed = False
+                    obs = record.observation
+                    obs_str = str(obs)[:500] if obs is not None else "(none)"
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": obs_str,
+                    })
+                else:
+                    error_msg = ToolExecutionError(
+                        error_type="tool_execution_error",
+                        message_for_llm=(
+                            f"Tool {tc.tool_name} failed: {record.error or 'unknown error'}"
+                        ),
+                        retryable=True,
+                    )
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": error_msg.model_dump_json(),
+                    })
+
+            if all_failed:
+                turn.consecutive_tool_failures += 1
+            else:
+                turn.consecutive_tool_failures = 0
+
+            if turn.consecutive_tool_failures >= self._max_consecutive_failures:
+                turn.termination = "consecutive_failures"
+                turn.add_step("consecutive_failures_limit")
+                return AgentTurnResult(
+                    assistant_message=(
+                        "I'm unable to complete this request. "
+                        "Let me transfer you to a human agent."
+                    ),
+                    turn=turn,
+                )
 
         turn.termination = "max_iterations"
         return AgentTurnResult(
@@ -122,3 +176,20 @@ class AgentLoop:
             messages.append({"role": msg.role, "content": msg.content})
         messages.append({"role": "user", "content": user_content})
         return messages
+
+    @staticmethod
+    def _assistant_message_dict(response: ToolCallResponse) -> dict[str, Any]:
+        msg: dict[str, Any] = {"role": "assistant", "content": response.assistant_content}
+        if response.tool_calls:
+            msg["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.tool_name,
+                        "arguments": tc.raw_arguments or "{}",
+                    },
+                }
+                for tc in response.tool_calls
+            ]
+        return msg
