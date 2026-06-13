@@ -269,26 +269,6 @@ class AgentLoop:
                 retryable=True,
                 allowed_tools=sorted(self._registry.tools),
             )
-        required = self._registry.required_args_for_tool(tool_call.tool_name)
-        missing = [a for a in required if not tool_call.arguments.get(a)]
-        if missing:
-            return ToolExecutionError(
-                error_type="missing_required_args",
-                message_for_llm=(
-                    f"Missing required arguments for {tool_call.tool_name}: {missing}"
-                ),
-                retryable=True,
-                missing_args=missing,
-            )
-        if tool_call.raw_arguments is not None and not tool_call.arguments:
-            return ToolExecutionError(
-                error_type="malformed_arguments",
-                message_for_llm=(
-                    f"Could not parse arguments for {tool_call.tool_name}. "
-                    "Please provide valid JSON arguments."
-                ),
-                retryable=True,
-            )
         return None
 
     @staticmethod
