@@ -211,10 +211,8 @@ class LocalRetailTools:
 
     def cancel_pending_order(self, order_id: str, reason: str) -> Dict[str, Any]:
         order = self._get_order(order_id)
-        if order["status"] != "pending":
-            raise ValueError("Non-pending order cannot be cancelled")
-        if reason not in {"no longer needed", "ordered by mistake"}:
-            raise ValueError("Invalid reason")
+        assert order["status"] == "pending", "Guard should have caught non-pending order"
+        assert reason in {"no longer needed", "ordered by mistake"}, "Guard should have caught invalid reason"
         order["status"] = "cancelled"
         order["cancel_reason"] = reason
         return copy.deepcopy(order)
@@ -230,8 +228,7 @@ class LocalRetailTools:
         zip: str,
     ) -> Dict[str, Any]:
         order = self._get_order(order_id)
-        if "pending" not in order["status"]:
-            raise ValueError("Non-pending order cannot be modified")
+        assert "pending" in order["status"], "Guard should have caught non-pending order"
         order["address"] = {
             "address1": address1,
             "address2": address2,
@@ -246,10 +243,8 @@ class LocalRetailTools:
         self, order_id: str, item_ids: list[str], new_item_ids: list[str]
     ) -> Dict[str, Any]:
         order = self._get_order(order_id)
-        if order["status"] != "pending":
-            raise ValueError("Non-pending order cannot be modified")
-        if len(item_ids) != len(new_item_ids):
-            raise ValueError("The number of replacement items should match.")
+        assert order["status"] == "pending", "Guard should have caught non-pending order"
+        assert len(item_ids) == len(new_item_ids), "Guard should have caught item count mismatch"
 
         for old_item_id, new_item_id in zip(item_ids, new_item_ids):
             matching_index = next(
@@ -260,13 +255,11 @@ class LocalRetailTools:
                 ),
                 None,
             )
-            if matching_index is None:
-                raise ValueError(f"Item {old_item_id} not found in order")
+            assert matching_index is not None, "Guard should have caught item not in order"
 
             old_item = order["items"][matching_index]
             new_variant = self._get_variant(old_item["product_id"], new_item_id)
-            if not new_variant["available"]:
-                raise ValueError(f"New item {new_item_id} not available")
+            assert new_variant["available"], "Guard should have caught unavailable replacement item"
 
             replacement = copy.deepcopy(old_item)
             replacement["item_id"] = new_item_id
@@ -281,17 +274,14 @@ class LocalRetailTools:
         self, order_id: str, payment_method_id: str
     ) -> Dict[str, Any]:
         order = self._get_order(order_id)
-        if "pending" not in order["status"]:
-            raise ValueError("Non-pending order cannot be modified")
+        assert "pending" in order["status"], "Guard should have caught non-pending order"
         payment_method = self._get_payment_method(order["user_id"], payment_method_id)
         current_payment_method_id = get_current_payment_method_id(order)
-        if payment_method_id == current_payment_method_id:
-            raise ValueError("New payment method must be different")
+        assert payment_method_id != current_payment_method_id, "Guard should have caught same payment method"
 
         amount = sum(float(item.get("price", 0.0)) for item in order["items"])
         if payment_method.get("source") == "gift_card":
-            if float(payment_method.get("balance", 0.0)) < amount:
-                raise ValueError("Gift card balance is insufficient")
+            assert float(payment_method.get("balance", 0.0)) >= amount, "Guard should have caught insufficient gift card balance"
 
         order["payment_history"].append(
             {
@@ -306,13 +296,11 @@ class LocalRetailTools:
         self, order_id: str, item_ids: list[str], payment_method_id: str
     ) -> Dict[str, Any]:
         order = self._get_order(order_id)
-        if order["status"] != "delivered":
-            raise ValueError("Non-delivered order cannot be returned")
+        assert order["status"] == "delivered", "Guard should have caught non-delivered order"
         self._get_payment_method(order["user_id"], payment_method_id)
         all_item_ids = [item["item_id"] for item in order["items"]]
         for item_id in item_ids:
-            if item_ids.count(item_id) > all_item_ids.count(item_id):
-                raise ValueError("Some item not found")
+            assert item_ids.count(item_id) <= all_item_ids.count(item_id), "Guard should have caught item not found in order"
         order["status"] = "return requested"
         order["return_items"] = sorted(item_ids)
         order["return_payment_method_id"] = payment_method_id
@@ -326,20 +314,16 @@ class LocalRetailTools:
         payment_method_id: str,
     ) -> Dict[str, Any]:
         order = self._get_order(order_id)
-        if order["status"] != "delivered":
-            raise ValueError("Non-delivered order cannot be exchanged")
-        if len(item_ids) != len(new_item_ids):
-            raise ValueError("The number of items to be exchanged should match.")
+        assert order["status"] == "delivered", "Guard should have caught non-delivered order"
+        assert len(item_ids) == len(new_item_ids), "Guard should have caught item count mismatch"
         self._get_payment_method(order["user_id"], payment_method_id)
         all_item_ids = [item["item_id"] for item in order["items"]]
         for item_id in item_ids:
-            if item_ids.count(item_id) > all_item_ids.count(item_id):
-                raise ValueError(f"Number of {item_id} not found.")
+            assert item_ids.count(item_id) <= all_item_ids.count(item_id), "Guard should have caught item not found in order"
         for item_id, new_item_id in zip(item_ids, new_item_ids):
             item = next(item for item in order["items"] if item["item_id"] == item_id)
             variant = self._get_variant(item["product_id"], new_item_id)
-            if not variant["available"]:
-                raise ValueError(f"New item {new_item_id} not found or available")
+            assert variant["available"], "Guard should have caught unavailable replacement item"
         order["status"] = "exchange requested"
         order["exchange_items"] = sorted(item_ids)
         order["exchange_new_items"] = sorted(new_item_ids)

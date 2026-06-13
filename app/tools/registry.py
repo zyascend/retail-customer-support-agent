@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict
 
 from app.agent.models import ToolKind
+from app.agent.action_specs import tool_params_for_llm as _spec_params
+from app.agent.action_specs import tool_constraints_for_llm as _spec_constraints
+from app.agent.action_specs import WRITE_TOOL_NAMES
 
 
 @dataclass(frozen=True)
@@ -83,29 +86,17 @@ class ToolRegistry:
             "get_item_details": "item_id (string)",
             "list_all_product_types": "(none)",
             "calculate": "expression (string)",
-            "cancel_pending_order": "order_id (string), reason (string: no longer needed | ordered by mistake)",
-            "modify_pending_order_address": "order_id (string), address1 (string), address2 (string), city (string), state (string), country (string), zip (string)",
-            "modify_pending_order_items": "order_id (string), item_ids (list of strings), new_item_ids (list of strings)",
-            "modify_pending_order_payment": "order_id (string), payment_method_id (string)",
-            "modify_user_address": "user_id (string), address1 (string), address2 (string), city (string), state (string), country (string), zip (string)",
-            "return_delivered_order_items": "order_id (string), item_ids (list of strings), payment_method_id (string)",
-            "exchange_delivered_order_items": "order_id (string), item_ids (list of strings), new_item_ids (list of strings), payment_method_id (string)",
             "transfer_to_human_agents": "summary (string)",
         }
-        return params_map.get(name, "(see function signature)")
+        if name in params_map:
+            return params_map[name]
+        return _spec_params(name)
 
     def _tool_constraints_for_llm(self, name: str, kind: str) -> str:
         if kind == "read":
             return "read-only, no confirmation needed"
         if name == "transfer_to_human_agents" or name == "calculate":
             return "no special constraints"
-        constraint_map: Dict[str, str] = {
-            "cancel_pending_order": "order must be pending; requires user confirmation; reason must be 'no longer needed' or 'ordered by mistake'",
-            "modify_pending_order_address": "order must be pending; requires user confirmation",
-            "modify_pending_order_items": "order must be pending; new items must be same product as old; new items must be available; count must match; requires user confirmation",
-            "modify_pending_order_payment": "order must be pending; payment method must belong to user; must differ from current; gift card must have sufficient balance; requires user confirmation",
-            "modify_user_address": "target user must be authenticated user; address passed to user_id argument; requires user confirmation",
-            "return_delivered_order_items": "order must be delivered; items must be in the order; payment method must belong to user; requires user confirmation",
-            "exchange_delivered_order_items": "order must be delivered; old and new item counts must match; new items must be same product as old; new items must be available; payment method must belong to user; requires user confirmation",
-        }
-        return constraint_map.get(name, "requires user confirmation")
+        if name in WRITE_TOOL_NAMES:
+            return _spec_constraints(name)
+        return "requires user confirmation"

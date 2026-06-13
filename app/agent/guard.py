@@ -12,15 +12,9 @@ from app.tools.retail_adapter import (
     get_user_from_db,
 )
 
-WRITE_ACTIONS = {
-    "cancel_pending_order",
-    "modify_pending_order_address",
-    "modify_pending_order_items",
-    "modify_pending_order_payment",
-    "modify_user_address",
-    "return_delivered_order_items",
-    "exchange_delivered_order_items",
-}
+from app.agent.action_specs import WRITE_ACTION_NAMES
+
+WRITE_ACTIONS = WRITE_ACTION_NAMES
 DEFERRED_WRITE_ACTIONS: set[str] = set()
 
 

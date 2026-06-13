@@ -456,6 +456,59 @@ DASHBOARD_TEMPLATE = r'''<!doctype html>
           <div><pre>${escapeHtml(JSON.stringify(entry.detail || {}, null, 2))}</pre></div>
         </div>
       `).join('');
+      const timing = trace.timing || {};
+      const stepDurations = timing.step_durations_ms || {};
+      const totalMs = timing.total_ms || 1;
+      const llmTotalMs = timing.llm_total_ms || 0;
+      const llmCalls = timing.llm_calls || [];
+      const llmByNode = {};
+      llmCalls.forEach(call => {
+        const node = call.node || '';
+        if (!llmByNode[node]) llmByNode[node] = [];
+        llmByNode[node].push(call);
+      });
+      const timingRows = Object.entries(stepDurations)
+        .sort((a, b) => b[1] - a[1])
+        .map(([node, ms]) => {
+          const pct = Math.min(100, (ms / totalMs) * 100);
+          let subCalls = '';
+          (llmByNode[node] || []).forEach(call => {
+            const llmMs = call.duration_ms || 0;
+            const llmPct = Math.min(100, (llmMs / totalMs) * 100);
+            subCalls += (
+              '<div style="margin-left:20px;font-size:12px;color:#888">' +
+              '  └ LLM ' + escapeHtml(call.call_type || '') + ': ' +
+              '<span style="display:inline-block;width:' + llmPct.toFixed(0) + '%;' +
+              'background:#a0b4ff;height:8px;border-radius:2px;' +
+              'margin:0 8px"></span>' +
+              llmMs.toFixed(0) + 'ms' +
+              '</div>'
+            );
+          });
+          return (
+            '<div style="margin:4px 0">' +
+            '  <span style="display:inline-block;width:200px;font-size:13px">' +
+            escapeHtml(node) + '</span>' +
+            '  <span style="display:inline-block;width:' + pct.toFixed(0) + '%;' +
+            'background:#5b7fff;height:14px;border-radius:3px;' +
+            'margin:0 8px" title="' + ms.toFixed(1) + 'ms"></span>' +
+            '  <span style="font-size:12px;color:#666">' + ms.toFixed(0) + 'ms</span>' +
+            '</div>' +
+            subCalls
+          );
+        }).join('');
+      const llmPct = totalMs ? ((llmTotalMs / totalMs) * 100).toFixed(0) : 0;
+      const timingWaterfall = Object.keys(stepDurations).length ? (
+        '<div class="panel">' +
+        '  <div class="panel-head"><h3>⏱ Timing Waterfall</h3></div>' +
+        '  <div class="panel-body">' +
+        '    <p style="font-size:12px;color:#888;margin-bottom:12px">' +
+        'Total: ' + totalMs.toFixed(0) + 'ms | LLM: ' + llmTotalMs.toFixed(0) + 'ms (' + llmPct + '%)' +
+        '    </p>' +
+        timingRows +
+        '  </div>' +
+        '</div>'
+      ) : '';
 
       detailEl.innerHTML = `
         <div class="detail-grid">
@@ -492,6 +545,7 @@ DASHBOARD_TEMPLATE = r'''<!doctype html>
           <div class="panel-head"><h3>Tool Calls</h3></div>
           <div class="panel-body timeline">${toolCalls || '<div class="subtle">No tool calls.</div>'}</div>
         </div>
+        ${timingWaterfall}
         <div class="panel">
           <div class="panel-head"><h3>Policy Checks</h3></div>
           <div class="panel-body timeline">${policyChecks || '<div class="subtle">No policy checks.</div>'}</div>

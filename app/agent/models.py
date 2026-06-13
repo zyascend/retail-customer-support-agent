@@ -91,5 +91,12 @@ class ConversationState(BaseModel):
     audit_logs: List[Dict[str, Any]] = Field(default_factory=list)
     termination_reason: Optional[str] = None
 
+    # ── Timing (Module 3) ──
+    step_durations: dict[str, float] = Field(default_factory=dict)
+    # {"identity_resolver": 45.2, "intent_and_slot_extractor": 210.8, ...}
+
+    llm_call_durations: list[dict] = Field(default_factory=list)
+    # [{"node": "policy_reasoner", "call_type": "json", "duration_ms": 185.2, "status": "ok"}, ...]
+
     def add_step(self, node: str, **detail: Any) -> None:
         self.steps.append(AgentStep(node=node, detail=detail))
