@@ -819,5 +819,65 @@ class DualTrackMergeTests(unittest.TestCase):
         self.assertIn("payment_method_id", missing)
 
 
+class ActionSpecsTests(unittest.TestCase):
+    def test_registry_has_seven_actions(self):
+        from app.agent.action_specs import WRITE_ACTION_REGISTRY
+        self.assertEqual(len(WRITE_ACTION_REGISTRY), 7)
+
+    def test_every_spec_has_valid_tool_name(self):
+        from app.agent.action_specs import WRITE_ACTION_REGISTRY
+        from app.tools.registry import ToolRegistry
+        from app.tools.retail_adapter import RetailAdapter
+        from app.config import resolve_config
+        runtime = RetailAdapter(resolve_config()).create_runtime()
+        registry = ToolRegistry(runtime.tools)
+        tool_names = set(registry.tools.keys())
+        for spec in WRITE_ACTION_REGISTRY:
+            self.assertIn(spec.tool_name, tool_names,
+                          f"{spec.tool_name} not found in tool registry")
+
+    def test_lookups_cover_all_specs(self):
+        from app.agent.action_specs import (
+            WRITE_ACTION_BY_NAME,
+            WRITE_ACTION_BY_INTENT,
+            WRITE_ACTION_REGISTRY,
+        )
+        self.assertEqual(len(WRITE_ACTION_BY_NAME), len(WRITE_ACTION_REGISTRY))
+        self.assertEqual(len(WRITE_ACTION_BY_INTENT), len(WRITE_ACTION_REGISTRY))
+
+    def test_intent_to_name_mapping_is_consistent(self):
+        from app.agent.action_specs import WRITE_ACTION_BY_INTENT, WRITE_ACTION_REGISTRY
+        for spec in WRITE_ACTION_REGISTRY:
+            mapped = WRITE_ACTION_BY_INTENT[spec.intent]
+            self.assertEqual(mapped.name, spec.name)
+
+    def test_required_slots_subset_of_known_slot_keys(self):
+        from app.agent.action_specs import WRITE_ACTION_REGISTRY
+        known_slots = {"order_id", "address", "item_ids", "new_item_ids",
+                       "payment_method_id", "reason"}
+        for spec in WRITE_ACTION_REGISTRY:
+            for slot in spec.required_slots:
+                self.assertIn(slot, known_slots,
+                              f"{spec.name}: unknown slot '{slot}'")
+
+    def test_catalog_for_prompt_includes_all_actions(self):
+        from app.agent.action_specs import build_action_catalog_for_prompt
+        catalog = build_action_catalog_for_prompt()
+        self.assertIn("cancel_pending_order", catalog)
+        self.assertIn("exchange_delivered_order_items", catalog)
+        self.assertIn("modify_user_address", catalog)
+
+    def test_params_for_llm_returns_args_for_write_tools(self):
+        from app.agent.action_specs import tool_params_for_llm
+        result = tool_params_for_llm("cancel_pending_order")
+        self.assertIn("order_id", result)
+        self.assertIn("reason", result)
+
+    def test_params_for_llm_falls_back_for_unknown_tool(self):
+        from app.agent.action_specs import tool_params_for_llm
+        result = tool_params_for_llm("get_order_details")
+        self.assertEqual(result, "(see function signature)")
+
+
 if __name__ == "__main__":
     unittest.main()
