@@ -8,6 +8,7 @@ import pytest
 
 from app.analysis.tau_task_analyzer import (
     _resolve_tau3_retail_dir,
+    analyze_nl_assertions,
     classify_task,
     compute_task_space_stats,
     load_splits,
@@ -191,3 +192,49 @@ def test_classify_task_no_actions_returns_unsupported():
     splits = {"train": [], "test": ["99"], "base": ["99"]}
     result = classify_task(task, splits)
     assert result.status == "unsupported"
+
+
+def test_analyze_nl_assertions_categorizes_correctly():
+    """analyze_nl_assertions categorizes NL assertions by type."""
+    tasks = [
+        {
+            "id": 1,
+            "evaluation_criteria": {
+                "nl_assertions": [
+                    "Agent should tell the user the refund is $50.",
+                    "Agent should not mention the competitor's price.",
+                ],
+            },
+        },
+        {
+            "id": 2,
+            "evaluation_criteria": {
+                "nl_assertions": [
+                    "Agent should convey the shipping timeline.",
+                ],
+            },
+        },
+    ]
+    result = analyze_nl_assertions(tasks)
+
+    assert result["total_tasks_with_nl"] == 2
+    assert result["total_assertions"] == 3
+    assert result["by_category"]["must_say"] == 1
+    assert result["by_category"]["must_not_say"] == 1
+    assert result["by_category"]["must_convey"] == 1
+    assert len(result["items"]) == 3
+    assert result["items"][0].task_id == "1"
+
+
+def test_analyze_nl_assertions_no_assertions_returns_empty():
+    """Tasks without NL assertions return empty analysis."""
+    tasks = [
+        {
+            "id": 0,
+            "evaluation_criteria": {"nl_assertions": None},
+        },
+    ]
+    result = analyze_nl_assertions(tasks)
+    assert result["total_tasks_with_nl"] == 0
+    assert result["total_assertions"] == 0
+    assert len(result["items"]) == 0

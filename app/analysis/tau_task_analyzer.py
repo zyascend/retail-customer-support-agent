@@ -218,6 +218,73 @@ class NLAssertionItem:
 
 
 # ---------------------------------------------------------------------------
+# NL assertion analysis
+# ---------------------------------------------------------------------------
+
+
+def _categorize_nl_assertion(text: str) -> str:
+    """Categorize a single NL assertion string.
+
+    Categories:
+      - "must_say": Agent should tell/user should be informed of specific info
+      - "must_not_say": Agent should NOT mention/say something
+      - "must_convey": Agent should convey a general concept (less specific)
+    """
+    lower = text.lower()
+    if "should not" in lower or "must not" in lower or "shouldn't" in lower:
+        return "must_not_say"
+    if "should tell" in lower or "should inform" in lower or "should state" in lower:
+        return "must_say"
+    if "should convey" in lower or "should communicate" in lower or "should explain" in lower:
+        return "must_convey"
+    return "must_say"
+
+
+def analyze_nl_assertions(tasks: list[dict]) -> dict:
+    """Analyze all NL assertions across tasks.
+
+    Returns a dict with:
+      - total_tasks_with_nl: count of tasks that have NL assertions
+      - total_assertions: total number of assertion strings
+      - by_category: dict of category -> count
+      - sample_by_category: dict of category -> list of up to 3 examples
+      - items: list of NLAssertionItem for all assertions
+    """
+    items: list[NLAssertionItem] = []
+    by_category: dict[str, int] = {}
+    sample_by_category: dict[str, list[str]] = {}
+
+    for task in tasks:
+        nl = task.get("evaluation_criteria", {}).get("nl_assertions")
+        if not nl:
+            continue
+        for assertion_text in nl:
+            category = _categorize_nl_assertion(assertion_text)
+            items.append(
+                NLAssertionItem(
+                    task_id=str(task["id"]),
+                    text=assertion_text,
+                    category=category,
+                )
+            )
+            by_category[category] = by_category.get(category, 0) + 1
+            if category not in sample_by_category:
+                sample_by_category[category] = []
+            if len(sample_by_category[category]) < 3:
+                sample_by_category[category].append(assertion_text)
+
+    return {
+        "total_tasks_with_nl": len(
+            {item.task_id for item in items}
+        ),
+        "total_assertions": len(items),
+        "by_category": by_category,
+        "sample_by_category": sample_by_category,
+        "items": items,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
 
