@@ -106,7 +106,7 @@ class ToolGateway:
                 arguments=normalized_args,
                 tool_kind=spec.kind,
                 status="error",
-                error=str(exc),
+                error=type(exc).__name__,
                 before_db_hash=before_hash,
                 after_db_hash=after_hash,
                 idempotency_key=idempotency_key,
@@ -117,6 +117,6 @@ class ToolGateway:
                 "tool_executor",
                 tool_name=tool_name,
                 status="error",
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
             return record

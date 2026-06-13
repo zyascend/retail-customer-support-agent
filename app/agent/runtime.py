@@ -843,7 +843,7 @@ class AgentRuntime:
             state.add_step(
                 f"{node_name}_llm",
                 status="error",
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
             return {}
         finally:
@@ -883,7 +883,7 @@ class AgentRuntime:
             state.add_step(
                 f"{node_name}_llm",
                 status="error",
-                error=str(exc),
+                error_type=type(exc).__name__,
             )
             return ""
         finally:
