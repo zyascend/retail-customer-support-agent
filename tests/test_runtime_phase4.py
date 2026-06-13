@@ -75,6 +75,37 @@ class TestRuntimePreflightConfirmation:
             assert session.pending_action is None
 
 
+    def test_changed_clears_pending_and_continues(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            runtime = AgentRuntime(config, provider=DisabledLLMProvider())
+            session = SessionState(session_id="test-changed")
+            session.pending_action = PendingAction(
+                action_name="cancel_pending_order",
+                arguments={"order_id": "#W1234567", "reason": "no longer needed"},
+                user_facing_summary="Cancel order",
+            )
+            msg = runtime.handle_user_message(session, "change to express shipping instead")
+            assert "discarded" in msg.lower()
+            assert session.pending_action is None
+
+    def test_identity_preflight_by_email(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            runtime = AgentRuntime(config, provider=DisabledLLMProvider())
+            session = SessionState(session_id="test-ident")
+            # Find a known user email from the DB
+            db = runtime.retail_runtime.db
+            users = db.get("users", {})
+            first_user = next(iter(users.values()))
+            email = first_user.get("email", "")
+            assert email and "@" in email
+
+            msg = runtime.handle_user_message(session, f"My email is {email}")
+            # Should authenticate or return offline fallback
+            assert session.authenticated_user_id is not None or "offline" in msg.lower()
+
+
 class TestRuntimeIntegration:
     """Tests: end-to-end script execution."""
 

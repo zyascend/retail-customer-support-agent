@@ -241,7 +241,7 @@ class AgentRuntime:
             session.slots = {}
             msg = "I discarded the previous request. Please provide updated details."
             session.messages.append(Message(role="assistant", content=msg))
-            return None
+            return msg
 
         return None
 

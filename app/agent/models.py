@@ -125,6 +125,7 @@ class SessionState(BaseModel):
     confirmation_status: str = "not_required"
     policy_decision: Optional[PolicyDecision] = None
     risk_level: str = "low"
+    step_durations: dict[str, float] = Field(default_factory=dict)
 
     steps: List[AgentStep] = Field(default_factory=list)
 
