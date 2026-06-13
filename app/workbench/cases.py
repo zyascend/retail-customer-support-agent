@@ -100,7 +100,7 @@ CASE_TITLES = {
 }
 
 
-def build_case_catalog(subset: str = "curated_mvp") -> Dict[str, Any]:
+def build_case_catalog(subset: str = "generalized_mvp") -> Dict[str, Any]:
     cases = get_cases(subset)
     # Also load synthetic cases
     try:
@@ -120,7 +120,7 @@ def build_case_catalog(subset: str = "curated_mvp") -> Dict[str, Any]:
     }
 
 
-def get_case_by_id(case_id: str, subset: str = "curated_mvp") -> EvalCase:
+def get_case_by_id(case_id: str, subset: str = "generalized_mvp") -> EvalCase:
     # Try primary subset first
     for case in get_cases(subset):
         if case.case_id == case_id:
