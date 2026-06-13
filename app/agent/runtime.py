@@ -29,34 +29,30 @@ from app.ops.tracing import TraceWriter, final_state_summary
 from app.tools.gateway import ToolGateway
 from app.tools.registry import ToolRegistry
 from app.agent.action_specs import (
-    WRITE_ACTION_BY_INTENT,
     WRITE_ACTION_BY_NAME,
     WRITE_ACTION_NAMES,
     WRITE_INTENTS,
 )
+from app.agent.parsers import (
+    EMAIL_RE,
+    ITEM_RE,
+    NAME_ZIP_RE,
+    ORDER_RE,
+    PAYMENT_RE,
+    SUPPORTED_INTENTS,
+    ZIP_RE,
+    code_missing_slots,
+    has_assistant_response,
+    infer_intent,
+    last_assistant_message,
+    merge_policy_decisions,
+    parse_address,
+    parse_item_replacement_pairs,
+    clean_llm_scalar,
+    clean_llm_list,
+)
 from app.tools.retail_adapter import RetailAdapter, get_order_from_db
 
-EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
-ZIP_RE = re.compile(r"\b\d{5}(?:-\d{4})?\b")
-NAME_ZIP_RE = re.compile(
-    r"(?:my name is|i am|i'm)\s+([A-Za-z]+)\s+([A-Za-z]+).*?\bzip(?: code)? is\s+(\d{5}(?:-\d{4})?)",
-    re.IGNORECASE,
-)
-ORDER_RE = re.compile(r"#W\d+")
-ITEM_RE = re.compile(r"\b\d{8,}\b")
-PAYMENT_RE = re.compile(r"\b(?:gift_card|credit_card|paypal)_\d+\b")
-SUPPORTED_INTENTS = {
-    "lookup",
-    "cancel_order",
-    "modify_order_address",
-    "modify_order_items",
-    "modify_order_payment",
-    "modify_user_address",
-    "return_items",
-    "exchange_items",
-    "transfer",
-    "unknown",
-}
 SUPPORTED_PENDING_ACTIONS = WRITE_ACTION_NAMES
 
 GUARD_USER_MESSAGES = {
@@ -439,12 +435,7 @@ class AgentRuntime:
         )
 
     def _code_missing_slots(self, state: ConversationState) -> list[str]:
-        """Code-side check for missing required slots per intent."""
-        spec = WRITE_ACTION_BY_INTENT.get(state.current_intent)
-        if spec is None:
-            return []
-        required = spec.required_slots
-        return [key for key in required if not state.slots.get(key)]
+        return code_missing_slots(state)
 
     def _merge_policy_decisions(
         self,
@@ -452,24 +443,9 @@ class AgentRuntime:
         code_decision: str,
         llm_decision: Optional[str],
     ) -> str:
-        """Conservative dual-track merge.
-        Any deny → deny. Any ask → ask. Transfer needs both to agree.
-        Only allow when both allow.
-        """
-        if llm_decision is None:
-            return code_decision
-        # Code-level transfer (unsupported requests) overrides LLM deny
-        if code_decision == "transfer" and llm_decision == "deny":
-            return "transfer"
-        if "deny" in (code_decision, llm_decision):
-            return "deny"
-        if "ask_clarification" in (code_decision, llm_decision):
-            return "ask_clarification"
-        if code_decision == "transfer" and llm_decision == "transfer":
-            return "transfer"
-        if code_decision == "transfer" or llm_decision == "transfer":
-            return "ask_clarification"
-        return "allow"
+        return merge_policy_decisions(
+            code_decision=code_decision, llm_decision=llm_decision
+        )
 
     def _policy_reasoner(self, state: ConversationState, content: str) -> None:
         if self._has_assistant_response(state):
@@ -1120,111 +1096,13 @@ class AgentRuntime:
         return f"Request an exchange for order {order_id}. Please confirm yes or no."
 
     def _infer_intent(self, lowered: str) -> str:
-        # Policy questions are lookups, not operations
-        if re.search(r'\b(return|exchange|cancel|refund)\s+policy\b', lowered):
-            return "lookup"
-
-        # Explicit human transfer request — multiple patterns
-        # Pattern 1: verb + human/agent/representative
-        if re.search(
-            r'\b(?:talk|speak|connect|transfer|want|need|get|like|'
-            r'speak)\s+(?:to|with|a|an)?\s*'
-            r'(?:human|agent|representative|person)\b',
-            lowered,
-        ):
-            return "transfer"
-        # Pattern 2: standalone unambiguous transfer signals
-        if re.search(
-            r'\b(?:customer\s+service|support\s+agent|real\s+person'
-            r'|human\s+agent|human\s+representative)\b',
-            lowered,
-        ):
-            return "transfer"
-        # Pattern 3: unsupported request types
-        if "discount" in lowered:
-            return "transfer"
-
-        # Cancel — must mention order
-        if re.search(r'\bcancel\b', lowered):
-            if re.search(r'\border\b', lowered) or ORDER_RE.search(lowered):
-                return "cancel_order"
-            return "cancel_order"
-
-        # Exchange — exclude "exchange rate" and "exchange policy"
-        if re.search(r'\bexchange\b', lowered):
-            if not re.search(r'\bexchange\s+(?:rate|policy)\b', lowered):
-                if re.search(r'\bitems?\b', lowered) or ITEM_RE.search(lowered):
-                    return "exchange_items"
-                return "exchange_items"
-
-        # Return — must mention item or order, not "return policy"
-        if re.search(r'\breturn\b', lowered):
-            if re.search(r'\breturn\s+policy\b', lowered):
-                pass
-            elif re.search(r'\bitems?\b', lowered) or ORDER_RE.search(lowered):
-                return "return_items"
-
-        # Payment modification
-        if "payment" in lowered and re.search(r'\b(change|modify|update|switch)\b',
-                                               lowered):
-            return "modify_order_payment"
-
-        # Item modification (pending order)
-        if re.search(r'\b(items?|products?)\b', lowered) and re.search(
-            r'\b(change|modify|replace|switch|swap)\b', lowered):
-            return "modify_order_items"
-
-        # User default address
-        if re.search(r'\bmy\b.*\bdefault\b.*\baddress\b', lowered):
-            return "modify_user_address"
-        if "default address" in lowered:
-            return "modify_user_address"
-
-        # Order address modification
-        if "address" in lowered and re.search(r'\b(change|modify|update)\b',
-                                               lowered):
-            if "my" in lowered and "default" in lowered:
-                return "modify_user_address"
-            return "modify_order_address"
-
-        # Order mention → lookup
-        if "order" in lowered or ORDER_RE.search(lowered):
-            return "lookup"
-
-        return "unknown"
+        return infer_intent(lowered)
 
     def _parse_address(self, content: str) -> Optional[Dict[str, str]]:
-        marker = re.search(r"(?:default )?address to\s+(.+)$", content, re.IGNORECASE)
-        if not marker:
-            return None
-        parts = [
-            part.strip().rstrip(".")
-            for part in marker.group(1).split(",")
-        ]
-        if len(parts) == 5:
-            address1, city, state, country, zip_code = parts
-            address2 = ""
-        elif len(parts) >= 6:
-            address1, address2, city, state, country, zip_code = parts[:6]
-        else:
-            return None
-        return {
-            "address1": address1,
-            "address2": address2,
-            "city": city,
-            "state": state,
-            "country": country,
-            "zip": zip_code,
-        }
+        return parse_address(content)
 
     def _parse_item_replacement_pairs(self, lowered: str) -> list[tuple[str, str]]:
-        pairs = re.findall(r"\b(\d{8,})\s+(?:to|for|instead)\s+(\d{8,})\b", lowered)
-        if pairs:
-            return pairs
-        return re.findall(
-            r"\bitem\s+(\d{8,}).*?\b(?:new item|instead)\s+(\d{8,})\b",
-            lowered,
-        )
+        return parse_item_replacement_pairs(lowered)
 
     def _assistant(
         self, state: ConversationState, content: str, allow_llm: bool = True
@@ -1237,28 +1115,13 @@ class AgentRuntime:
         state.messages.append(Message(role="assistant", content=final_content))
 
     def _has_assistant_response(self, state: ConversationState) -> bool:
-        return bool(state.messages and state.messages[-1].role == "assistant")
+        return has_assistant_response(state)
 
     def _last_assistant_message(self, state: ConversationState) -> str:
-        for message in reversed(state.messages):
-            if message.role == "assistant":
-                return message.content
-        return ""
+        return last_assistant_message(state)
 
     def _clean_llm_scalar(self, value: Any) -> Optional[str]:
-        if value is None:
-            return None
-        text = str(value).strip()
-        if not text or text.lower() in {"null", "none", "n/a"}:
-            return None
-        return text
+        return clean_llm_scalar(value)
 
     def _clean_llm_list(self, value: Any) -> list[str]:
-        if not isinstance(value, list):
-            return []
-        cleaned = []
-        for item in value:
-            text = self._clean_llm_scalar(item)
-            if text:
-                cleaned.append(text)
-        return cleaned
+        return clean_llm_list(value)
