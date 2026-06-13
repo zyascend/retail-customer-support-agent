@@ -68,7 +68,7 @@ export function Timeline({
               >
                 {i > 0 && <span className="timeline-segment" />}
                 <span className={"timeline-marker marker-" + shape + " marker-" + tone} />
-                <span className="timeline-dot-label">
+                <span className={"timeline-dot-label label-" + shape}>
                   {abbreviate(eventLabel(event.label))}
                 </span>
               </button>

@@ -510,7 +510,7 @@ pre {
 }
 
 .timeline-segment {
-  width: 28px;
+  width: 36px;
   height: 2px;
   background: #d9e1ec;
   border-radius: 1px;
@@ -575,12 +575,16 @@ pre {
   left: 50%;
   transform: translateX(-50%);
   margin-top: 5px;
-  color: #667085;
   font-size: 10px;
   font-weight: 600;
   white-space: nowrap;
   pointer-events: none;
 }
+
+.label-step { color: #3b82f6; }
+.label-tool { color: #8b5cf6; }
+.label-msg  { color: #6b7280; }
+.label-audit { color: #f59e0b; }
 
 .timeline-footer {
   display: flex;
@@ -610,8 +614,8 @@ pre {
 /* Legend */
 .timeline-legend {
   display: flex;
-  gap: 16px;
-  margin-top: 10px;
+  gap: 18px;
+  margin-top: 12px;
   padding-top: 8px;
   border-top: 1px solid #e4e9f0;
 }
@@ -620,34 +624,27 @@ pre {
   display: flex;
   align-items: center;
   gap: 5px;
-  color: #667085;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
 }
+
+.legend-item:nth-child(1) { color: #3b82f6; }
+.legend-item:nth-child(2) { color: #8b5cf6; }
+.legend-item:nth-child(3) { color: #6b7280; }
+.legend-item:nth-child(4) { color: #f59e0b; }
 
 .legend-marker {
   display: inline-block;
   width: 12px;
   height: 12px;
-  background: #94a3b8;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
-.legend-marker.marker-tool {
-  border-radius: 3px;
-  transform: rotate(45deg);
-  width: 10px;
-  height: 10px;
-}
-
-.legend-marker.marker-msg {
-  border-radius: 3px;
-}
-
-.legend-marker.marker-audit {
-  border-radius: 3px 8px 3px 8px;
-}
+.legend-marker.marker-step { background: #3b82f6; }
+.legend-marker.marker-tool { background: #8b5cf6; border-radius: 3px; transform: rotate(45deg); width: 10px; height: 10px; }
+.legend-marker.marker-msg  { background: #6b7280; border-radius: 3px; }
+.legend-marker.marker-audit { background: #f59e0b; border-radius: 3px 8px 3px 8px; }
 
 /* Hide old vertical timeline */
 .timeline-list {
