@@ -311,7 +311,9 @@ class CuratedEvalRunner:
             if task_data is not None:
                 from app.eval.tau_user_simulator import TauUserSimulator
 
-                simulator = TauUserSimulator(task_data)
+                simulator = TauUserSimulator(
+                    task_data, db_path=str(runtime_config.retail_db_path)
+                )
                 run_messages = [{"role": "user", "content": simulator.initial_message()}]
                 user_simulator_callback = simulator.respond
 

@@ -6,6 +6,7 @@ by responding to agent questions with template-generated replies.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Optional
 
@@ -13,6 +14,10 @@ _EMAIL_PATTERN = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 
 _EMAIL_KEYWORDS = ("email", "e-mail", "mail")
 _NAME_KEYWORDS = ("name", "who are you", "identify", "zip", "tell me who")
+
+# Cache for tau3 user DB
+_user_db_cache: dict | None = None
+_user_db_path: str | None = None
 
 
 def _extract_name(instructions: dict) -> Optional[str]:
@@ -86,14 +91,39 @@ def _to_first_person(text: str | None) -> str:
     return text
 
 
+def _resolve_user_from_db(user_id: str, db_path: str) -> dict | None:
+    """Resolve a tau3 user_id to real first/last name and email from DB."""
+    global _user_db_cache, _user_db_path
+    if _user_db_cache is None or _user_db_path != db_path:
+        with open(db_path, encoding="utf-8") as f:
+            _user_db_cache = json.load(f)
+        _user_db_path = db_path
+    users = _user_db_cache.get("users", {}) if _user_db_cache else {}
+    return users.get(user_id)
+
+
 class TauUserSimulator:
     """Template-based user simulator for tau3 multi-turn conversations."""
 
-    def __init__(self, task: dict) -> None:
+    def __init__(self, task: dict, db_path: str | None = None) -> None:
         instructions = task["user_scenario"]["instructions"]
         self.name = _extract_name(instructions)
         self.email = _extract_email(instructions)
         self.zip_code = _extract_zip(instructions)
+
+        # Resolve synthetic usernames (with underscores) to real DB names
+        if db_path and self.name and "_" in self.name:
+            user_record = _resolve_user_from_db(self.name, db_path)
+            if user_record:
+                real_name = user_record.get("name", {})
+                first = real_name.get("first_name", "")
+                last = real_name.get("last_name", "")
+                if first and last:
+                    self.name = f"{first} {last}"
+                # Also resolve email if available
+                if not self.email:
+                    self.email = user_record.get("email")
+
         self._reason = _to_first_person(instructions.get("reason_for_call", ""))
         self._unknown_info = instructions.get("unknown_info", "") or ""
         self._email_asked_count = 0
