@@ -33,6 +33,12 @@ from app.agent.action_specs import (
     WRITE_ACTION_NAMES,
     WRITE_INTENTS,
 )
+from app.agent.builders import (
+    merge_slots,
+    normalize_llm_action_arguments,
+    pending_action_has_required_args,
+    pending_prompt,
+)
 from app.agent.parsers import (
     EMAIL_RE,
     ITEM_RE,
@@ -41,6 +47,8 @@ from app.agent.parsers import (
     PAYMENT_RE,
     SUPPORTED_INTENTS,
     ZIP_RE,
+    clean_llm_list,
+    clean_llm_scalar,
     code_missing_slots,
     has_assistant_response,
     infer_intent,
@@ -48,8 +56,6 @@ from app.agent.parsers import (
     merge_policy_decisions,
     parse_address,
     parse_item_replacement_pairs,
-    clean_llm_scalar,
-    clean_llm_list,
 )
 from app.tools.retail_adapter import RetailAdapter, get_order_from_db
 
@@ -913,31 +919,11 @@ class AgentRuntime:
         code_slots: Dict[str, Any],
         llm_slots: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        """Merge code and LLM slots. Code wins for ID formats; LLM for semantic."""
-        if not llm_slots:
-            return dict(code_slots)
-        merged = dict(code_slots)
-        for key, value in llm_slots.items():
-            if key not in merged or not merged[key]:
-                if value:
-                    merged[key] = value
-                continue
-            if key == "reason":
-                cleaned = self._clean_llm_scalar(value)
-                if cleaned and cleaned.lower() in {
-                    "no longer needed",
-                    "ordered by mistake",
-                }:
-                    merged[key] = cleaned.lower()
-            if key == "address" and isinstance(value, dict):
-                cleaned_address = {
-                    k: self._clean_llm_scalar(value.get(k)) or ""
-                    for k in ("address1", "address2", "city", "state",
-                              "country", "zip")
-                }
-                if cleaned_address.get("address1") and cleaned_address.get("zip"):
-                    merged["address"] = cleaned_address
-        return merged
+        return merge_slots(
+            code_slots=code_slots,
+            llm_slots=llm_slots,
+            clean_llm_scalar_fn=self._clean_llm_scalar,
+        )
 
     def _llm_policy_decision(
         self, state: ConversationState, content: str, fallback_decision: str
@@ -1039,61 +1025,17 @@ class AgentRuntime:
     def _pending_action_has_required_args(
         self, action_name: str, arguments: Dict[str, Any]
     ) -> bool:
-        spec = WRITE_ACTION_BY_NAME.get(action_name)
-        if spec is None:
-            return False
-        return all(arguments.get(key) for key in spec.required_args)
+        return pending_action_has_required_args(action_name, arguments)
 
     def _normalize_llm_action_arguments(
         self, action_name: str, arguments: Dict[str, Any]
     ) -> Dict[str, Any]:
-        normalized = dict(arguments)
-        if action_name == "modify_pending_order_address":
-            address = normalized.pop("address", None)
-            if isinstance(address, dict):
-                for key in ("address1", "address2", "city", "state", "country", "zip"):
-                    if key not in normalized and address.get(key) is not None:
-                        normalized[key] = address.get(key)
-        for key in ("item_ids", "new_item_ids"):
-            value = normalized.get(key)
-            if isinstance(value, str):
-                normalized[key] = [value]
-        for key, value in list(normalized.items()):
-            if isinstance(value, str):
-                cleaned = self._clean_llm_scalar(value)
-                if cleaned is None:
-                    normalized.pop(key)
-                else:
-                    normalized[key] = cleaned
-        return normalized
+        return normalize_llm_action_arguments(
+            action_name, arguments, self._clean_llm_scalar
+        )
 
     def _pending_prompt(self, action_name: str, arguments: Dict[str, Any]) -> str:
-        order_id = arguments.get("order_id")
-        if action_name == "cancel_pending_order":
-            return (
-                f"Cancel order {order_id} because {arguments.get('reason')}. "
-                "Please confirm yes or no."
-            )
-        if action_name == "modify_pending_order_address":
-            return (
-                f"Modify the shipping address for order {order_id}. "
-                "Please confirm yes or no."
-            )
-        if action_name == "modify_pending_order_items":
-            return (
-                f"Replace items in order {order_id}. "
-                "Please confirm yes or no."
-            )
-        if action_name == "modify_pending_order_payment":
-            return (
-                f"Change payment for order {order_id}. "
-                "Please confirm yes or no."
-            )
-        if action_name == "modify_user_address":
-            return "Modify your default address. Please confirm yes or no."
-        if action_name == "return_delivered_order_items":
-            return f"Request a return for order {order_id}. Please confirm yes or no."
-        return f"Request an exchange for order {order_id}. Please confirm yes or no."
+        return pending_prompt(action_name, arguments)
 
     def _infer_intent(self, lowered: str) -> str:
         return infer_intent(lowered)
