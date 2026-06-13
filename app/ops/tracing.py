@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
-from app.agent.models import ConversationState, SessionState
+from app.agent.models import ConversationState
 
 
 class TraceWriter:
