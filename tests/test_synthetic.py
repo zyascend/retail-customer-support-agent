@@ -109,3 +109,110 @@ class SyntheticDBGeneratorTests(unittest.TestCase):
             with open(path) as f:
                 loaded = json.load(f)
             self.assertEqual(world, loaded)
+
+
+class SyntheticRetailAdapterTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from app.synthetic.generator import SyntheticDBGenerator
+        cls.world = SyntheticDBGenerator(seed=42).generate()
+        from app.synthetic.adapter import SyntheticRetailTools
+        cls.tools = SyntheticRetailTools(cls.world)
+        from app.synthetic.adapter import SyntheticRetailAdapter
+        cls.adapter = SyntheticRetailAdapter(seed=42)
+
+    def test_tools_dict_has_read_tools(self):
+        for name in ("find_user_id_by_email", "find_user_id_by_name_zip",
+                     "get_user_details", "get_order_details",
+                     "get_product_details", "get_item_details",
+                     "list_all_product_types"):
+            self.assertIn(name, self.tools.tools)
+
+    def test_tools_dict_has_write_tools(self):
+        for name in ("cancel_pending_order", "modify_pending_order_address",
+                     "modify_pending_order_items", "modify_pending_order_payment",
+                     "return_delivered_order_items", "exchange_delivered_order_items",
+                     "modify_user_address", "modify_pending_order_shipping_method"):
+            self.assertIn(name, self.tools.tools)
+
+    def test_tools_dict_has_generic_tools(self):
+        for name in ("calculate", "transfer_to_human_agents"):
+            self.assertIn(name, self.tools.tools)
+
+    def test_tool_type_classifies_read(self):
+        self.assertEqual(self.tools.tool_type("find_user_id_by_email"), "read")
+        self.assertEqual(self.tools.tool_type("get_order_details"), "read")
+
+    def test_tool_type_classifies_write(self):
+        self.assertEqual(self.tools.tool_type("cancel_pending_order"), "write")
+        self.assertEqual(self.tools.tool_type("modify_pending_order_shipping_method"), "write")
+
+    def test_tool_type_classifies_generic(self):
+        self.assertEqual(self.tools.tool_type("calculate"), "generic")
+        self.assertEqual(self.tools.tool_type("transfer_to_human_agents"), "generic")
+
+    def test_get_hash_is_stable(self):
+        h1 = self.tools.get_hash()
+        h2 = self.tools.get_hash()
+        self.assertEqual(h1, h2)
+
+    def test_find_user_by_email_works(self):
+        first_user = next(iter(self.world["users"].values()))
+        email = first_user["email"]
+        uid = self.tools.find_user_id_by_email(email)
+        self.assertEqual(uid, first_user["user_id"])
+
+    def test_get_order_details_works(self):
+        first_order = next(iter(self.world["orders"].values()))
+        oid = first_order["order_id"]
+        order = self.tools.get_order_details(oid)
+        self.assertEqual(order["order_id"], oid)
+
+    def test_shipping_method_mutation_happy_path(self):
+        pending_orders = [
+            o for o in self.world["orders"].values()
+            if o["status"] == "pending" and o["shipping_method"] == "standard"
+        ]
+        if not pending_orders:
+            self.skipTest("no pending standard-shipping order in seed 42")
+        order = pending_orders[0]
+        result = self.tools.modify_pending_order_shipping_method(
+            order["order_id"], "express", payment_method_id=None
+        )
+        self.assertEqual(result["shipping_method"], "express")
+        self.assertEqual(result["shipping_fee"], 9.99)
+
+    def test_shipping_method_mutation_with_payment_upgrade(self):
+        pending_orders = [
+            o for o in self.world["orders"].values()
+            if o["status"] == "pending" and o["shipping_method"] == "standard"
+        ]
+        if not pending_orders:
+            self.skipTest("no pending order in seed 42")
+        order = pending_orders[0]
+        user = self.world["users"][order["user_id"]]
+        cc_id = next(
+            (k for k, v in user["payment_methods"].items()
+             if v.get("source") == "credit_card"),
+            list(user["payment_methods"].keys())[0],
+        )
+        result = self.tools.modify_pending_order_shipping_method(
+            order["order_id"], "overnight", payment_method_id=cc_id
+        )
+        self.assertEqual(result["shipping_method"], "overnight")
+        self.assertEqual(result["shipping_fee"], 24.99)
+        last_txn = result["payment_history"][-1]
+        self.assertEqual(last_txn["transaction_type"], "shipping_upgrade")
+        self.assertEqual(last_txn["payment_method_id"], cc_id)
+
+    def test_adapter_create_runtime_returns_retail_runtime(self):
+        from app.tools.retail_adapter import RetailRuntime
+        runtime = self.adapter.create_runtime()
+        self.assertIsInstance(runtime, RetailRuntime)
+        self.assertEqual(runtime.source, "synthetic")
+
+    def test_adapter_runtime_db_has_correct_tables(self):
+        runtime = self.adapter.create_runtime()
+        db = runtime.tools.db
+        for key in ("users", "orders", "products", "shipping_methods"):
+            self.assertIn(key, db)
