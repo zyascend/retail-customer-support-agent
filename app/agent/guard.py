@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from app.agent.action_specs import WRITE_ACTION_NAMES
-from app.agent.models import ConversationState, ToolCall
+from app.agent.models import SessionState, ToolCall
 from app.ops.serialization import stable_hash
 from app.tools.retail_adapter import (
     find_variant_in_db,
@@ -34,7 +34,7 @@ class WriteActionGuard:
     def check(
         self,
         *,
-        state: ConversationState,
+        state: SessionState,
         db: Any,
         action: ToolCall,
         confirmed: bool,
@@ -107,7 +107,7 @@ class WriteActionGuard:
         return normalized
 
     def _validate_ownership(
-        self, state: ConversationState, db: Any, action: ToolCall
+        self, state: SessionState, db: Any, action: ToolCall
     ) -> Optional[str]:
         user_id = state.authenticated_user_id
         if action.tool_name == "modify_user_address":
@@ -124,7 +124,7 @@ class WriteActionGuard:
         return None
 
     def _validate_read_before_write(
-        self, state: ConversationState, action: ToolCall
+        self, state: SessionState, action: ToolCall
     ) -> Optional[str]:
         order_id = action.arguments.get("order_id")
         if order_id and order_id not in state.loaded_context.orders:
