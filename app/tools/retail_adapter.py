@@ -197,9 +197,12 @@ class LocalRetailTools:
         return copy.deepcopy(self._get_product(product_id))
 
     def get_item_details(self, item_id: str) -> Dict[str, Any]:
-        for product in self.db["products"].values():
+        for product_id, product in self.db["products"].items():
             if item_id in product["variants"]:
-                return copy.deepcopy(product["variants"][item_id])
+                payload = copy.deepcopy(product["variants"][item_id])
+                payload["product_id"] = product_id
+                payload["name"] = product.get("name")
+                return payload
         raise ValueError("Item not found")
 
     def list_all_product_types(self) -> str:

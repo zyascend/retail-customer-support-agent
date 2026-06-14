@@ -18,21 +18,12 @@ from app.agent.models import (
     TurnContext,
 )
 from app.agent.providers import LLMProvider
+from app.agent.tool_observations import format_tool_observation
 from app.tools.gateway import ToolGateway
 from app.tools.registry import ToolRegistry
 
 
 class AgentLoop:
-    _TOOL_OBSERVATION_LIMIT = 1200
-    _PRIORITY_OBSERVATION_KEYS = (
-        "status",
-        "order_id",
-        "user_id",
-        "email",
-        "name",
-        "orders",
-    )
-
     # Write tools whose order_id is the primary resource to load
     _ORDER_WRITE_TOOLS: set[str] = {
         "cancel_pending_order",
@@ -286,7 +277,7 @@ class AgentLoop:
             return record, {
                 "role": "tool",
                 "tool_call_id": tool_call.id,
-                "content": self._format_tool_observation(record.observation),
+                "content": format_tool_observation(record.observation),
             }
         elif record.status == "blocked":
             if record.error == "explicit_confirmation_required":
@@ -622,7 +613,7 @@ class AgentLoop:
                 }
             )
         elif record.status == "success":
-            content = self._format_tool_observation(record.observation)
+            content = format_tool_observation(record.observation)
         else:
             content = json.dumps(
                 {
@@ -642,36 +633,6 @@ class AgentLoop:
         }
 
         return assistant_msg, tool_msg
-
-    def _format_tool_observation(self, observation: Any) -> str:
-        """Compact tool observations while keeping top-level facts visible."""
-        if observation is None:
-            return "(none)"
-
-        payload = self._prioritize_observation_keys(observation)
-        try:
-            text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-        except TypeError:
-            text = str(payload)
-
-        if len(text) <= self._TOOL_OBSERVATION_LIMIT:
-            return text
-        return f"{text[: self._TOOL_OBSERVATION_LIMIT]}...[truncated]"
-
-    def _prioritize_observation_keys(self, observation: Any) -> Any:
-        if not isinstance(observation, dict):
-            return observation
-
-        prioritized: dict[str, Any] = {}
-        for key in self._PRIORITY_OBSERVATION_KEYS:
-            if key in observation:
-                prioritized[key] = observation[key]
-
-        for key, value in observation.items():
-            if key not in prioritized:
-                prioritized[key] = value
-
-        return prioritized
 
     @staticmethod
     def _assistant_message_dict(response: ToolCallResponse) -> dict[str, Any]:

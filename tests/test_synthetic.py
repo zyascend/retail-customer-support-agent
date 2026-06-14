@@ -185,6 +185,17 @@ class SyntheticRetailAdapterTests(unittest.TestCase):
         order = self.tools.get_order_details(oid)
         self.assertEqual(order["order_id"], oid)
 
+    def test_get_item_details_includes_product_id_and_name(self):
+        first_product_id, first_product = next(iter(self.world["products"].items()))
+        first_item_id, first_variant = next(iter(first_product["variants"].items()))
+
+        item = self.tools.get_item_details(first_item_id)
+
+        self.assertEqual(item["item_id"], first_item_id)
+        self.assertEqual(item["product_id"], first_product_id)
+        self.assertEqual(item["name"], first_product["name"])
+        self.assertEqual(item["price"], first_variant["price"])
+
     def test_shipping_method_mutation_happy_path(self):
         pending_orders = [
             o

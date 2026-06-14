@@ -79,3 +79,28 @@ def test_modify_order_payment_schema_has_required_fields() -> None:
         "description": "Payment method ID from user profile (e.g. credit_card_XXXX or gift_card_XXXX)",
     }
     assert params["additionalProperties"] is False
+
+
+def test_modify_user_address_schema_requires_address2() -> None:
+    registry = _registry()
+
+    schema = next(
+        item
+        for item in registry.tool_schemas_for_llm()
+        if item["function"]["name"] == "modify_user_address"
+    )
+    params = schema["function"]["parameters"]
+
+    assert params["required"] == [
+        "user_id",
+        "address1",
+        "address2",
+        "city",
+        "state",
+        "country",
+        "zip",
+    ]
+    assert params["properties"]["address2"] == {
+        "type": "string",
+        "description": "Apartment/unit number (optional)",
+    }
