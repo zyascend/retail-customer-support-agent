@@ -38,6 +38,8 @@ class MetricResult(Protocol):
     failure_summary: Optional[str]
     expected_actual_diff: Dict[str, Any]
     replay_metadata: Dict[str, Any]
+    auto_load_count: int
+    premature_refusal_corrected_count: int
 
 
 class MetricCase(Protocol):
@@ -96,6 +98,10 @@ def compute_metrics(results: Iterable[MetricResult]) -> Dict[str, Any]:
             if isinstance(value, int):
                 token_totals[key] = token_totals.get(key, 0) + value
     loop_iterations = [result.llm_loop_iterations for result in result_list]
+    auto_load_count = sum(result.auto_load_count for result in result_list)
+    premature_refusal_corrected_count = sum(
+        result.premature_refusal_corrected_count for result in result_list
+    )
 
     return {
         "pass_1": _rate(passed, total),
@@ -125,6 +131,8 @@ def compute_metrics(results: Iterable[MetricResult]) -> Dict[str, Any]:
         "average_llm_loop_iterations": (
             round(sum(loop_iterations) / total, 3) if total else 0.0
         ),
+        "auto_load_count": auto_load_count,
+        "premature_refusal_corrected_count": premature_refusal_corrected_count,
         "mutation_error_count": mutation_errors,
         "db_changed_count": db_changed_count,
     }

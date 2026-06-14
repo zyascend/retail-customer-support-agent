@@ -223,6 +223,42 @@ class TestAgentLoopReadTools:
 class TestAgentLoopWritePending:
     """Tests: write tool requires confirmation."""
 
+    def test_auto_load_counter_is_recorded_when_guard_requires_prior_read(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+        from app.agent.models import ToolCallRequest
+
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_cancel",
+                            tool_name="cancel_pending_order",
+                            arguments={
+                                "order_id": "#W5918442",
+                                "reason": "no longer needed",
+                            },
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+            ]
+        )
+        loop = AgentLoop(
+            provider=provider,
+            gateway=_gateway(),
+            registry=_registry(),
+            context_builder=_context_builder(),
+        )
+
+        result = loop.run_turn(
+            _session(authenticated_user_id="sofia_rossi_8776"),
+            "Cancel #W5918442 because no longer needed.",
+        )
+
+        assert result.turn.auto_load_count == 1
+        assert any(step.node == "auto_load_order" for step in result.turn.steps)
+
     def test_write_triggers_pending_confirmation(self) -> None:
         from app.agent.llm_agent import AgentLoop
         from app.agent.models import ToolCallRequest

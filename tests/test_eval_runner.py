@@ -235,6 +235,27 @@ class CuratedEvalTests(unittest.TestCase):
         )
         self.assertEqual(metrics["average_llm_loop_iterations"], 3.0)
 
+    def test_metrics_aggregate_runtime_fallback_counters(self):
+        metrics = compute_metrics(
+            [
+                _result(
+                    "case_a",
+                    0,
+                    auto_load_count=2,
+                    premature_refusal_corrected_count=1,
+                ),
+                _result(
+                    "case_b",
+                    0,
+                    auto_load_count=1,
+                    premature_refusal_corrected_count=0,
+                ),
+            ]
+        )
+
+        self.assertEqual(metrics["auto_load_count"], 3)
+        self.assertEqual(metrics["premature_refusal_corrected_count"], 1)
+
     def test_eval_report_contains_phase9_baseline_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             config = resolve_config(artifact_dir=tmp)
@@ -1638,6 +1659,8 @@ def _result(
     final_db_hash: str = "same",
     llm_token_usage: dict | None = None,
     llm_loop_iterations: int = 0,
+    auto_load_count: int = 0,
+    premature_refusal_corrected_count: int = 0,
 ) -> EvalCaseResult:
     return EvalCaseResult(
         run_id=f"{case_id}-{trial}",
@@ -1665,6 +1688,8 @@ def _result(
         trial_turn_count=1,
         llm_token_usage=llm_token_usage,
         llm_loop_iterations=llm_loop_iterations,
+        auto_load_count=auto_load_count,
+        premature_refusal_corrected_count=premature_refusal_corrected_count,
     )
 
 

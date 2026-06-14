@@ -45,6 +45,35 @@ class ContextBuilder:
         if session.write_locks:
             parts.append(f"Locks: {', '.join(session.write_locks)}")
 
+        recent_guard_block = next(
+            (
+                record
+                for record in reversed(session.tool_results)
+                if record.status == "blocked"
+                and record.error != "explicit_confirmation_required"
+            ),
+            None,
+        )
+        if recent_guard_block and recent_guard_block.error:
+            parts.append(
+                "Recent guard block: "
+                f"{recent_guard_block.tool_name} {recent_guard_block.error}"
+            )
+
+        recent_tool_error = next(
+            (
+                record
+                for record in reversed(session.tool_results)
+                if record.status == "error"
+            ),
+            None,
+        )
+        if recent_tool_error and recent_tool_error.error:
+            parts.append(
+                "Recent tool error: "
+                f"{recent_tool_error.tool_name} {recent_tool_error.error}"
+            )
+
         return "\n".join(parts)
 
     def estimate_tokens(self, text: str) -> int:

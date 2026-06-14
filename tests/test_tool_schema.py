@@ -53,12 +53,12 @@ def test_item_array_schema_declares_string_items() -> None:
 
     assert params["properties"]["item_ids"] == {
         "type": "array",
-        "items": {"type": "string"},
+        "items": {"type": "string", "pattern": "^\\d+$"},
         "description": "List of item IDs to modify/return/exchange (numeric strings)",
     }
     assert params["properties"]["new_item_ids"] == {
         "type": "array",
-        "items": {"type": "string"},
+        "items": {"type": "string", "pattern": "^\\d+$"},
         "description": "List of replacement item IDs, must be same count as item_ids",
     }
 
@@ -76,6 +76,7 @@ def test_modify_order_payment_schema_has_required_fields() -> None:
     assert params["required"] == ["order_id", "payment_method_id"]
     assert params["properties"]["payment_method_id"] == {
         "type": "string",
+        "pattern": "^(credit_card|gift_card|paypal)_\\d+$",
         "description": "Payment method ID from user profile (e.g. credit_card_XXXX or gift_card_XXXX)",
     }
     assert params["additionalProperties"] is False
@@ -104,3 +105,73 @@ def test_modify_user_address_schema_requires_address2() -> None:
         "type": "string",
         "description": "Apartment/unit number (optional)",
     }
+
+
+def test_write_tool_descriptions_include_selection_contract() -> None:
+    registry = _registry()
+    schema = next(
+        item
+        for item in registry.tool_schemas_for_llm()
+        if item["function"]["name"] == "cancel_pending_order"
+    )
+    description = schema["function"]["description"]
+
+    assert "When to use:" in description
+    assert "When not to use:" in description
+    assert "Required prior reads:" in description
+    assert "Guard blocks:" in description
+
+
+def test_read_tool_description_tells_model_not_to_mutate() -> None:
+    registry = _registry()
+    schema = next(
+        item
+        for item in registry.tool_schemas_for_llm()
+        if item["function"]["name"] == "get_order_details"
+    )
+
+    assert "Read-only" in schema["function"]["description"]
+    assert "Do not use for writes" in schema["function"]["description"]
+
+
+def test_payment_method_schema_uses_pattern() -> None:
+    registry = _registry()
+    schema = next(
+        item
+        for item in registry.tool_schemas_for_llm()
+        if item["function"]["name"] == "return_delivered_order_items"
+    )
+    payment = schema["function"]["parameters"]["properties"]["payment_method_id"]
+
+    assert payment["pattern"] == "^(credit_card|gift_card|paypal)_\\d+$"
+
+
+def test_order_and_item_ids_use_patterns() -> None:
+    registry = _registry()
+    cancel = next(
+        item
+        for item in registry.tool_schemas_for_llm()
+        if item["function"]["name"] == "cancel_pending_order"
+    )
+    exchange = next(
+        item
+        for item in registry.tool_schemas_for_llm()
+        if item["function"]["name"] == "exchange_delivered_order_items"
+    )
+
+    assert (
+        cancel["function"]["parameters"]["properties"]["order_id"]["pattern"]
+        == "^#W\\d+$"
+    )
+    assert (
+        exchange["function"]["parameters"]["properties"]["item_ids"]["items"][
+            "pattern"
+        ]
+        == "^\\d+$"
+    )
+    assert (
+        exchange["function"]["parameters"]["properties"]["new_item_ids"]["items"][
+            "pattern"
+        ]
+        == "^\\d+$"
+    )
