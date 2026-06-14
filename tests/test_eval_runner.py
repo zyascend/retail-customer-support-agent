@@ -288,6 +288,244 @@ class CuratedEvalTests(unittest.TestCase):
             -0.5,
         )
 
+    def test_comparison_artifact_reports_case_level_deltas(self):
+        comparison = build_comparison_artifact(
+            baseline={
+                "eval_run_id": "baseline",
+                "model": "model-a",
+                "code_commit": "abc",
+                "metrics": {"pass_1": 0.5},
+                "failure_analysis": {"failure_label_counts": {"wrong_tool": 2}},
+                "report_artifact_path": "baseline-report.json",
+                "results": [
+                    {
+                        "case_id": "fixed_case",
+                        "passed": False,
+                        "failure_label": "wrong_tool",
+                        "trace_artifact_path": "baseline-fixed.trace.json",
+                    },
+                    {
+                        "case_id": "still_failing_case",
+                        "passed": False,
+                        "failure_label": "wrong_tool",
+                        "trace_artifact_path": "baseline-still.trace.json",
+                    },
+                    {
+                        "case_id": "new_failure_case",
+                        "passed": True,
+                        "failure_label": None,
+                        "trace_artifact_path": "baseline-new.trace.json",
+                    },
+                    {
+                        "case_id": "baseline_only_case",
+                        "passed": True,
+                        "failure_label": None,
+                        "trace_artifact_path": "baseline-only.trace.json",
+                    },
+                ],
+            },
+            candidate={
+                "eval_run_id": "candidate",
+                "model": "model-b",
+                "code_commit": "def",
+                "metrics": {"pass_1": 0.75},
+                "failure_analysis": {"failure_label_counts": {"passed": 2}},
+                "report_artifact_path": "candidate-report.json",
+                "results": [
+                    {
+                        "case_id": "fixed_case",
+                        "passed": True,
+                        "failure_label": None,
+                        "trace_artifact_path": "candidate-fixed.trace.json",
+                    },
+                    {
+                        "case_id": "new_failure_case",
+                        "passed": False,
+                        "failure_label": "auth_failure",
+                        "trace_artifact_path": "candidate-new.trace.json",
+                    },
+                    {
+                        "case_id": "still_failing_case",
+                        "passed": False,
+                        "failure_label": "response_mismatch",
+                        "trace_artifact_path": "candidate-still.trace.json",
+                    },
+                    {
+                        "case_id": "candidate_only_case",
+                        "passed": True,
+                        "failure_label": None,
+                        "trace_artifact_path": "candidate-only.trace.json",
+                    },
+                ],
+            },
+        )
+
+        self.assertEqual(comparison["case_deltas"]["overlap_case_count"], 3)
+        self.assertEqual(
+            comparison["case_deltas"]["baseline_only_case_ids"],
+            ["baseline_only_case"],
+        )
+        self.assertEqual(
+            comparison["case_deltas"]["candidate_only_case_ids"],
+            ["candidate_only_case"],
+        )
+        self.assertEqual(
+            comparison["case_deltas"]["fixed"],
+            [
+                {
+                    "case_id": "fixed_case",
+                    "baseline_failure_label": "wrong_tool",
+                    "candidate_failure_label": None,
+                    "baseline_trace_artifact_path": "baseline-fixed.trace.json",
+                    "candidate_trace_artifact_path": "candidate-fixed.trace.json",
+                    "baseline_report_artifact_path": "baseline-report.json",
+                    "candidate_report_artifact_path": "candidate-report.json",
+                }
+            ],
+        )
+        self.assertEqual(
+            comparison["case_deltas"]["new_failures"],
+            [
+                {
+                    "case_id": "new_failure_case",
+                    "baseline_failure_label": None,
+                    "candidate_failure_label": "auth_failure",
+                    "baseline_trace_artifact_path": "baseline-new.trace.json",
+                    "candidate_trace_artifact_path": "candidate-new.trace.json",
+                    "baseline_report_artifact_path": "baseline-report.json",
+                    "candidate_report_artifact_path": "candidate-report.json",
+                }
+            ],
+        )
+        self.assertEqual(
+            comparison["case_deltas"]["still_failing"],
+            [
+                {
+                    "case_id": "still_failing_case",
+                    "baseline_failure_label": "wrong_tool",
+                    "candidate_failure_label": "response_mismatch",
+                    "baseline_trace_artifact_path": "baseline-still.trace.json",
+                    "candidate_trace_artifact_path": "candidate-still.trace.json",
+                    "baseline_report_artifact_path": "baseline-report.json",
+                    "candidate_report_artifact_path": "candidate-report.json",
+                }
+            ],
+        )
+        self.assertEqual(
+            comparison["case_deltas"]["failure_label_changed"],
+            [
+                {
+                    "case_id": "still_failing_case",
+                    "baseline_failure_label": "wrong_tool",
+                    "candidate_failure_label": "response_mismatch",
+                    "baseline_trace_artifact_path": "baseline-still.trace.json",
+                    "candidate_trace_artifact_path": "candidate-still.trace.json",
+                    "baseline_report_artifact_path": "baseline-report.json",
+                    "candidate_report_artifact_path": "candidate-report.json",
+                }
+            ],
+        )
+
+    def test_comparison_artifact_aggregates_multi_trial_cases_deterministically(self):
+        comparison = build_comparison_artifact(
+            baseline={
+                "report_artifact_path": "baseline-report.json",
+                "results": [
+                    {
+                        "case_id": "trial_case",
+                        "trial": 0,
+                        "passed": False,
+                        "failure_label": "wrong_tool",
+                        "trace_artifact_path": "baseline-fail.trace.json",
+                    },
+                    {
+                        "case_id": "trial_case",
+                        "trial": 1,
+                        "passed": True,
+                        "failure_label": None,
+                        "trace_artifact_path": "baseline-pass.trace.json",
+                    },
+                ],
+            },
+            candidate={
+                "report_artifact_path": "candidate-report.json",
+                "results": [
+                    {
+                        "case_id": "trial_case",
+                        "trial": 0,
+                        "passed": True,
+                        "failure_label": None,
+                        "trace_artifact_path": "candidate-pass.trace.json",
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(
+            comparison["case_deltas"]["fixed"],
+            [
+                {
+                    "case_id": "trial_case",
+                    "baseline_failure_label": "wrong_tool",
+                    "candidate_failure_label": None,
+                    "baseline_trace_artifact_path": "baseline-fail.trace.json",
+                    "candidate_trace_artifact_path": "candidate-pass.trace.json",
+                    "baseline_report_artifact_path": "baseline-report.json",
+                    "candidate_report_artifact_path": "candidate-report.json",
+                }
+            ],
+        )
+
+    def test_comparison_artifact_skips_malformed_rows_without_passed_flag(self):
+        comparison = build_comparison_artifact(
+            baseline={
+                "report_artifact_path": "baseline-report.json",
+                "results": [
+                    {
+                        "case_id": "valid_case",
+                        "passed": False,
+                        "failure_label": "wrong_tool",
+                        "trace_artifact_path": "baseline-valid.trace.json",
+                    },
+                    {
+                        "case_id": "malformed_case",
+                        "failure_label": "wrong_tool",
+                        "trace_artifact_path": "baseline-malformed.trace.json",
+                    },
+                ],
+            },
+            candidate={
+                "report_artifact_path": "candidate-report.json",
+                "results": [
+                    {
+                        "case_id": "valid_case",
+                        "passed": True,
+                        "failure_label": None,
+                        "trace_artifact_path": "candidate-valid.trace.json",
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(
+            comparison["case_deltas"]["baseline_only_case_ids"],
+            [],
+        )
+        self.assertEqual(
+            comparison["case_deltas"]["fixed"],
+            [
+                {
+                    "case_id": "valid_case",
+                    "baseline_failure_label": "wrong_tool",
+                    "candidate_failure_label": None,
+                    "baseline_trace_artifact_path": "baseline-valid.trace.json",
+                    "candidate_trace_artifact_path": "candidate-valid.trace.json",
+                    "baseline_report_artifact_path": "baseline-report.json",
+                    "candidate_report_artifact_path": "candidate-report.json",
+                }
+            ],
+        )
+
     def test_generalized_subset_starts_as_curated_regression_copy(self):
         curated_cases = get_cases("curated_mvp")
         generalized_cases = get_cases("generalized_mvp")
@@ -576,6 +814,787 @@ class CuratedEvalTests(unittest.TestCase):
             for result in summary.results:
                 self.assertEqual(result.eval_backend, "scripted")
 
+    def test_replay_run_sets_eval_backend_and_writes_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            case = next(
+                item for item in get_cases("curated_mvp")
+                if item.case_id == "transfer_to_human"
+            )
+            trace_dir = artifact_dir / "replay"
+            _trace_fixture_for_case(trace_dir, case)
+
+            with patch("app.eval.runner.get_cases", return_value=[case]):
+                summary = CuratedEvalRunner(
+                    config=config,
+                    artifact_dir=artifact_dir,
+                    replay_trace_dir=trace_dir,
+                ).run(subset="curated_mvp", trials=1)
+
+            payload = json.loads(
+                Path(summary.result_artifact_path).read_text(encoding="utf-8")
+            )
+            report = json.loads(
+                Path(summary.report_artifact_path).read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(summary.eval_backend, "replay")
+        self.assertEqual(summary.case_count, 1)
+        self.assertEqual(summary.results[0].eval_backend, "replay")
+        self.assertEqual(payload["eval_backend"], "replay")
+        self.assertEqual(payload["results"][0]["eval_backend"], "replay")
+        self.assertEqual(report["eval_backend"], "replay")
+
+    def test_replay_run_indexes_runs_subdir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            case = next(
+                item for item in get_cases("curated_mvp")
+                if item.case_id == "transfer_to_human"
+            )
+            trace_dir = artifact_dir / "replay"
+            _trace_fixture_for_case(trace_dir / "runs", case)
+
+            with patch("app.eval.runner.get_cases", return_value=[case]):
+                summary = CuratedEvalRunner(
+                    config=config,
+                    artifact_dir=artifact_dir,
+                    replay_trace_dir=trace_dir,
+                ).run(subset="curated_mvp", trials=1)
+
+        self.assertEqual(summary.eval_backend, "replay")
+        self.assertEqual(summary.case_count, 1)
+        self.assertEqual(summary.results[0].case_id, case.case_id)
+
+    def test_replay_case_builds_one_case_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            case = next(
+                item for item in get_cases("curated_mvp")
+                if item.case_id == "transfer_to_human"
+            )
+            trace_path = _trace_fixture_for_case(artifact_dir, case)
+
+            summary = CuratedEvalRunner(
+                config=config,
+                artifact_dir=artifact_dir,
+                replay_case_path=trace_path,
+            ).run()
+
+            payload = json.loads(
+                Path(summary.result_artifact_path).read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(summary.eval_backend, "replay")
+        self.assertEqual(summary.case_count, 1)
+        self.assertEqual(summary.results[0].case_id, case.case_id)
+        self.assertEqual(summary.results[0].eval_backend, "replay")
+        self.assertEqual(payload["results"][0]["case_id"], case.case_id)
+        self.assertEqual(payload["results"][0]["trace_artifact_path"], str(trace_path))
+
+    def test_replay_case_projects_legacy_trace_without_llm_responses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            case = next(
+                item for item in get_cases("curated_mvp")
+                if item.case_id == "transfer_to_human"
+            )
+            trace_path = _trace_fixture_for_case(
+                artifact_dir,
+                case,
+                trace_messages=[
+                    *case.messages,
+                    {
+                        "role": "assistant",
+                        "content": case.expected_assistant_contains,
+                    },
+                ],
+                llm_responses=[],
+            )
+
+            summary = CuratedEvalRunner(
+                config=config,
+                artifact_dir=artifact_dir,
+                replay_case_path=trace_path,
+            ).run()
+
+        self.assertEqual(summary.eval_backend, "replay")
+        self.assertEqual(summary.results[0].case_id, case.case_id)
+        self.assertTrue(summary.results[0].passed)
+        self.assertEqual(summary.results[0].llm_loop_iterations, 0)
+
+    def test_replay_case_legacy_trace_requires_final_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            case = next(
+                item for item in get_cases("curated_mvp")
+                if item.case_id == "transfer_to_human"
+            )
+            trace_path = _trace_fixture_for_case(
+                artifact_dir,
+                case,
+                trace_messages=[
+                    *case.messages,
+                    {
+                        "role": "assistant",
+                        "content": case.expected_assistant_contains,
+                    },
+                ],
+                llm_responses=[],
+            )
+            trace = json.loads(trace_path.read_text(encoding="utf-8"))
+            trace.pop("final_state", None)
+            trace_path.write_text(json.dumps(trace), encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Legacy replay trace is missing required fields",
+            ):
+                CuratedEvalRunner(
+                    config=config,
+                    artifact_dir=artifact_dir,
+                    replay_case_path=trace_path,
+                ).run()
+
+    def test_replay_case_recovers_case_id_from_final_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            case = next(
+                item for item in get_cases("curated_mvp")
+                if item.case_id == "transfer_to_human"
+            )
+            trace_path = _trace_fixture_for_case(artifact_dir, case)
+            trace = json.loads(trace_path.read_text(encoding="utf-8"))
+            trace["metadata"].pop("task_id", None)
+            trace.pop("task_id", None)
+            trace["final_state"]["task_id"] = case.case_id
+            trace_path.write_text(json.dumps(trace), encoding="utf-8")
+
+            summary = CuratedEvalRunner(
+                config=config,
+                artifact_dir=artifact_dir,
+                replay_case_path=trace_path,
+            ).run()
+
+        self.assertEqual(summary.eval_backend, "replay")
+        self.assertEqual(summary.results[0].case_id, case.case_id)
+
+    def test_replay_run_projects_legacy_traces_from_runs_subdir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            case = next(
+                item for item in get_cases("curated_mvp")
+                if item.case_id == "transfer_to_human"
+            )
+            trace_dir = artifact_dir / "replay"
+            _trace_fixture_for_case(
+                trace_dir / "runs",
+                case,
+                trace_messages=[
+                    *case.messages,
+                    {
+                        "role": "assistant",
+                        "content": case.expected_assistant_contains,
+                    },
+                ],
+                llm_responses=[],
+            )
+
+            with patch("app.eval.runner.get_cases", return_value=[case]):
+                summary = CuratedEvalRunner(
+                    config=config,
+                    artifact_dir=artifact_dir,
+                    replay_trace_dir=trace_dir,
+                ).run(subset="curated_mvp", trials=1)
+
+        self.assertEqual(summary.eval_backend, "replay")
+        self.assertEqual(summary.case_count, 1)
+        self.assertTrue(summary.results[0].passed)
+        self.assertEqual(summary.results[0].case_id, case.case_id)
+
+    def test_replay_case_missing_trace_raises_explicit_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            missing_trace = Path(tmp) / "missing-trace.json"
+
+            with self.assertRaisesRegex(
+                FileNotFoundError,
+                re.escape(f"Replay trace file not found: {missing_trace}"),
+            ):
+                CuratedEvalRunner(
+                    config=config,
+                    artifact_dir=Path(tmp),
+                    replay_case_path=missing_trace,
+                ).run()
+
+    def test_replay_case_resolution_searches_tau_subset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            tau_case = EvalCase(
+                case_id="tau_transfer_case",
+                category="transfer",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "Please connect me to a human.",
+                    }
+                ],
+                expected_user_id="tau_user",
+                expected_intent="transfer",
+                expected_tool_names=["transfer_to_human_agents"],
+                subset="tau_retail_smoke",
+            )
+            trace_path = _trace_fixture_for_case(artifact_dir, tau_case)
+            requested_subsets: list[str] = []
+
+            def fake_get_cases(subset: str):
+                requested_subsets.append(subset)
+                if subset == "tau_retail_smoke":
+                    return [tau_case]
+                return []
+
+            with patch("app.eval.runner.get_cases", side_effect=fake_get_cases):
+                summary = CuratedEvalRunner(
+                    config=config,
+                    artifact_dir=artifact_dir,
+                    replay_case_path=trace_path,
+                ).run()
+
+        self.assertEqual(summary.results[0].case_id, tau_case.case_id)
+        self.assertIn("tau_retail_smoke", requested_subsets)
+
+    def test_replay_case_resolution_accepts_none_subset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            case = next(
+                item for item in get_cases("curated_mvp")
+                if item.case_id == "transfer_to_human"
+            )
+            trace_path = _trace_fixture_for_case(artifact_dir, case)
+
+            requested_subsets: list[str] = []
+
+            def fake_get_cases(subset: str):
+                requested_subsets.append(subset)
+                if subset is None:
+                    raise AssertionError("get_cases(None) should not be called")
+                return [case]
+
+            with patch("app.eval.runner.get_cases", side_effect=fake_get_cases):
+                summary = CuratedEvalRunner(
+                    config=config,
+                    artifact_dir=artifact_dir,
+                    replay_case_path=trace_path,
+                ).run(subset=None)
+
+        self.assertEqual(summary.results[0].case_id, case.case_id)
+        self.assertEqual(summary.eval_backend, "replay")
+        self.assertTrue(requested_subsets)
+
+    def test_replay_case_does_not_seed_authenticated_user_from_final_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            case = next(
+                item for item in get_cases("curated_mvp")
+                if item.case_id == "transfer_to_human"
+            )
+            trace_path = _trace_fixture_for_case(
+                artifact_dir,
+                case,
+                final_state_overrides={
+                    "authenticated_user_id": case.expected_user_id,
+                },
+            )
+
+            summary = CuratedEvalRunner(
+                config=config,
+                artifact_dir=artifact_dir,
+                replay_case_path=trace_path,
+            ).run()
+
+        self.assertIsNone(summary.results[0].authenticated_user_id)
+        self.assertEqual(summary.results[0].failure_label, "auth_failure")
+
+    def test_replay_case_prefers_successful_write_order_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            case = EvalCase(
+                case_id="replay_write_status_case",
+                category="cancel",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "My email is test@example.com. Cancel order #W1 because no longer needed.",
+                    }
+                ],
+                expected_user_id="user_1",
+                expected_intent="cancel_order",
+                order_id="#W1",
+                expected_order_status="cancelled",
+                expected_tool_names=[
+                    "find_user_id_by_email",
+                    "cancel_pending_order",
+                ],
+                subset="curated_mvp",
+            )
+            trace_path = _trace_fixture_for_case(
+                artifact_dir,
+                case,
+                llm_responses=[
+                    {
+                        "assistant_content": "Let me verify your account.",
+                        "tool_calls": [
+                            {
+                                "id": "call_auth",
+                                "tool_name": "find_user_id_by_email",
+                                "arguments": {"email": "test@example.com"},
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                    {
+                        "assistant_content": "I'll cancel the order now.",
+                        "tool_calls": [
+                            {
+                                "id": "call_cancel",
+                                "tool_name": "cancel_pending_order",
+                                "arguments": {
+                                    "order_id": "#W1",
+                                    "reason": "no longer needed",
+                                },
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                    {
+                        "assistant_content": "Your order is cancelled.",
+                        "tool_calls": [],
+                        "finish_reason": "stop",
+                    },
+                ],
+                tool_calls=[
+                    {
+                        "tool_name": "find_user_id_by_email",
+                        "arguments": {"email": "test@example.com"},
+                        "tool_kind": "read",
+                        "status": "success",
+                        "observation": "user_1",
+                    },
+                    {
+                        "tool_name": "cancel_pending_order",
+                        "arguments": {
+                            "order_id": "#W1",
+                            "reason": "no longer needed",
+                        },
+                        "tool_kind": "write",
+                        "status": "success",
+                        "observation": {"order_id": "#W1", "status": "cancelled"},
+                    },
+                ],
+                final_state_overrides={
+                    "authenticated_user_id": "spoofed_user",
+                    "confirmation_status": "confirmed",
+                },
+            )
+
+            with patch("app.eval.runner.get_cases", return_value=[case]):
+                summary = CuratedEvalRunner(
+                    config=config,
+                    artifact_dir=artifact_dir,
+                    replay_case_path=trace_path,
+                ).run()
+
+        self.assertEqual(summary.results[0].authenticated_user_id, "user_1")
+        self.assertEqual(summary.results[0].actual_order_status, "cancelled")
+        self.assertTrue(summary.results[0].passed)
+
+    def test_replay_case_replays_confirmation_yes_via_confirm_branch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            case = EvalCase(
+                case_id="replay_confirm_yes_case",
+                category="cancel",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "My email is test@example.com. Cancel order #W1 because no longer needed.",
+                    },
+                    {"role": "user", "content": "yes"},
+                ],
+                expected_user_id="user_1",
+                expected_intent="cancel_order",
+                order_id="#W1",
+                expected_order_status="cancelled",
+                expected_confirmation_status="confirmed",
+                expected_tool_names=[
+                    "find_user_id_by_email",
+                    "cancel_pending_order",
+                ],
+                subset="curated_mvp",
+            )
+            trace_path = _trace_fixture_for_case(
+                artifact_dir,
+                case,
+                llm_responses=[
+                    {
+                        "assistant_content": "Let me verify your account.",
+                        "tool_calls": [
+                            {
+                                "id": "call_auth",
+                                "tool_name": "find_user_id_by_email",
+                                "arguments": {"email": "test@example.com"},
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                    {
+                        "assistant_content": "I can cancel that order for you.",
+                        "tool_calls": [
+                            {
+                                "id": "call_cancel",
+                                "tool_name": "cancel_pending_order",
+                                "arguments": {
+                                    "order_id": "#W1",
+                                    "reason": "no longer needed",
+                                },
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                ],
+                tool_calls=[
+                    {
+                        "tool_name": "find_user_id_by_email",
+                        "arguments": {"email": "test@example.com"},
+                        "tool_kind": "read",
+                        "status": "success",
+                        "observation": "user_1",
+                    },
+                    {
+                        "tool_name": "cancel_pending_order",
+                        "arguments": {
+                            "order_id": "#W1",
+                            "reason": "no longer needed",
+                        },
+                        "tool_kind": "write",
+                        "status": "blocked",
+                        "error": "explicit_confirmation_required",
+                    },
+                    {
+                        "tool_name": "cancel_pending_order",
+                        "arguments": {
+                            "order_id": "#W1",
+                            "reason": "no longer needed",
+                        },
+                        "tool_kind": "write",
+                        "status": "success",
+                        "observation": {"order_id": "#W1", "status": "cancelled"},
+                        "resource_lock": "order:#W1:cancel",
+                    },
+                ],
+                final_state_overrides={
+                    "confirmation_status": "confirmed",
+                },
+            )
+
+            with patch("app.eval.runner.get_cases", return_value=[case]):
+                summary = CuratedEvalRunner(
+                    config=config,
+                    artifact_dir=artifact_dir,
+                    replay_case_path=trace_path,
+                ).run()
+
+        self.assertTrue(summary.results[0].passed)
+        self.assertEqual(summary.results[0].actual_confirmation_status, "confirmed")
+        self.assertEqual(summary.results[0].actual_order_status, "cancelled")
+        self.assertEqual(summary.results[0].tool_call_count, 3)
+        self.assertEqual(summary.results[0].write_locks, ["order:#W1:cancel"])
+
+    def test_replay_case_unknown_confirmation_falls_back_to_agent_loop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            case = EvalCase(
+                case_id="replay_confirm_unknown_case",
+                category="cancel",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "My email is test@example.com. Cancel order #W1 because no longer needed.",
+                    },
+                    {"role": "user", "content": "Can you explain a bit more?"},
+                ],
+                expected_user_id="user_1",
+                expected_intent="cancel_order",
+                expected_confirmation_status="required",
+                expected_tool_names=[
+                    "find_user_id_by_email",
+                    "cancel_pending_order",
+                ],
+                subset="curated_mvp",
+            )
+            trace_path = _trace_fixture_for_case(
+                artifact_dir,
+                case,
+                llm_responses=[
+                    {
+                        "assistant_content": "Let me verify your account.",
+                        "tool_calls": [
+                            {
+                                "id": "call_auth",
+                                "tool_name": "find_user_id_by_email",
+                                "arguments": {"email": "test@example.com"},
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                    {
+                        "assistant_content": "I can cancel that order for you.",
+                        "tool_calls": [
+                            {
+                                "id": "call_cancel",
+                                "tool_name": "cancel_pending_order",
+                                "arguments": {
+                                    "order_id": "#W1",
+                                    "reason": "no longer needed",
+                                },
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                    {
+                        "assistant_content": "Please answer yes or no so I know whether to proceed.",
+                        "tool_calls": [],
+                        "finish_reason": "stop",
+                    },
+                ],
+                tool_calls=[
+                    {
+                        "tool_name": "find_user_id_by_email",
+                        "arguments": {"email": "test@example.com"},
+                        "tool_kind": "read",
+                        "status": "success",
+                        "observation": "user_1",
+                    },
+                    {
+                        "tool_name": "cancel_pending_order",
+                        "arguments": {
+                            "order_id": "#W1",
+                            "reason": "no longer needed",
+                        },
+                        "tool_kind": "write",
+                        "status": "blocked",
+                        "error": "explicit_confirmation_required",
+                    },
+                ],
+                final_state_overrides={
+                    "confirmation_status": "confirmed",
+                },
+            )
+
+            with patch("app.eval.runner.get_cases", return_value=[case]):
+                summary = CuratedEvalRunner(
+                    config=config,
+                    artifact_dir=artifact_dir,
+                    replay_case_path=trace_path,
+                ).run()
+
+        self.assertEqual(summary.results[0].actual_confirmation_status, "required")
+        self.assertEqual(summary.results[0].message_count, 4)
+        self.assertEqual(summary.results[0].tool_call_count, 2)
+        self.assertEqual(summary.results[0].failure_label, "confirmation_failure")
+
+    def test_replay_case_uses_replayed_confirmation_status_not_final_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            case = EvalCase(
+                case_id="replay_confirm_denied_case",
+                category="cancel",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "My email is test@example.com. Cancel order #W1 because no longer needed.",
+                    },
+                    {"role": "user", "content": "no"},
+                ],
+                expected_user_id="user_1",
+                expected_intent="cancel_order",
+                expected_confirmation_status="confirmed",
+                expected_tool_names=[
+                    "find_user_id_by_email",
+                    "cancel_pending_order",
+                ],
+                subset="curated_mvp",
+            )
+            trace_path = _trace_fixture_for_case(
+                artifact_dir,
+                case,
+                llm_responses=[
+                    {
+                        "assistant_content": "Let me verify your account.",
+                        "tool_calls": [
+                            {
+                                "id": "call_auth",
+                                "tool_name": "find_user_id_by_email",
+                                "arguments": {"email": "test@example.com"},
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                    {
+                        "assistant_content": "I can cancel that order for you.",
+                        "tool_calls": [
+                            {
+                                "id": "call_cancel",
+                                "tool_name": "cancel_pending_order",
+                                "arguments": {
+                                    "order_id": "#W1",
+                                    "reason": "no longer needed",
+                                },
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                ],
+                tool_calls=[
+                    {
+                        "tool_name": "find_user_id_by_email",
+                        "arguments": {"email": "test@example.com"},
+                        "tool_kind": "read",
+                        "status": "success",
+                        "observation": "user_1",
+                    },
+                    {
+                        "tool_name": "cancel_pending_order",
+                        "arguments": {
+                            "order_id": "#W1",
+                            "reason": "no longer needed",
+                        },
+                        "tool_kind": "write",
+                        "status": "blocked",
+                        "error": "explicit_confirmation_required",
+                    },
+                ],
+                final_state_overrides={
+                    "confirmation_status": "confirmed",
+                },
+            )
+
+            with patch("app.eval.runner.get_cases", return_value=[case]):
+                summary = CuratedEvalRunner(
+                    config=config,
+                    artifact_dir=artifact_dir,
+                    replay_case_path=trace_path,
+                ).run()
+
+        self.assertEqual(summary.results[0].actual_confirmation_status, "denied")
+        self.assertEqual(
+            summary.results[0].failure_label,
+            "confirmation_status_mismatch",
+        )
+
+    def test_replay_case_raises_on_unconsumed_tool_results(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            case = EvalCase(
+                case_id="replay_orphan_tool_case",
+                category="transfer",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "My email is test@example.com. Please transfer me to a human.",
+                    }
+                ],
+                expected_user_id="user_1",
+                expected_intent="transfer",
+                expected_tool_names=[
+                    "find_user_id_by_email",
+                    "transfer_to_human_agents",
+                ],
+                subset="curated_mvp",
+            )
+            trace_path = _trace_fixture_for_case(
+                artifact_dir,
+                case,
+                llm_responses=[
+                    {
+                        "assistant_content": "Let me verify your account.",
+                        "tool_calls": [
+                            {
+                                "id": "call_auth",
+                                "tool_name": "find_user_id_by_email",
+                                "arguments": {"email": "test@example.com"},
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                    {
+                        "assistant_content": "I'll transfer you now.",
+                        "tool_calls": [
+                            {
+                                "id": "call_transfer",
+                                "tool_name": "transfer_to_human_agents",
+                                "arguments": {"summary": "user requested human support"},
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                    {
+                        "assistant_content": "YOU ARE BEING TRANSFERRED TO A HUMAN AGENT. PLEASE HOLD ON.",
+                        "tool_calls": [],
+                        "finish_reason": "stop",
+                    },
+                ],
+                tool_calls=[
+                    {
+                        "tool_name": "find_user_id_by_email",
+                        "arguments": {"email": "test@example.com"},
+                        "tool_kind": "read",
+                        "status": "success",
+                        "observation": "user_1",
+                    },
+                    {
+                        "tool_name": "transfer_to_human_agents",
+                        "arguments": {"summary": "user requested human support"},
+                        "tool_kind": "generic",
+                        "status": "success",
+                        "observation": "transferred",
+                    },
+                    {
+                        "tool_name": "get_order_details",
+                        "arguments": {"order_id": "#W999"},
+                        "tool_kind": "read",
+                        "status": "success",
+                        "observation": {"order_id": "#W999", "status": "pending"},
+                    },
+                ],
+            )
+
+            with patch("app.eval.runner.get_cases", return_value=[case]):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "Unconsumed replay tool results remain",
+                ):
+                    CuratedEvalRunner(
+                        config=config,
+                        artifact_dir=artifact_dir,
+                        replay_case_path=trace_path,
+                    ).run()
+
 
 def _result(
     case_id: str,
@@ -616,6 +1635,77 @@ def _result(
         db_accuracy_basis="test",
         trial_turn_count=1,
     )
+
+
+def _trace_fixture_for_case(
+    base_dir: Path,
+    case: EvalCase,
+    *,
+    trace_messages: list[dict] | None = None,
+    llm_responses: list[dict] | None = None,
+    tool_calls: list[dict] | None = None,
+    final_state_overrides: dict | None = None,
+) -> Path:
+    trace_dir = Path(base_dir)
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    trace_path = trace_dir / f"{case.case_id}.json"
+    if llm_responses is None:
+        llm_responses = [
+            {
+                "assistant_content": "Let me transfer you.",
+                "tool_calls": [
+                    {
+                        "id": "call_transfer",
+                        "tool_name": "transfer_to_human_agents",
+                        "arguments": {"summary": "user requested a human agent"},
+                    }
+                ],
+                "finish_reason": "tool_calls",
+            },
+            {
+                "assistant_content": (
+                    "YOU ARE BEING TRANSFERRED TO A HUMAN AGENT. PLEASE HOLD ON."
+                ),
+                "tool_calls": [],
+                "finish_reason": "stop",
+            },
+        ]
+    if tool_calls is None:
+        tool_calls = [
+            {
+                "tool_name": "transfer_to_human_agents",
+                "arguments": {"summary": "user requested a human agent"},
+                "tool_kind": "generic",
+                "status": "success",
+                "observation": "transferred",
+            }
+        ]
+    final_state = {
+        "session_id": f"trace-{case.case_id}",
+        "task_id": case.case_id,
+        "authenticated_user_id": case.expected_user_id,
+        "confirmation_status": "not_required",
+        "write_locks": [],
+        "termination_reason": "script_completed",
+    }
+    if final_state_overrides:
+        final_state.update(final_state_overrides)
+    if trace_messages is None:
+        trace_messages = case.messages
+    trace = {
+        "run_id": f"replay-{case.case_id}",
+        "metadata": {
+            "task_id": case.case_id,
+            "initial_db_hash": "same",
+            "final_db_hash": "same",
+        },
+        "messages": trace_messages,
+        "llm_responses": llm_responses,
+        "tool_calls": tool_calls,
+        "final_state": final_state,
+    }
+    trace_path.write_text(json.dumps(trace), encoding="utf-8")
+    return trace_path
 
 
 class TimingTests(unittest.TestCase):
