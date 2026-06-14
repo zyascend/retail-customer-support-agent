@@ -88,8 +88,10 @@ class AgentRuntime:
         provider: Optional[LLMProvider] = None,
         require_llm: bool = False,
         runtime: Optional[RetailRuntime] = None,
+        offline_demo: bool = False,
     ) -> None:
         self.config = config
+        self.offline_demo = offline_demo
         if runtime is not None:
             self.retail_runtime = runtime
         else:
@@ -150,6 +152,10 @@ class AgentRuntime:
             metadata={
                 "runtime_source": self.retail_runtime.source,
                 "model": self.config.default_agent_model,
+                "runtime_backend": (
+                    "offline_demo" if self.offline_demo else "llm_tool_calling"
+                ),
+                "offline_demo": self.offline_demo,
                 "llm_enabled": self.provider is not None,
                 "llm_timeout_seconds": self.config.agent_llm_timeout_seconds,
                 "llm_max_retries": self.config.agent_llm_max_retries,
@@ -189,14 +195,23 @@ class AgentRuntime:
             self._preflight_identity(session, content)
 
         # 3. LLM agent loop
-        # Phase 7: fall back to deterministic provider when no LLM configured
         provider = self.provider
         if provider is None or isinstance(provider, DeterministicProvider):
-            # Deterministic mode: handle write intents directly before AgentLoop.
-            # DeterministicProvider.chat_with_tools() never returns tool_calls,
-            # so the confirmation flow (pending_action → guard → confirm) never
-            # activates through AgentLoop alone.  This fast path bridges the gap.
-            write_result = self._deterministic_write_intent(session, content)
+            if not self.offline_demo:
+                msg = (
+                    "I'm unable to process this request without an LLM provider. "
+                    "Let me transfer you to a human agent."
+                )
+                session.add_step("provider_unavailable", offline_demo=False)
+                session.messages.append(Message(role="assistant", content=msg))
+                session.step_durations["handle_user_message"] = round(
+                    (time.perf_counter() - t0) * 1000, 1
+                )
+                return msg
+
+            # Offline demo harness: keep local scripted demos useful without
+            # treating rule parsing as the production runtime.
+            write_result = self._offline_demo_intent(session, content)
             if write_result is not None:
                 session.step_durations["handle_user_message"] = round(
                     (time.perf_counter() - t0) * 1000, 1
@@ -204,7 +219,7 @@ class AgentRuntime:
                 return write_result
 
             provider = DeterministicProvider()
-            session.add_step("deterministic_fallback")
+            session.add_step("offline_demo_harness")
 
         loop = AgentLoop(
             provider=provider,
@@ -330,7 +345,7 @@ class AgentRuntime:
                     "preflight_identity", method="name_zip", user_id=user_id
                 )
 
-    # ── Deterministic write intent: bridges the gap when no LLM is available ──
+    # ── Offline demo intent: explicit harness when no LLM is available ──
 
     _ORDER_RE = re.compile(r"#W\d+")
     _ITEM_RE = re.compile(r"\b\d{10}\b")
@@ -345,7 +360,7 @@ class AgentRuntime:
         re.IGNORECASE,
     )
 
-    def _deterministic_write_intent(
+    def _offline_demo_intent(
         self, session: SessionState, content: str
     ) -> Optional[str]:
         """Detect write intents from user message and execute via gateway.
@@ -499,7 +514,7 @@ class AgentRuntime:
         *,
         read_only: bool = False,
     ) -> Optional[str]:
-        """Execute a deterministic tool call and handle guard/confirmation flow."""
+        """Execute an offline-demo tool call and handle guard/confirmation flow."""
         # Auto-load order context before write
         order_id = arguments.get("order_id")
         if order_id and tool_name != "transfer_to_human_agents":
@@ -535,7 +550,7 @@ class AgentRuntime:
                     )
                     session.confirmation_status = "required"
                     session.add_step(
-                        "deterministic_write_intent",
+                        "offline_demo_intent",
                         tool_name=tool_name,
                         status="pending_confirmation",
                     )

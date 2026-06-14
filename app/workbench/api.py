@@ -14,7 +14,7 @@ from app.workbench.session import WorkbenchSessionManager
 
 
 class CreateSessionRequest(BaseModel):
-    mode: str = "deterministic"
+    mode: str = "offline_demo"
     case_id: Optional[str] = None
 
 
@@ -58,7 +58,7 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     @app.get("/api/workbench/config")
     def get_workbench_config() -> dict[str, Any]:
         return {
-            "default_mode": "deterministic",
+            "default_mode": "offline_demo",
             "llm_available": bool(resolved_config.deepseek_api_key),
             "model": resolved_config.default_agent_model,
             "case_catalog": build_case_catalog(),

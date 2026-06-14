@@ -133,6 +133,46 @@ class TestAgentLoopReadTools:
         assert session.tool_results[0].tool_name == "get_order_details"
         assert session.tool_results[0].status == "success"
 
+    def test_order_status_is_visible_in_tool_observation(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+        from app.agent.models import ToolCallRequest
+
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_1",
+                            tool_name="get_order_details",
+                            arguments={"order_id": "#W5918442"},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                ToolCallResponse(
+                    assistant_content="Your order #W5918442 is pending.",
+                    finish_reason="stop",
+                ),
+            ]
+        )
+        loop = AgentLoop(
+            provider=provider,
+            gateway=_gateway(),
+            registry=_registry(),
+            context_builder=_context_builder(),
+        )
+
+        loop.run_turn(_session(), "What is the status of order #W5918442?")
+
+        second_call_messages = provider.calls[1]["messages"]
+        tool_messages = [
+            message
+            for message in second_call_messages
+            if message.get("role") == "tool"
+        ]
+        assert tool_messages
+        assert '"status":"pending"' in tool_messages[-1]["content"]
+
     def test_multi_read_tool_sequence(self) -> None:
         from app.agent.llm_agent import AgentLoop
         from app.agent.models import ToolCallRequest

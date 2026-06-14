@@ -527,7 +527,7 @@ pre {
   position: relative;
 }
 
-/* Step (pipeline node) = circle */
+/* Runtime step = circle */
 .marker-step {
   border-radius: 50%;
 }

@@ -104,8 +104,7 @@ class AgentStep(BaseModel):
 class SessionState(BaseModel):
     """Cross-turn persistent state.
 
-    Replaces ConversationState's session-level fields. Phase 4 will make
-    this the primary state object when the old pipeline is removed.
+    Primary state object for runtime turns and trace artifacts.
     """
     session_id: str
     task_id: Optional[str] = None

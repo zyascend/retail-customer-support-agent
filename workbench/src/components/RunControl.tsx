@@ -114,7 +114,7 @@ export function RunControl({
           onChange={(event) => onModeChange(event.target.value as WorkbenchMode)}
           value={snapshot.mode}
         >
-          <option value="deterministic">{modeLabel("deterministic")}</option>
+          <option value="offline_demo">{modeLabel("offline_demo")}</option>
           <option disabled={!llmAvailable} value="llm">
             {llmAvailable ? modeLabel("llm") : "LLM 不可用"}
           </option>

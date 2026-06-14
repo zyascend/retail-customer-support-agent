@@ -22,13 +22,13 @@ from app.workbench.snapshot import snapshot_from_state
 class WorkbenchSession:
     config: AppConfig
     session_id: str
-    mode: str = "deterministic"
+    mode: str = "offline_demo"
     selected_case: Optional[EvalCase] = None
     script_cursor: int = 0
 
     def __post_init__(self) -> None:
         self._lock = RLock()
-        _validate_mode(self.mode, self.config)
+        self.mode = _validate_mode(self.mode, self.config)
         self.last_error: Optional[Dict[str, Any]] = None
         self.trace_artifact_path: Optional[str] = None
         self.initial_db_hash: Optional[str] = None
@@ -53,8 +53,10 @@ class WorkbenchSession:
         self, case_id: Optional[str] = None, mode: Optional[str] = None
     ) -> Dict[str, Any]:
         with self._lock:
-            next_mode = mode if mode is not None else self.mode
-            _validate_mode(next_mode, self.config)
+            next_mode = _validate_mode(
+                mode if mode is not None else self.mode,
+                self.config,
+            )
             next_selected_case = (
                 _get_case_or_raise(case_id)
                 if case_id is not None
@@ -164,7 +166,7 @@ class WorkbenchSession:
         mode: str,
         selected_case: Optional[EvalCase],
     ) -> tuple[AgentRuntime, SessionState, str]:
-        provider = DisabledLLMProvider() if mode == "deterministic" else None
+        provider = DisabledLLMProvider() if mode == "offline_demo" else None
 
         # If this is a synthetic case, use SyntheticRetailAdapter
         runtime_kwargs = {}
@@ -182,6 +184,7 @@ class WorkbenchSession:
             self.config,
             provider=provider,
             require_llm=mode == "llm",
+            offline_demo=mode == "offline_demo",
             **runtime_kwargs,
         )
         state = SessionState(
@@ -308,6 +311,8 @@ class WorkbenchSession:
             "runtime_source": runtime.retail_runtime.source,
             "model": self.config.default_agent_model,
             "mode": mode,
+            "runtime_backend": mode,
+            "offline_demo": mode == "offline_demo",
             "llm_available": self.llm_available,
             "llm_enabled": runtime.provider is not None,
             "llm_timeout_seconds": self.config.agent_llm_timeout_seconds,
@@ -336,9 +341,9 @@ class WorkbenchSessionManager:
         self._sessions: Dict[str, WorkbenchSession] = {}
 
     def create_session(
-        self, mode: str = "deterministic", case_id: Optional[str] = None
+        self, mode: str = "offline_demo", case_id: Optional[str] = None
     ) -> WorkbenchSession:
-        _validate_mode(mode, self.config)
+        mode = _validate_mode(mode, self.config)
         selected_case = _get_case_or_raise(case_id) if case_id is not None else None
         session_id = f"workbench-{uuid.uuid4().hex[:12]}"
         session = WorkbenchSession(
@@ -376,12 +381,12 @@ def _get_case_or_raise(case_id: str) -> EvalCase:
         ) from exc
 
 
-def _validate_mode(mode: str, config: AppConfig) -> None:
-    if mode == "deterministic":
-        return
+def _validate_mode(mode: str, config: AppConfig) -> str:
+    if mode in {"offline_demo", "deterministic"}:
+        return "offline_demo"
     if mode == "llm":
         if config.deepseek_api_key:
-            return
+            return "llm"
         raise WorkbenchAPIError(
             code="llm_unavailable",
             message="LLM mode requires DEEPSEEK_API_KEY.",
@@ -392,6 +397,6 @@ def _validate_mode(mode: str, config: AppConfig) -> None:
         code="invalid_mode",
         message="Unsupported workbench session mode.",
         recoverable=True,
-        details={"mode": mode, "supported_modes": ["deterministic", "llm"]},
+        details={"mode": mode, "supported_modes": ["offline_demo", "llm"]},
         status_code=400,
     )

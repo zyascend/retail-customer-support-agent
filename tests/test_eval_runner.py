@@ -427,8 +427,8 @@ class CuratedEvalTests(unittest.TestCase):
             ).run(subset="generalized_mvp", trials=1)
 
             self.assertGreaterEqual(summary.case_count, 30)
-            # Phase 7: DeterministicProvider yields 0 passes; eval infrastructure
-            # still runs correctly — only verify it doesn't crash on the subset.
+            # Offline demo harness is not a generalized pass-rate gate; this
+            # verifies the subset still runs without mutation/tool errors.
             self.assertEqual(summary.metrics["mutation_error_rate"], 0.0)
             self.assertEqual(summary.metrics["tool_error_rate"], 0.0)
 
