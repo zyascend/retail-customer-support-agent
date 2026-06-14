@@ -129,6 +129,15 @@ class RetailAdapterTests(unittest.TestCase):
         self.assertIn("parameters:", catalog)
         self.assertIn("constraints:", catalog)
 
+    def test_get_item_details_includes_product_id_and_name(self):
+        runtime = RetailAdapter(resolve_config()).create_runtime()
+
+        item = runtime.tools.get_item_details("6469567736")
+
+        self.assertEqual(item["item_id"], "6469567736")
+        self.assertEqual(item["product_id"], "8310926033")
+        self.assertEqual(item["name"], "Water Bottle")
+
 
 class ConfirmationResolverTests(unittest.TestCase):
     def setUp(self):
