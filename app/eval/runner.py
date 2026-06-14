@@ -545,13 +545,7 @@ class CuratedEvalRunner:
         )
         harness = TraceReplayHarness(trace_path, runtime.registry)
         if not harness.has_llm_responses:
-            return self._project_legacy_replay_case(
-                harness=harness,
-                eval_run_id=eval_run_id,
-                case=case,
-                trial=trial,
-                trace_path=trace_path,
-            )
+            raise ValueError(f"Replay trace is missing llm_responses: {trace_path}")
         final_state = harness.final_state
         confirmation_resolver = ConfirmationResolver()
         session = SessionState(
@@ -688,126 +682,6 @@ class CuratedEvalRunner:
                 "task_id": case.case_id,
                 "trace_artifact_path": str(trace_path),
                 "trial": trial,
-            },
-            db_assertion_failures=[],
-        )
-        apply_case_diagnostics(result, case)
-        return result
-
-    def _project_legacy_replay_case(
-        self,
-        *,
-        harness: TraceReplayHarness,
-        eval_run_id: str,
-        case: EvalCase,
-        trial: int,
-        trace_path: Path,
-    ) -> EvalCaseResult:
-        final_state = harness.final_state
-        messages = harness.messages
-        if not messages or not isinstance(final_state, dict) or not final_state:
-            raise ValueError(
-                f"Legacy replay trace is missing required fields: {trace_path}"
-            )
-
-        tool_records = harness.tool_results
-        actual_order_status = self._replay_order_status(case, tool_records)
-        guard_block_reasons = [
-            str(record.error)
-            for record in tool_records
-            if record.status == "blocked" and record.error
-        ]
-        tool_errors = sum(1 for record in tool_records if record.status == "error")
-        guard_blocks = sum(
-            1
-            for record in tool_records
-            if record.status == "blocked"
-            and record.error != "explicit_confirmation_required"
-        )
-        successful_tool_calls = sum(
-            1 for record in tool_records if record.status == "success"
-        )
-        assistant_messages = [
-            str(message.get("content", ""))
-            for message in messages
-            if message.get("role") == "assistant"
-        ]
-        user_messages = [
-            str(message.get("content", ""))
-            for message in messages
-            if message.get("role") == "user"
-        ]
-        write_locks = list(final_state.get("write_locks") or [])
-        confirmation_status = str(
-            final_state.get("confirmation_status") or "not_required"
-        )
-        failure_label = classify_failure(
-            case=case,
-            authenticated_user_id=final_state.get("authenticated_user_id"),
-            final_intent="",
-            write_locks=write_locks,
-            actual_order_status=actual_order_status,
-            assistant_messages=assistant_messages,
-            tool_names=[record.tool_name for record in tool_records],
-            guard_block_reasons=guard_block_reasons,
-            tool_errors=tool_errors,
-            guard_blocks=guard_blocks,
-            pending_action=bool(final_state.get("pending_action")),
-            llm_errors=0,
-            confirmation_status=confirmation_status,
-            db_assertion_failures=[],
-        )
-        result = EvalCaseResult(
-            run_id=str(harness.run_id or harness.task_id or case.case_id),
-            session_id=str(
-                final_state.get("session_id")
-                or f"{eval_run_id}-{case.case_id}-trial-{trial}"
-            ),
-            case_id=case.case_id,
-            category=case.category,
-            trial=trial,
-            scenario_family=case.scenario_family or case.capability,
-            variant_type=case.variant_type or case.case_id,
-            language_variation_level=case.language_variation_level,
-            seed=getattr(case, "seed", None),
-            passed=failure_label is None,
-            failure_label=failure_label,
-            eval_backend="replay",
-            llm_token_usage=None,
-            llm_loop_iterations=0,
-            trace_artifact_path=str(trace_path),
-            authenticated_user_id=final_state.get("authenticated_user_id"),
-            final_intent="",
-            termination_reason=final_state.get("termination_reason"),
-            expected_write_lock=case.expected_write_lock,
-            write_locks=write_locks,
-            expected_order_status=case.expected_order_status,
-            actual_order_status=actual_order_status,
-            expected_confirmation_status=case.expected_confirmation_status,
-            actual_confirmation_status=confirmation_status,
-            expected_guard_block_reason=case.expected_guard_block_reason,
-            actual_guard_block_reasons=guard_block_reasons,
-            initial_db_hash=harness.metadata.get("initial_db_hash"),
-            final_db_hash=harness.metadata.get("final_db_hash"),
-            order_status_before=None,
-            order_status_after=actual_order_status,
-            duration_seconds=0.0,
-            tool_errors=tool_errors,
-            guard_blocks=guard_blocks,
-            tool_call_count=len(tool_records),
-            successful_tool_calls=successful_tool_calls,
-            failed_tool_calls=tool_errors,
-            blocked_tool_calls=guard_blocks,
-            trial_turn_count=len(user_messages),
-            message_count=len(messages),
-            policy_check_count=0,
-            replay_metadata={
-                "run_id": harness.run_id,
-                "session_id": final_state.get("session_id"),
-                "task_id": case.case_id,
-                "trace_artifact_path": str(trace_path),
-                "trial": trial,
-                "legacy_trace": True,
             },
             db_assertion_failures=[],
         )
@@ -1034,29 +908,12 @@ class CuratedEvalRunner:
     def _trace_case_id(self, trace_path: Path) -> str:
         with trace_path.open(encoding="utf-8") as file:
             trace = json.load(file)
-        case_id = (
-            trace.get("metadata", {}).get("task_id")
-            or trace.get("task_id")
-            or trace.get("final_state", {}).get("task_id")
-            or self._trace_case_id_from_filename(trace_path)
-        )
+        case_id = trace.get("metadata", {}).get("task_id")
         if not case_id:
             raise ValueError(
                 f"Replay trace is missing case identity metadata: {trace_path}"
             )
         return str(case_id)
-
-    def _trace_case_id_from_filename(self, trace_path: Path) -> Optional[str]:
-        stem = trace_path.stem
-        if "-trial-" not in stem:
-            return None
-        prefix, _, _ = stem.rpartition("-trial-")
-        if not prefix:
-            return None
-        _, separator, case_id = prefix.rpartition("-")
-        if not separator or not case_id:
-            return None
-        return case_id
 
     def _resolve_case_for_trace(self, trace_path: Path, *, subset: str) -> EvalCase:
         if not trace_path.exists():
