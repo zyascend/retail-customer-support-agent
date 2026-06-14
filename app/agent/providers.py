@@ -265,7 +265,7 @@ class FakeFailingProvider:
 
 
 class DisabledLLMProvider:
-    """Sentinel used by tests and offline eval to force deterministic fallback."""
+    """Sentinel used by offline demo harnesses to disable live LLM calls."""
 
     def chat_with_tools(
         self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]

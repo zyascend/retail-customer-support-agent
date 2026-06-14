@@ -293,13 +293,16 @@ class CuratedEvalRunner:
             agent_llm_timeout_seconds=self.config.agent_llm_timeout_seconds,
             agent_llm_max_retries=self.config.agent_llm_max_retries,
         )
-        # Phase 5: live mode uses real LLM provider, scripted uses deterministic
+        # Live mode uses the real LLM provider; scripted CI uses the explicit
+        # offline demo harness so it does not look like production fallback.
+        offline_demo = False
         if self.live:
             provider = None  # let AgentRuntime build real DeepSeekProvider
         elif self.require_llm:
             provider = None
         else:
             provider = DeterministicProvider()
+            offline_demo = True
         # Synthetic subset: use synthetic runtime
         if case.subset in (
             "synthetic_seeded_v1",
@@ -319,6 +322,7 @@ class CuratedEvalRunner:
             provider=provider,
             require_llm=self.require_llm,
             runtime=synthetic_runtime,
+            offline_demo=offline_demo,
         )
         # Tau subsets: use UserSimulator for multi-turn conversations
         user_simulator_callback = None
