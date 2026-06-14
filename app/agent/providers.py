@@ -26,7 +26,8 @@ def normalize_tool_calling_message(
     message: Dict[str, Any],
     finish_reason: Optional[str],
     token_usage: Optional[Dict[str, Any]],
-    raw: Optional[Dict[str, Any]],
+    reasoning_content: Optional[str] = None,
+    raw: Optional[Dict[str, Any]] = None,
 ) -> ToolCallResponse:
     tool_calls: List[ToolCallRequest] = []
     for index, raw_call in enumerate(message.get("tool_calls") or []):
@@ -55,6 +56,7 @@ def normalize_tool_calling_message(
         tool_calls=tool_calls,
         finish_reason=finish_reason,
         token_usage=token_usage,
+        reasoning_content=reasoning_content,
         raw=raw,
     )
 
@@ -143,6 +145,8 @@ class DeepSeekProvider:
                     },
                 }
             )
+        # DeepSeek reasoning_content must be passed back to the API
+        reasoning_content = getattr(message, "reasoning_content", None) or None
         usage = getattr(response, "usage", None)
         token_usage = None
         if usage is not None:
@@ -155,6 +159,7 @@ class DeepSeekProvider:
             message=message_dict,
             finish_reason=getattr(choice, "finish_reason", None),
             token_usage=token_usage,
+            reasoning_content=reasoning_content,
             raw=None,
         )
 
