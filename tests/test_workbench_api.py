@@ -113,7 +113,7 @@ class WorkbenchAPITests(unittest.TestCase):
                 },
             ).json()
 
-        self.assertEqual(snapshot["business"]["current_intent"], "unknown")
+        self.assertEqual(snapshot["compat"]["current_intent"], "unknown")
         self.assertEqual(snapshot["script_cursor"], 0)
 
     def test_errors_are_structured(self):

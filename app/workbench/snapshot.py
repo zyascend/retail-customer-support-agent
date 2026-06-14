@@ -51,20 +51,22 @@ def snapshot_from_state(
             "auth_method": state.auth_method,
             "active_user_identity": redact_value(state.active_user_identity),
             "active_order_id": None,
-            "current_intent": "unknown",
-            "slots": {},
             "confirmation_status": state.confirmation_status,
             "db_changed": initial_db_hash != current_db_hash,
             "initial_db_hash": initial_db_hash,
             "current_db_hash": current_db_hash,
             "write_locks": redact_value(state.write_locks),
         },
+        "compat": {
+            "current_intent": "unknown",
+            "slots": {},
+            "policy_decision": None,
+        },
         "pending_action": (
             redact_value(to_plain_data(state.pending_action))
             if state.pending_action is not None
             else None
         ),
-        "policy_decision": None,
         "tool_results": tool_results,
         "timeline": build_timeline(state),
         "audit_logs": audit_logs,

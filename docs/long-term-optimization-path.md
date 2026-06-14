@@ -139,6 +139,46 @@
 - 是否没有把 demo harness 伪装成 production fallback。
 - 是否让 eval backend 的语义更精确。
 
+## Phase 7 Review
+
+### 目标
+
+- 把 `offline_demo` 规则解析从 `AgentRuntime` 中拆出。
+- 明确 `scripted_offline_demo` / `scripted_tool_loop` / `live` / `replay` 的 backend 语义。
+- 让 trace 和 Workbench 中的旧架构字段只以 compat 形式存在。
+
+### 完成内容
+
+- 新增 `app/agent/offline_demo.py`，引入 `OfflineDemoHarness.handle(session, content)` 承载 demo-only parser、确认流和工具执行包装。
+- `AgentRuntime` 只保留 provider 构造、pre-flight confirmation、pre-flight identity、`AgentLoop` 调用和显式 harness 分流。
+- `CuratedEvalRunner`、`EvalCaseResult`、`EvalRunSummary` 的 `eval_backend` 命名更新为 `scripted_offline_demo`、`scripted_tool_loop`、`live`、`replay`。
+- `app/workbench/snapshot.py` 和 `app/ops/tracing.py` 将 `current_intent`、`slots`、`policy_decision` 下沉到 `compat` 区域；Workbench 类型与 UI 同步读取 `compat`。
+- README 与 portfolio 文档明确说明 offline demo/scripted 结果不是 live LLM 能力证明。
+
+### 架构边界检查
+
+- production runtime 仍保持单一路径：pre-flight -> `AgentLoop` -> `ToolGateway` / `WriteActionGuard` -> post-processing。
+- demo harness 现在是显式模块，而不是 runtime 文件内的隐式 fallback。
+- Workbench mode 继续只输出 `offline_demo` 和 `llm`；legacy `"deterministic"` 仅作为输入兼容。
+
+### 安全检查
+
+- 无 provider 且未开启 `offline_demo` 时，runtime 仍然安全转人工，不执行写操作。
+- 所有写工具仍经由 `ToolGateway` 和 `WriteActionGuard`。
+- confirmation pre-flight 和确认后的再次 guard 校验未变。
+
+### Eval / Trace 证据
+
+- `uv run python -m pytest tests/test_runtime_phase4.py -q`
+- `uv run python -m pytest tests/test_eval_runner.py -q`
+- `uv run python -m pytest tests/test_workbench_snapshot.py tests/test_workbench_session.py tests/test_workbench_api.py tests/test_workbench_cases.py -q`
+- 后续验收命令：`uv run python -m pytest -q`、`uv run ruff check .`、`uv run python -m app.cli.eval --subset curated_mvp --trials 1 --max-workers 1 --no-progress`
+
+### 未解决问题
+
+- `scripted_tool_loop` 目前只有命名契约，尚未接入真正的 scripted tool-calling provider。
+- Workbench 仍展示 compat 信息，但这些字段已被明确隔离，不再伪装为 runtime 业务真相。
+
 ## Phase 8：Structured Guard Context
 
 ### 目标

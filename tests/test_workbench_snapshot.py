@@ -13,8 +13,8 @@ SNAPSHOT_KEYS = {
     "run_controls",
     "messages",
     "business",
+    "compat",
     "pending_action",
-    "policy_decision",
     "tool_results",
     "timeline",
     "audit_logs",
@@ -129,6 +129,11 @@ class WorkbenchSnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot["session_id"], "session-1")
         self.assertEqual(snapshot["business"]["authenticated_user_id"], "user-1")
         self.assertIsNone(snapshot["business"]["active_order_id"])
+        self.assertNotIn("current_intent", snapshot["business"])
+        self.assertNotIn("slots", snapshot["business"])
+        self.assertEqual(snapshot["compat"]["current_intent"], "unknown")
+        self.assertEqual(snapshot["compat"]["slots"], {})
+        self.assertIsNone(snapshot["compat"]["policy_decision"])
         self.assertEqual(
             snapshot["pending_action"]["action_name"], "cancel_pending_order"
         )

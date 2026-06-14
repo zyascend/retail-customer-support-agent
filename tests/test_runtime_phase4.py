@@ -62,6 +62,15 @@ class TestRuntimeSafeFallback:
         assert any(step.node == "offline_demo_harness" for step in result.state.steps)
         assert result.state.termination_reason == "script_completed"
 
+    def test_offline_demo_parser_lives_outside_agent_runtime(self) -> None:
+        assert not hasattr(AgentRuntime, "_offline_demo_intent")
+        assert not hasattr(AgentRuntime, "_det_call")
+        assert not hasattr(AgentRuntime, "_parse_address")
+
+        from app.agent.offline_demo import OfflineDemoHarness
+
+        assert hasattr(OfflineDemoHarness, "handle")
+
 
 class TestRuntimePreflightConfirmation:
     """Tests: pending confirmation handled in pre-flight."""

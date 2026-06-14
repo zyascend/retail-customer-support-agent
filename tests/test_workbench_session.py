@@ -90,7 +90,7 @@ class WorkbenchSessionTests(unittest.TestCase):
             )
 
             self.assertEqual(snapshot["script_cursor"], 0)
-            self.assertEqual(snapshot["business"]["current_intent"], "unknown")
+            self.assertEqual(snapshot["compat"]["current_intent"], "unknown")
             self.assertGreaterEqual(len(snapshot["messages"]), 2)
 
     def test_reset_recreates_runtime_and_state(self):
@@ -125,7 +125,7 @@ class WorkbenchSessionTests(unittest.TestCase):
             )
 
             self.assertEqual(trace["run_id"], session.session_id)
-            self.assertEqual(trace["final_state"]["current_intent"], "unknown")
+            self.assertEqual(trace["final_state"]["compat"]["current_intent"], "unknown")
 
     def test_get_missing_session_raises_structured_error(self):
         with tempfile.TemporaryDirectory() as tmp:

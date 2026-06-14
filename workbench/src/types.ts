@@ -83,20 +83,22 @@ export interface WorkbenchSnapshot {
     auth_method: string | null;
     active_user_identity: unknown;
     active_order_id: string | null;
-    current_intent: string;
-    slots: Record<string, unknown>;
     confirmation_status: string;
     db_changed: boolean;
     initial_db_hash: string | null;
     current_db_hash: string | null;
     write_locks: string[];
   };
+  compat: {
+    current_intent: string;
+    slots: Record<string, unknown>;
+    policy_decision: unknown;
+  };
   pending_action: null | {
     action_name: string;
     arguments: Record<string, unknown>;
     user_facing_summary: string;
   };
-  policy_decision: unknown;
   tool_results: unknown[];
   timeline: TimelineEvent[];
   audit_logs: unknown[];
