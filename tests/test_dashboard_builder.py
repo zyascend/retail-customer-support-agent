@@ -37,7 +37,13 @@ class DashboardBuilderTests(unittest.TestCase):
                         ],
                         "policy_checks": [{"decision": "allow"}],
                         "write_audit_logs": [{"action": "modify_address"}],
-                        "final_state": {"current_intent": "modify_order_address"},
+                        "final_state": {
+                            "compat": {
+                                "current_intent": "modify_order_address",
+                                "slots": {},
+                                "policy_decision": None,
+                            }
+                        },
                     }
                 ),
                 encoding="utf-8",

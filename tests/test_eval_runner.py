@@ -728,14 +728,14 @@ class CuratedEvalTests(unittest.TestCase):
 
     def test_eval_case_result_defaults_to_scripted_backend(self):
         result = _result("test_case", 0)
-        self.assertEqual(result.eval_backend, "scripted")
+        self.assertEqual(result.eval_backend, "scripted_offline_demo")
 
     def test_eval_case_result_carries_llm_metrics(self):
         result = _result("test_case", 0)
         result.llm_token_usage = {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
         result.llm_loop_iterations = 3
 
-        self.assertEqual(result.eval_backend, "scripted")
+        self.assertEqual(result.eval_backend, "scripted_offline_demo")
         self.assertEqual(result.llm_token_usage["total_tokens"], 150)
         self.assertEqual(result.llm_loop_iterations, 3)
 
@@ -746,7 +746,14 @@ class CuratedEvalTests(unittest.TestCase):
                 config=config,
                 artifact_dir=Path(tmp),
             ).run(subset="curated_mvp", trials=1)
-        self.assertEqual(summary.eval_backend, "scripted")
+        self.assertEqual(summary.eval_backend, "scripted_offline_demo")
+
+    def test_eval_backend_names_scripted_offline_demo_for_ci_harness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            runner = CuratedEvalRunner(config=config, artifact_dir=Path(tmp))
+
+            self.assertEqual(runner._eval_backend(), "scripted_offline_demo")
 
     def test_required_and_forbidden_pass_when_satisfied(self):
         case = EvalCase(
@@ -797,7 +804,7 @@ class CuratedEvalTests(unittest.TestCase):
                 artifact_dir=Path(tmp),
                 live=False,
             ).run(subset="curated_mvp", trials=1)
-            self.assertEqual(summary.eval_backend, "scripted")
+            self.assertEqual(summary.eval_backend, "scripted_offline_demo")
             self.assertEqual(summary.case_count, 11)
 
     def test_eval_backend_in_summary_matches_live_flag(self):
@@ -810,9 +817,9 @@ class CuratedEvalTests(unittest.TestCase):
                 artifact_dir=Path(tmp),
                 live=False,
             ).run(subset="curated_mvp", trials=1)
-            self.assertEqual(summary.eval_backend, "scripted")
+            self.assertEqual(summary.eval_backend, "scripted_offline_demo")
             for result in summary.results:
-                self.assertEqual(result.eval_backend, "scripted")
+                self.assertEqual(result.eval_backend, "scripted_offline_demo")
 
     def test_replay_run_sets_eval_backend_and_writes_report(self):
         with tempfile.TemporaryDirectory() as tmp:

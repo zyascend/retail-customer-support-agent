@@ -25,7 +25,7 @@ user message → pre-flight checks → AgentLoop → ToolGateway / WriteActionGu
 
 **7 层写护栏**: 身份认证 → 显式确认 → 所有权校验 → 先读后写 → 策略合规 → 资源锁 → 幂等性。每一次写操作在真正执行前，都必须依次通过全部七层检查。
 
-**显式离线演示**: Workbench 和 scripted eval 可以使用 `offline_demo` harness，无需 API key 演示确认流、护栏和审计。但它是演示/CI harness，不代表生产 Agent 的 LLM 能力。
+**显式离线演示**: Workbench 和 `scripted_offline_demo` eval 可以使用 `offline_demo` harness，无需 API key 演示确认流、护栏和审计。但它是演示/CI harness，不代表生产 Agent 的 LLM 能力。
 
 ## 关键设计决策
 
@@ -43,7 +43,7 @@ uv sync --extra dev
 uv run phase4-workbench &           # Python API → :8000
 cd workbench && npm install && npm run dev   # React 界面 → :5173
 
-# 3. 运行 scripted eval（offline_demo harness）
+# 3. 运行 scripted eval（`scripted_offline_demo` / offline_demo harness）
 uv run phase2-eval --subset curated_mvp --trials 1
 
 # 4. 运行测试
@@ -73,7 +73,8 @@ uv run python -m pytest tests/ -q
 
 | 指标 | curated_mvp（11 case） | generalized_mvp（30+ case） |
 |------|----------------------|----------------------------|
-| scripted/offline demo | 作为 CI smoke 和演示集 | 验证无 mutation/tool error |
+| `scripted_offline_demo` | 作为 CI smoke 和演示集 | 验证 harness、guard、audit 和无 mutation/tool error |
+| `scripted_tool_loop` | 预留给 scripted provider 直驱 `AgentLoop` | 不与 `offline_demo` harness 混淆 |
 | live LLM | 需配置 API key 后手动运行 | 需配置 API key 后手动运行 |
 | trace | 每次运行输出 JSON artifact | 每次运行输出 JSON artifact |
 

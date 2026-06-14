@@ -83,8 +83,11 @@ def final_state_summary(state: SessionState) -> Dict[str, Any]:
         "authenticated_user_id": state.authenticated_user_id,
         "auth_method": state.auth_method,
         "confirmation_status": state.confirmation_status,
-        "current_intent": "unknown",
-        "slots": {},
+        "compat": {
+            "current_intent": "unknown",
+            "slots": {},
+            "policy_decision": None,
+        },
         "pending_action": (
             state.pending_action.model_dump() if state.pending_action else None
         ),

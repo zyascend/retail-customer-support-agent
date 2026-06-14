@@ -6,7 +6,7 @@
 
 一个基于 LLM tool-calling runtime 的零售客服 Agent。核心设计理念：**LLM 负责理解和工具选择，代码负责工具边界、写入护栏、确认流程和审计证据**。系统必须始终做出安全决策：LLM 可以请求写操作，但不能绕过 guard；没有 LLM provider 时，生产 runtime 安全转人工，不悄悄降级成规则写操作。
 
-关键数字：1 个 `AgentLoop`、7 层写保护、1 个显式 `offline_demo` harness、1 个单一事实来源（`action_specs.py`）、curated scripted eval + live LLM eval 双验证路径。
+关键数字：1 个 `AgentLoop`、7 层写保护、1 个显式 `offline_demo` harness、1 个单一事实来源（`action_specs.py`）、`scripted_offline_demo` + live LLM eval 双验证路径。
 
 ## 2. LLM Tool-Calling Runtime
 
@@ -33,11 +33,13 @@ user message → pre-flight checks → AgentLoop → ToolGateway / WriteActionGu
 
 ### Offline Demo Harness
 
-`offline_demo=True` 是显式演示/CI harness，用于 Workbench 和 scripted eval：
+`offline_demo=True` 是显式演示/CI harness，用于 Workbench 和 `scripted_offline_demo` eval：
 
 - 无需 API key 演示用户确认、guard block、write audit。
 - 可以用规则解析覆盖精选脚本案例，保持本地 demo 稳定。
 - 不作为生产 LLM 能力的证据，也不作为 generalized/live eval 的通过标准。
+
+Phase 7 之后，demo-only 解析逻辑已移动到 `app/agent/offline_demo.py` 的 `OfflineDemoHarness`。`AgentRuntime` 只显式调用这个 harness，不再把 demo parser 混在生产 runtime 主体里。
 
 Workbench API 仍兼容 legacy `"deterministic"` 输入，但会 canonicalize 为 `"offline_demo"`；新的 UI 和 snapshot 统一输出 `"offline_demo"`。
 

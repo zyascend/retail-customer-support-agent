@@ -16,7 +16,7 @@ export function BusinessState({
   onDeny,
   onChange,
 }: BusinessStateProps) {
-  const { business, pending_action: pendingAction } = snapshot;
+  const { business, compat, pending_action: pendingAction } = snapshot;
 
   return (
     <section className="panel business-state" aria-label="业务状态">
@@ -41,7 +41,7 @@ export function BusinessState({
         </div>
         <div>
           <dt>意图</dt>
-          <dd>{intentLabel(business.current_intent)}</dd>
+          <dd>{intentLabel(compat.current_intent)}</dd>
         </div>
         <div>
           <dt>确认状态</dt>
@@ -50,8 +50,8 @@ export function BusinessState({
       </dl>
 
       <div className="json-section">
-        <div className="section-label">槽位</div>
-        <pre>{formatJson(business.slots)}</pre>
+        <div className="section-label">兼容槽位</div>
+        <pre>{formatJson(compat.slots)}</pre>
       </div>
 
       {pendingAction ? (

@@ -93,7 +93,7 @@ class EvalCaseResult:
     db_assertion_failures: List[str] = field(default_factory=list)
 
     # ── Phase 5: LLM tool-calling metrics ──
-    eval_backend: str = "scripted"
+    eval_backend: str = "scripted_offline_demo"
     llm_token_usage: Optional[Dict[str, Any]] = None
     llm_loop_iterations: int = 0
 
@@ -127,7 +127,7 @@ class EvalRunSummary:
     generalization_variant_count: int = 0
 
     # ── Phase 5 ──
-    eval_backend: str = "scripted"
+    eval_backend: str = "scripted_offline_demo"
 
     def as_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -473,7 +473,7 @@ class CuratedEvalRunner:
             seed=getattr(case, "seed", None),
             passed=failure_label is None,
             failure_label=failure_label,
-            eval_backend="live" if self.live else "scripted",
+            eval_backend=self._eval_backend(),
             llm_token_usage=total_tokens,
             llm_loop_iterations=total_loop_iterations,
             trace_artifact_path=str(run_result.trace_artifact_path),
@@ -887,7 +887,11 @@ class CuratedEvalRunner:
     def _eval_backend(self) -> str:
         if self._is_replay_mode():
             return "replay"
-        return "live" if self.live else "scripted"
+        if self.live:
+            return "live"
+        if self.require_llm:
+            return "scripted_tool_loop"
+        return "scripted_offline_demo"
 
     def _is_replay_mode(self) -> bool:
         return self.replay_trace_dir is not None or self.replay_case_path is not None
