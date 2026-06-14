@@ -38,6 +38,7 @@ class ToolCallResponse(BaseModel):
     tool_calls: List[ToolCallRequest] = Field(default_factory=list)
     finish_reason: Optional[str] = None
     token_usage: Optional[Dict[str, Any]] = None
+    reasoning_content: Optional[str] = None
     raw: Optional[Dict[str, Any]] = None
 
 

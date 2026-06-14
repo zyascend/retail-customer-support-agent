@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import re
 import time
+import uuid
 from typing import Any
 
 from app.agent.context_builder import ContextBuilder
@@ -31,6 +34,45 @@ class AgentLoop:
         "exchange_delivered_order_items",
     }
 
+    # ── Premature refusal safety net ──
+
+    # Maps write intents to regex patterns for extracting from user messages
+    _WRITE_INTENT_MAP: list[tuple[str, re.Pattern]] = [
+        (
+            "cancel_pending_order",
+            re.compile(r"\bcancel\b.*?(?P<order_id>#W\d+)", re.IGNORECASE),
+        ),
+        (
+            "return_delivered_order_items",
+            re.compile(r"\breturn\b.*?(?P<order_id>#W\d+)", re.IGNORECASE),
+        ),
+        (
+            "exchange_delivered_order_items",
+            re.compile(r"\bexchange\b.*?(?P<order_id>#W\d+)", re.IGNORECASE),
+        ),
+        (
+            "modify_pending_order_address",
+            re.compile(
+                r"\b(?:modify|change|update)\b.*?\baddress\b.*?(?P<order_id>#W\d+)",
+                re.IGNORECASE,
+            ),
+        ),
+    ]
+
+    # Patterns that indicate the LLM refused without calling a write tool
+    _REFUSAL_PATTERNS: list[re.Pattern] = [
+        re.compile(
+            r"\b(?:belongs?\s+to|another\s+account|different\s+(?:account|user)"
+            r"|not\s+your|own(?:ed)?\s+by\s+another"
+            r"|cannot\s+(?:cancel|modify|return|exchange|access|process))",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?:do\s+not\s+own|cannot\s+be\s+(?:cancell|modifi|return|exchang))",
+            re.IGNORECASE,
+        ),
+    ]
+
     def __init__(
         self,
         *,
@@ -57,6 +99,8 @@ class AgentLoop:
         turn = TurnContext()
         messages = self._build_messages(session, user_content)
         tool_schemas = self._registry.tool_schemas_for_llm()
+        _forced_write_injected = False
+        _any_write_attempted = False
 
         while turn.loop_iterations < self._max_iterations:
             turn.loop_iterations += 1
@@ -87,6 +131,31 @@ class AgentLoop:
                 turn.llm_token_usage = response.token_usage
 
             if not response.tool_calls:
+                # Safety net: detect premature refusal and force write tool call
+                # so the guard layer can evaluate ownership/status/policy.
+                if not _forced_write_injected and not _any_write_attempted:
+                    refused_tool = self._detect_premature_refusal(
+                        session,
+                        user_content,
+                        response.assistant_content or "",
+                    )
+                    if refused_tool:
+                        _forced_write_injected = True
+                        turn.add_step(
+                            "premature_refusal_corrected", tool=refused_tool
+                        )
+                        injected = self._force_write_tool_call(
+                            session,
+                            user_content,
+                            refused_tool,
+                            turn,
+                            reasoning_content=response.reasoning_content,
+                        )
+                        if injected:
+                            assistant_msg, tool_msg = injected
+                            messages.append(assistant_msg)
+                            messages.append(tool_msg)
+                            continue
                 return self._step_finalize(response, turn)
 
             # Execute each tool call
@@ -95,6 +164,9 @@ class AgentLoop:
 
             all_failed = True
             for tc in response.tool_calls:
+                # Track whether any write tool was attempted (for safety net)
+                if tc.tool_name in self._ORDER_WRITE_TOOLS or tc.tool_name == "modify_user_address":
+                    _any_write_attempted = True
                 record, obs_msg = self._step_tool_execute(session, tc, turn)
 
                 if record is not None and record.status == "blocked" and record.error == "explicit_confirmation_required":
@@ -383,9 +455,193 @@ class AgentLoop:
             )
         return None
 
+    # ── Premature refusal safety net ──
+
+    def _detect_premature_refusal(
+        self,
+        session: SessionState,
+        user_content: str,
+        assistant_content: str,
+    ) -> str | None:
+        """Return write tool name if LLM refused without calling it, else None.
+
+        Detects the pattern where the LLM read order/user data, saw an
+        ownership/status/policy issue, and responded with a text refusal
+        instead of calling the write tool to let the guard decide.
+        """
+        if not session.loaded_context.orders or not session.authenticated_user_id:
+            return None
+        if not assistant_content:
+            return None
+        if not any(p.search(assistant_content) for p in self._REFUSAL_PATTERNS):
+            return None
+        # Verify the refusal is about the loaded order (ownership mismatch)
+        orders = session.loaded_context.orders
+        user_id = session.authenticated_user_id
+        has_ownership_mismatch = any(
+            isinstance(o, dict) and o.get("user_id") != user_id
+            for o in orders.values()
+        )
+        if not has_ownership_mismatch:
+            return None
+        for tool_name, pattern in self._WRITE_INTENT_MAP:
+            if pattern.search(user_content):
+                return tool_name
+        return None
+
+    def _force_write_tool_call(
+        self,
+        session: SessionState,
+        user_content: str,
+        tool_name: str,
+        turn: TurnContext,
+        *,
+        reasoning_content: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        """Force-call a write tool to trigger the guard layer.
+
+        Called when the LLM prematurely refused without calling a write tool.
+        Extracts arguments from the user message, calls through the gateway,
+        and returns (assistant_message_dict, tool_observation_dict) so the
+        LLM can respond to the actual guard block.
+        """
+        args: dict[str, Any] = {}
+
+        # Extract order_id — required for all order-scoped write tools
+        order_m = re.search(r"(?:order\s*)?(#W\d+)", user_content, re.IGNORECASE)
+        if order_m:
+            args["order_id"] = order_m.group(1)
+        else:
+            return None
+
+        # Extract tool-specific arguments
+        if tool_name == "cancel_pending_order":
+            reason_m = re.search(
+                r"because\s+(.+?)(?:\.|$)", user_content, re.IGNORECASE
+            )
+            reason = (
+                reason_m.group(1).strip().rstrip(".")
+                if reason_m
+                else ""
+            )
+            if reason.lower() in {"no longer needed", "ordered by mistake"}:
+                args["reason"] = reason.lower()
+            else:
+                args["reason"] = "no longer needed"
+        elif tool_name == "return_delivered_order_items":
+            item_ids = re.findall(r"\b(\d{10})\b", user_content)
+            if item_ids:
+                args["item_ids"] = item_ids[:1]
+            else:
+                args["item_ids"] = ["0"]  # placeholder to trigger guard
+            pm_m = re.search(
+                r"\b(gift_card_\d+|credit_card_\d+|paypal_\d+)\b", user_content
+            )
+            args["payment_method_id"] = pm_m.group(1) if pm_m else "unknown"
+        elif tool_name == "exchange_delivered_order_items":
+            item_ids = re.findall(r"\b(\d{10})\b", user_content)
+            if len(item_ids) >= 2:
+                args["item_ids"] = [item_ids[0]]
+                args["new_item_ids"] = [item_ids[1]]
+            elif item_ids:
+                args["item_ids"] = [item_ids[0]]
+                args["new_item_ids"] = ["0"]
+            else:
+                args["item_ids"] = ["0"]
+                args["new_item_ids"] = ["0"]
+            pm_m = re.search(
+                r"\b(gift_card_\d+|credit_card_\d+|paypal_\d+)\b", user_content
+            )
+            args["payment_method_id"] = pm_m.group(1) if pm_m else "unknown"
+        elif tool_name == "modify_pending_order_address":
+            # Minimal args — guard will validate ownership first, then
+            # policy/status checks. We just need the order_id to trigger it.
+            args["address1"] = "unknown"
+            args["city"] = "unknown"
+            args["state"] = "XX"
+            args["country"] = "USA"
+            args["zip"] = "00000"
+        else:
+            return None
+
+        synthetic_id = f"call_syn_{uuid.uuid4().hex[:8]}"
+
+        # Execute via gateway (guard validation happens here)
+        t0 = time.perf_counter()
+        record = self._gateway.execute(
+            state=session,
+            tool_name=tool_name,
+            arguments=args,
+        )
+        turn.step_durations[f"tool_{tool_name}_guard"] = round(
+            (time.perf_counter() - t0) * 1000, 1
+        )
+        turn.add_step(
+            "tool_execute", tool_name=tool_name, status=record.status
+        )
+
+        # Build assistant message with synthetic tool call.
+        # Preserve reasoning_content from the refusing response so DeepSeek
+        # API passthrough works (the API requires it when thinking mode is on).
+        assistant_msg: dict[str, Any] = {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": synthetic_id,
+                    "type": "function",
+                    "function": {
+                        "name": tool_name,
+                        "arguments": json.dumps(args),
+                    },
+                }
+            ],
+        }
+        if reasoning_content:
+            assistant_msg["reasoning_content"] = reasoning_content
+
+        # Build tool observation matching the guard block result
+        if record.status == "blocked":
+            content = json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "guard_blocked",
+                    "message_for_llm": (
+                        f"Tool {tool_name} was blocked: {record.error}. "
+                        "Explain this to the user and suggest alternatives."
+                    ),
+                    "retryable": False,
+                }
+            )
+        elif record.status == "success":
+            obs = record.observation
+            content = str(obs)[:500] if obs is not None else "(none)"
+        else:
+            content = json.dumps(
+                {
+                    "status": "error",
+                    "error_type": "tool_execution_error",
+                    "message_for_llm": (
+                        f"Tool {tool_name} failed: {record.error or 'unknown'}"
+                    ),
+                    "retryable": True,
+                }
+            )
+
+        tool_msg: dict[str, Any] = {
+            "role": "tool",
+            "tool_call_id": synthetic_id,
+            "content": content,
+        }
+
+        return assistant_msg, tool_msg
+
     @staticmethod
     def _assistant_message_dict(response: ToolCallResponse) -> dict[str, Any]:
         msg: dict[str, Any] = {"role": "assistant", "content": response.assistant_content}
+        # Preserve reasoning_content for DeepSeek API compatibility
+        if response.reasoning_content:
+            msg["reasoning_content"] = response.reasoning_content
         if response.tool_calls:
             msg["tool_calls"] = [
                 {
