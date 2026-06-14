@@ -128,6 +128,7 @@ Run:
 ```bash
 uv run python -m pytest -q
 uv run python -m app.cli.eval --subset curated_mvp --trials 1 --max-workers 1 --no-progress
+uv run python -m app.cli.eval --subset curated_mvp --trials 1 --max-workers 1 --no-progress --live
 ```
 
-Expected: PASS and curated eval remains 11/11.
+Expected: PASS and curated scripted/live eval remains 11/11.

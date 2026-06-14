@@ -171,7 +171,7 @@
 - `uv run python -m pytest tests/test_runtime_phase4.py -q`
 - `uv run python -m pytest tests/test_eval_runner.py -q`
 - `uv run python -m pytest tests/test_workbench_snapshot.py tests/test_workbench_session.py tests/test_workbench_api.py tests/test_workbench_cases.py -q`
-- 后续验收命令：`uv run python -m pytest -q`、`uv run ruff check .`、`uv run python -m app.cli.eval --subset curated_mvp --trials 1 --max-workers 1 --no-progress`
+- 后续验收命令：`uv run python -m pytest -q`、`uv run ruff check .`、`uv run python -m app.cli.eval --subset curated_mvp --trials 1 --max-workers 1 --no-progress`、`uv run python -m app.cli.eval --subset curated_mvp --trials 1 --max-workers 1 --no-progress --live`
 
 ### 未解决问题
 
@@ -259,7 +259,7 @@ block_context: dict[str, Any] = field(default_factory=dict)
 ### 验证证据
 
 - Targeted pytest 覆盖 guard、gateway、agent loop、trace/replay、Workbench、observation formatter。
-- Full pytest、ruff、curated MVP eval 作为 Phase 8 出口验证。
+- Full pytest、ruff、curated MVP scripted eval、curated MVP live eval 作为 Phase 8 出口验证。
 
 ### 后续风险
 
@@ -545,4 +545,4 @@ Phase 9 plan 应拆成这些任务：
 2. 输出 failure taxonomy：tool selection、guard explanation、missing context、policy ambiguity、latency/token cost。
 3. 将 scripted/offline eval 和 live eval 的结论分开展示。
 4. 为 Phase 10 prompt/schema optimization 定义可回归的目标指标。
-5. 跑 full pytest、ruff、curated scripted eval，并记录 live baseline 结果。
+5. 跑 full pytest、ruff、curated scripted eval、curated live eval，并记录 live baseline 结果。
