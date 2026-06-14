@@ -265,6 +265,37 @@ CURATED_MVP_CASES: List[EvalCase] = [
     ),
 ]
 
+LIVE_SMOKE_CORE_CASE_IDS: tuple[str, ...] = (
+    "lookup_pending_order",
+    "cancel_pending_order",
+    "return_delivered_order_item",
+    "exchange_delivered_order_item",
+    "deny_cancel_confirmation",
+    "block_wrong_user_order_access",
+)
+
+LIVE_GUARD_SMOKE_CASE_IDS: tuple[str, ...] = (
+    "block_cancel_processed_order",
+    "block_return_pending_order",
+    "block_wrong_user_order_access",
+)
+
+
+def _clone_case_for_subset(case: EvalCase, subset: str) -> EvalCase:
+    return EvalCase(
+        **{
+            **case.__dict__,
+            "required_tools": set(case.required_tools),
+            "forbidden_tools": set(case.forbidden_tools),
+            "subset": subset,
+        }
+    )
+
+
+def _curated_cases_by_id(case_ids: tuple[str, ...], *, subset: str) -> List[EvalCase]:
+    by_id = {case.case_id: case for case in CURATED_MVP_CASES}
+    return [_clone_case_for_subset(by_id[case_id], subset) for case_id in case_ids]
+
 
 def _case_for_subset(case: EvalCase, subset: str) -> EvalCase:
     return EvalCase(
@@ -952,6 +983,10 @@ SYNTHETIC_SEEDED_V1_CASES: List[EvalCase] = [
 def get_cases(subset: str) -> List[EvalCase]:
     if subset == "curated_mvp":
         return list(CURATED_MVP_CASES)
+    if subset == "live_smoke_core":
+        return _curated_cases_by_id(LIVE_SMOKE_CORE_CASE_IDS, subset=subset)
+    if subset == "live_guard_smoke":
+        return _curated_cases_by_id(LIVE_GUARD_SMOKE_CASE_IDS, subset=subset)
     if subset == "generalized_mvp":
         return list(GENERALIZED_MVP_CASES)
     if subset == "synthetic_seeded_v1":

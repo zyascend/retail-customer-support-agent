@@ -38,6 +38,36 @@ class CuratedEvalTests(unittest.TestCase):
             },
         )
 
+    def test_live_smoke_core_subset_pins_representative_cases(self):
+        cases = get_cases("live_smoke_core")
+
+        self.assertEqual(
+            [case.case_id for case in cases],
+            [
+                "lookup_pending_order",
+                "cancel_pending_order",
+                "return_delivered_order_item",
+                "exchange_delivered_order_item",
+                "deny_cancel_confirmation",
+                "block_wrong_user_order_access",
+            ],
+        )
+        self.assertTrue(all(case.subset == "live_smoke_core" for case in cases))
+
+    def test_live_guard_smoke_subset_pins_guard_cases(self):
+        cases = get_cases("live_guard_smoke")
+
+        self.assertEqual(
+            [case.case_id for case in cases],
+            [
+                "block_cancel_processed_order",
+                "block_return_pending_order",
+                "block_wrong_user_order_access",
+            ],
+        )
+        self.assertTrue(all(case.category == "guard" for case in cases))
+        self.assertTrue(all(case.expected_no_write for case in cases))
+
     def test_classify_failure_detects_auth_failure_first(self):
         case = get_cases("curated_mvp")[0]
 
@@ -168,6 +198,66 @@ class CuratedEvalTests(unittest.TestCase):
 
         self.assertEqual(metrics["pass_1"], 0.75)
         self.assertEqual(metrics["pass_k"], 0.5)
+
+    def test_metrics_aggregate_llm_token_usage_and_loop_iterations(self):
+        results = [
+            _result(
+                "case_a",
+                0,
+                llm_token_usage={
+                    "prompt_tokens": 100,
+                    "completion_tokens": 20,
+                    "total_tokens": 120,
+                },
+                llm_loop_iterations=2,
+            ),
+            _result(
+                "case_b",
+                0,
+                llm_token_usage={
+                    "prompt_tokens": 50,
+                    "completion_tokens": 10,
+                    "total_tokens": 60,
+                },
+                llm_loop_iterations=4,
+            ),
+        ]
+
+        metrics = compute_metrics(results)
+
+        self.assertEqual(
+            metrics["total_token_usage"],
+            {
+                "completion_tokens": 30,
+                "prompt_tokens": 150,
+                "total_tokens": 180,
+            },
+        )
+        self.assertEqual(metrics["average_llm_loop_iterations"], 3.0)
+
+    def test_eval_report_contains_phase9_baseline_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            summary = CuratedEvalRunner(
+                config=config,
+                artifact_dir=Path(tmp),
+            ).run(subset="live_guard_smoke", trials=1)
+            report = json.loads(
+                Path(summary.report_artifact_path).read_text(encoding="utf-8")
+            )
+
+        metadata = report["baseline_metadata"]
+        self.assertEqual(metadata["eval_backend"], "scripted_offline_demo")
+        self.assertEqual(metadata["subset"], "live_guard_smoke")
+        self.assertIn("model", metadata)
+        self.assertIn("provider", metadata)
+        self.assertRegex(metadata["prompt_hash"], r"^[0-9a-f]{64}$")
+        self.assertRegex(metadata["tool_schema_hash"], r"^[0-9a-f]{64}$")
+        self.assertRegex(metadata["action_specs_hash"], r"^[0-9a-f]{64}$")
+        self.assertIn("total_token_usage", report["metrics"])
+        self.assertIn("average_llm_loop_iterations", report["metrics"])
+        self.assertIn("llm_loop_iterations", report["results"][0])
+        self.assertIn("llm_token_usage", report["results"][0])
 
     def test_expected_guard_block_is_not_tool_error(self):
         result = _result(
@@ -1546,6 +1636,8 @@ def _result(
     guard_blocks: int = 0,
     initial_db_hash: str = "same",
     final_db_hash: str = "same",
+    llm_token_usage: dict | None = None,
+    llm_loop_iterations: int = 0,
 ) -> EvalCaseResult:
     return EvalCaseResult(
         run_id=f"{case_id}-{trial}",
@@ -1571,6 +1663,8 @@ def _result(
         db_accuracy_passed=True,
         db_accuracy_basis="test",
         trial_turn_count=1,
+        llm_token_usage=llm_token_usage,
+        llm_loop_iterations=llm_loop_iterations,
     )
 
 

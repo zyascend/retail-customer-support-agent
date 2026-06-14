@@ -80,6 +80,16 @@ uv run python -m pytest tests/ -q
 
 失败分类体系包含 14 种有序标签（llm_json_failure → auth_failure → wrong_intent → ...），确保精准定位问题。
 
+Phase 9 之后，live baseline 建议手动跑小集合并生成 triage：
+
+```bash
+uv run python -m app.cli.eval --subset live_smoke_core --trials 1 --max-workers 1 --no-progress --live
+uv run python -m app.cli.eval --subset live_guard_smoke --trials 1 --max-workers 1 --no-progress --live
+uv run python -m app.eval.live_triage artifacts/phase2/reports/<eval-run-id>.json
+```
+
+Eval report 会记录 `baseline_metadata`（model、provider、prompt/tool/action-spec hash）、`total_token_usage`、`average_llm_loop_iterations`、tool call / guard block 指标和失败 root cause。
+
 ## 项目结构
 
 ```text

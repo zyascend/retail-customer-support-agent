@@ -90,6 +90,12 @@ def compute_metrics(results: Iterable[MetricResult]) -> Dict[str, Any]:
     mutation_errors = sum(1 for result in result_list if result.unexpected_mutation)
     db_changed_count = sum(1 for result in result_list if result.db_changed)
     durations = [result.duration_seconds for result in result_list]
+    token_totals: Dict[str, int] = {}
+    for result in result_list:
+        for key, value in (result.llm_token_usage or {}).items():
+            if isinstance(value, int):
+                token_totals[key] = token_totals.get(key, 0) + value
+    loop_iterations = [result.llm_loop_iterations for result in result_list]
 
     return {
         "pass_1": _rate(passed, total),
@@ -115,6 +121,10 @@ def compute_metrics(results: Iterable[MetricResult]) -> Dict[str, Any]:
         "successful_tool_calls": successful_tool_calls,
         "failed_tool_calls": failed_tool_calls,
         "blocked_tool_calls": blocked_tool_calls,
+        "total_token_usage": dict(sorted(token_totals.items())),
+        "average_llm_loop_iterations": (
+            round(sum(loop_iterations) / total, 3) if total else 0.0
+        ),
         "mutation_error_count": mutation_errors,
         "db_changed_count": db_changed_count,
     }
@@ -240,6 +250,7 @@ def build_report_artifact(summary: Any) -> Dict[str, Any]:
         "code_commit": summary.code_commit,
         "prompt_metadata": summary.prompt_metadata,
         "eval_backend": summary.eval_backend,
+        "baseline_metadata": summary.baseline_metadata,
         "result_artifact_path": summary.result_artifact_path,
         "report_artifact_path": summary.report_artifact_path,
         "metrics": summary.metrics,
