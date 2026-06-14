@@ -137,17 +137,12 @@ class TraceReplayHarness:
         return dict(self._trace.get("final_state", {}))
 
     @property
-    def messages(self) -> List[dict[str, Any]]:
-        return list(self._trace.get("messages", []))
-
-    @property
     def has_llm_responses(self) -> bool:
         return bool(self._responses)
 
     @property
     def task_id(self) -> str | None:
-        metadata = self.metadata
-        return metadata.get("task_id") or self._trace.get("task_id")
+        return self.metadata.get("task_id")
 
     @property
     def user_messages(self) -> List[str]:

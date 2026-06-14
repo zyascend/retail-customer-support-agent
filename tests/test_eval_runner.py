@@ -895,7 +895,7 @@ class CuratedEvalTests(unittest.TestCase):
         self.assertEqual(payload["results"][0]["case_id"], case.case_id)
         self.assertEqual(payload["results"][0]["trace_artifact_path"], str(trace_path))
 
-    def test_replay_case_projects_legacy_trace_without_llm_responses(self):
+    def test_replay_case_requires_llm_responses(self):
         with tempfile.TemporaryDirectory() as tmp:
             config = resolve_config(artifact_dir=tmp)
             artifact_dir = Path(tmp)
@@ -915,45 +915,10 @@ class CuratedEvalTests(unittest.TestCase):
                 ],
                 llm_responses=[],
             )
-
-            summary = CuratedEvalRunner(
-                config=config,
-                artifact_dir=artifact_dir,
-                replay_case_path=trace_path,
-            ).run()
-
-        self.assertEqual(summary.eval_backend, "replay")
-        self.assertEqual(summary.results[0].case_id, case.case_id)
-        self.assertTrue(summary.results[0].passed)
-        self.assertEqual(summary.results[0].llm_loop_iterations, 0)
-
-    def test_replay_case_legacy_trace_requires_final_state(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            config = resolve_config(artifact_dir=tmp)
-            artifact_dir = Path(tmp)
-            case = next(
-                item for item in get_cases("curated_mvp")
-                if item.case_id == "transfer_to_human"
-            )
-            trace_path = _trace_fixture_for_case(
-                artifact_dir,
-                case,
-                trace_messages=[
-                    *case.messages,
-                    {
-                        "role": "assistant",
-                        "content": case.expected_assistant_contains,
-                    },
-                ],
-                llm_responses=[],
-            )
-            trace = json.loads(trace_path.read_text(encoding="utf-8"))
-            trace.pop("final_state", None)
-            trace_path.write_text(json.dumps(trace), encoding="utf-8")
 
             with self.assertRaisesRegex(
                 ValueError,
-                "Legacy replay trace is missing required fields",
+                "Replay trace is missing llm_responses",
             ):
                 CuratedEvalRunner(
                     config=config,
@@ -961,7 +926,7 @@ class CuratedEvalTests(unittest.TestCase):
                     replay_case_path=trace_path,
                 ).run()
 
-    def test_replay_case_recovers_case_id_from_final_state(self):
+    def test_replay_case_requires_metadata_task_id(self):
         with tempfile.TemporaryDirectory() as tmp:
             config = resolve_config(artifact_dir=tmp)
             artifact_dir = Path(tmp)
@@ -972,52 +937,17 @@ class CuratedEvalTests(unittest.TestCase):
             trace_path = _trace_fixture_for_case(artifact_dir, case)
             trace = json.loads(trace_path.read_text(encoding="utf-8"))
             trace["metadata"].pop("task_id", None)
-            trace.pop("task_id", None)
-            trace["final_state"]["task_id"] = case.case_id
             trace_path.write_text(json.dumps(trace), encoding="utf-8")
 
-            summary = CuratedEvalRunner(
-                config=config,
-                artifact_dir=artifact_dir,
-                replay_case_path=trace_path,
-            ).run()
-
-        self.assertEqual(summary.eval_backend, "replay")
-        self.assertEqual(summary.results[0].case_id, case.case_id)
-
-    def test_replay_run_projects_legacy_traces_from_runs_subdir(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            config = resolve_config(artifact_dir=tmp)
-            artifact_dir = Path(tmp)
-            case = next(
-                item for item in get_cases("curated_mvp")
-                if item.case_id == "transfer_to_human"
-            )
-            trace_dir = artifact_dir / "replay"
-            _trace_fixture_for_case(
-                trace_dir / "runs",
-                case,
-                trace_messages=[
-                    *case.messages,
-                    {
-                        "role": "assistant",
-                        "content": case.expected_assistant_contains,
-                    },
-                ],
-                llm_responses=[],
-            )
-
-            with patch("app.eval.runner.get_cases", return_value=[case]):
-                summary = CuratedEvalRunner(
+            with self.assertRaisesRegex(
+                ValueError,
+                "Replay trace is missing case identity metadata",
+            ):
+                CuratedEvalRunner(
                     config=config,
                     artifact_dir=artifact_dir,
-                    replay_trace_dir=trace_dir,
-                ).run(subset="curated_mvp", trials=1)
-
-        self.assertEqual(summary.eval_backend, "replay")
-        self.assertEqual(summary.case_count, 1)
-        self.assertTrue(summary.results[0].passed)
-        self.assertEqual(summary.results[0].case_id, case.case_id)
+                    replay_case_path=trace_path,
+                ).run()
 
     def test_replay_case_missing_trace_raises_explicit_error(self):
         with tempfile.TemporaryDirectory() as tmp:
