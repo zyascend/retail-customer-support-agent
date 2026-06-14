@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import re
 import subprocess
@@ -12,8 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from app.agent.confirmation import ConfirmationResolver
+from app.agent.models import Message, SessionState
 from app.agent.prompts import prompt_metadata
 from app.agent.providers import DeterministicProvider
+from app.agent.replay import TraceReplayHarness
 from app.agent.runtime import AgentRuntime
 from app.config import AppConfig
 from app.eval.cases import EvalCase, get_cases
@@ -28,6 +32,13 @@ from app.tools.retail_adapter import get_order_from_db, get_user_from_db
 
 DEFAULT_EVAL_ARTIFACT_DIR = Path("artifacts/phase2")
 ORDER_RE = re.compile(r"#W\d+")
+_GET_CASES_SUBSET_RE = re.compile(r'if subset == "([^"]+)"')
+
+_CONFIRMED_REPLAY_MESSAGE = "Done. I have completed the requested update."
+_DENIED_REPLAY_MESSAGE = "No changes were made."
+_CHANGED_REPLAY_MESSAGE = (
+    "I discarded the previous request. Please provide updated details."
+)
 
 
 @dataclass
@@ -151,12 +162,16 @@ class CuratedEvalRunner:
         require_llm: bool = False,
         live: bool = False,
         progress_callback: Optional[Callable[[str, EvalCaseResult], None]] = None,
+        replay_trace_dir: Optional[Path] = None,
+        replay_case_path: Optional[Path] = None,
     ) -> None:
         self.config = config
         self.artifact_dir = artifact_dir
         self.require_llm = require_llm
         self.live = live
         self.progress_callback = progress_callback
+        self.replay_trace_dir = replay_trace_dir
+        self.replay_case_path = replay_case_path
 
     def run(
         self,
@@ -168,23 +183,67 @@ class CuratedEvalRunner:
     ) -> EvalRunSummary:
         self._seed = seed
         eval_run_id = "eval-" + uuid.uuid4().hex[:12]
-        cases = get_cases(subset)
-        results: List[EvalCaseResult] = []
-        for trial in range(trials):
-            if max_workers > 1:
-                trial_results = self._run_trial_parallel(
-                    eval_run_id,
-                    cases,
-                    trial,
-                    max_workers,
+        if self.replay_case_path and self.replay_trace_dir:
+            raise ValueError(
+                "Replay runner accepts either replay_case_path or replay_trace_dir, not both"
+            )
+
+        results: List[EvalCaseResult]
+        if self.replay_case_path:
+            case = self._resolve_case_for_trace(self.replay_case_path, subset=subset)
+            results = [
+                self._run_replay_case(
+                    eval_run_id=eval_run_id,
+                    case=case,
+                    trial=0,
+                    trace_path=self.replay_case_path,
                 )
-            else:
-                trial_results = self._run_trial_sequential(
-                    eval_run_id,
-                    cases,
-                    trial,
+            ]
+            trials = 1
+            subset = case.subset
+        elif self.replay_trace_dir:
+            cases = get_cases(subset)
+            trace_index = self._index_replay_traces(self.replay_trace_dir)
+            results = []
+            for case in cases:
+                trace_path = trace_index.get(case.case_id)
+                if trace_path is None:
+                    raise FileNotFoundError(
+                        f"Missing replay trace for case_id '{case.case_id}' in {self.replay_trace_dir}"
+                    )
+                if self.progress_callback:
+                    self.progress_callback(
+                        "start",
+                        self._progress_placeholder(case=case, trial=0),
+                    )
+                result = self._run_replay_case(
+                    eval_run_id=eval_run_id,
+                    case=case,
+                    trial=0,
+                    trace_path=trace_path,
                 )
-            results.extend(trial_results)
+                results.append(result)
+                if self.progress_callback:
+                    self.progress_callback("finish", result)
+            trials = 1
+        else:
+            cases = get_cases(subset)
+            results = []
+            for trial in range(trials):
+                if max_workers > 1:
+                    trial_results = self._run_trial_parallel(
+                        eval_run_id,
+                        cases,
+                        trial,
+                        max_workers,
+                    )
+                else:
+                    trial_results = self._run_trial_sequential(
+                        eval_run_id,
+                        cases,
+                        trial,
+                    )
+                results.extend(trial_results)
         passed_count = sum(1 for result in results if result.passed)
         result_path = self.artifact_dir / "eval_runs" / f"{eval_run_id}.json"
         report_path = self.artifact_dir / "reports" / f"{eval_run_id}.json"
@@ -201,7 +260,7 @@ class CuratedEvalRunner:
             created_at=created_at,
             agent_strategy="guarded_workflow_agent",
             model=self.config.default_agent_model,
-            llm_required=self.require_llm or self.live,
+            llm_required=False if self._is_replay_mode() else (self.require_llm or self.live),
             llm_timeout_seconds=self.config.agent_llm_timeout_seconds,
             llm_max_retries=self.config.agent_llm_max_retries,
             case_count=len(results),
@@ -224,7 +283,7 @@ class CuratedEvalRunner:
             generalization_variant_count=len(results)
             if subset == "generalization"
             else 0,
-            eval_backend="live" if self.live else "scripted",
+            eval_backend=self._eval_backend(),
         )
         self._write_summary(summary)
         self._write_report(summary)
@@ -457,6 +516,389 @@ class CuratedEvalRunner:
         apply_case_diagnostics(result, case)
         return result
 
+    def _run_replay_case(
+        self,
+        *,
+        eval_run_id: str,
+        case: EvalCase,
+        trial: int,
+        trace_path: Path,
+    ) -> EvalCaseResult:
+        if not trace_path.exists():
+            raise FileNotFoundError(f"Replay trace file not found: {trace_path}")
+
+        runtime_config = AppConfig(
+            tau3_retail_root=self.config.tau3_retail_root,
+            tau2_bench_root=self.config.tau2_bench_root,
+            artifact_dir=self.artifact_dir / "traces" / eval_run_id,
+            deepseek_api_key=self.config.deepseek_api_key,
+            deepseek_base_url=self.config.deepseek_base_url,
+            default_agent_model=self.config.default_agent_model,
+            agent_llm_timeout_seconds=self.config.agent_llm_timeout_seconds,
+            agent_llm_max_retries=self.config.agent_llm_max_retries,
+        )
+        runtime = AgentRuntime(
+            runtime_config,
+            provider=DeterministicProvider(),
+            require_llm=False,
+            offline_demo=True,
+        )
+        harness = TraceReplayHarness(trace_path, runtime.registry)
+        if not harness.has_llm_responses:
+            return self._project_legacy_replay_case(
+                harness=harness,
+                eval_run_id=eval_run_id,
+                case=case,
+                trial=trial,
+                trace_path=trace_path,
+            )
+        final_state = harness.final_state
+        confirmation_resolver = ConfirmationResolver()
+        session = SessionState(
+            session_id=str(
+                final_state.get("session_id")
+                or f"{eval_run_id}-{case.case_id}-trial-{trial}"
+            ),
+            task_id=case.case_id,
+        )
+        started_at = time.perf_counter()
+        turn_contexts = []
+        for user_message in self._replay_user_messages(harness, case):
+            session.messages.append(Message(role="user", content=user_message))
+            if session.pending_action:
+                turn_result, needs_post_process = self._replay_confirmation_turn(
+                    harness=harness,
+                    session=session,
+                    user_message=user_message,
+                    resolver=confirmation_resolver,
+                    runtime=runtime,
+                )
+            else:
+                turn_result = harness.replay(
+                    session,
+                    user_message,
+                    context_builder=runtime._context_builder,
+                )
+                needs_post_process = True
+            if needs_post_process:
+                self._apply_replay_turn_result(session, turn_result)
+            turn_contexts.append(turn_result.turn)
+        duration_seconds = round(time.perf_counter() - started_at, 3)
+
+        if harness.remaining_tool_results:
+            raise RuntimeError(
+                "Unconsumed replay tool results remain: "
+                f"{len(harness.remaining_tool_results)}"
+            )
+
+        total_tokens = None
+        total_loop_iterations = 0
+        for turn_ctx in turn_contexts:
+            total_loop_iterations += turn_ctx.loop_iterations
+            if turn_ctx.llm_token_usage:
+                if total_tokens is None:
+                    total_tokens = dict(turn_ctx.llm_token_usage)
+                else:
+                    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                        total_tokens[key] = total_tokens.get(key, 0) + turn_ctx.llm_token_usage.get(key, 0)
+
+        tool_records = harness.consumed_tool_results
+        actual_order_status = self._replay_order_status(case, tool_records)
+        guard_block_reasons = [
+            str(record.error)
+            for record in tool_records
+            if record.status == "blocked" and record.error
+        ]
+        tool_errors = sum(1 for record in tool_records if record.status == "error")
+        guard_blocks = sum(
+            1
+            for record in tool_records
+            if record.status == "blocked"
+            and record.error != "explicit_confirmation_required"
+        )
+        successful_tool_calls = sum(
+            1 for record in tool_records if record.status == "success"
+        )
+        failure_label = classify_failure(
+            case=case,
+            authenticated_user_id=session.authenticated_user_id,
+            final_intent="",
+            write_locks=list(session.write_locks),
+            actual_order_status=actual_order_status,
+            assistant_messages=[
+                message.content
+                for message in session.messages
+                if message.role == "assistant"
+            ],
+            tool_names=[record.tool_name for record in tool_records],
+            guard_block_reasons=guard_block_reasons,
+            tool_errors=tool_errors,
+            guard_blocks=guard_blocks,
+            pending_action=session.pending_action is not None,
+            llm_errors=0,
+            confirmation_status=session.confirmation_status,
+            db_assertion_failures=[],
+        )
+        result = EvalCaseResult(
+            run_id=str(harness.run_id or harness.task_id or case.case_id),
+            session_id=session.session_id,
+            case_id=case.case_id,
+            category=case.category,
+            trial=trial,
+            scenario_family=case.scenario_family or case.capability,
+            variant_type=case.variant_type or case.case_id,
+            language_variation_level=case.language_variation_level,
+            seed=getattr(case, "seed", None),
+            passed=failure_label is None,
+            failure_label=failure_label,
+            eval_backend="replay",
+            llm_token_usage=total_tokens,
+            llm_loop_iterations=total_loop_iterations,
+            trace_artifact_path=str(trace_path),
+            authenticated_user_id=session.authenticated_user_id,
+            final_intent="",
+            termination_reason=final_state.get("termination_reason"),
+            expected_write_lock=case.expected_write_lock,
+            write_locks=list(session.write_locks),
+            expected_order_status=case.expected_order_status,
+            actual_order_status=actual_order_status,
+            expected_confirmation_status=case.expected_confirmation_status,
+            actual_confirmation_status=session.confirmation_status,
+            expected_guard_block_reason=case.expected_guard_block_reason,
+            actual_guard_block_reasons=guard_block_reasons,
+            initial_db_hash=harness.metadata.get("initial_db_hash"),
+            final_db_hash=harness.metadata.get("final_db_hash"),
+            order_status_before=None,
+            order_status_after=actual_order_status,
+            duration_seconds=duration_seconds,
+            tool_errors=tool_errors,
+            guard_blocks=guard_blocks,
+            tool_call_count=len(tool_records),
+            successful_tool_calls=successful_tool_calls,
+            failed_tool_calls=tool_errors,
+            blocked_tool_calls=guard_blocks,
+            trial_turn_count=sum(
+                1 for message in session.messages if message.role == "user"
+            ),
+            message_count=len(session.messages),
+            policy_check_count=0,
+            replay_metadata={
+                "run_id": harness.run_id,
+                "session_id": session.session_id,
+                "task_id": case.case_id,
+                "trace_artifact_path": str(trace_path),
+                "trial": trial,
+            },
+            db_assertion_failures=[],
+        )
+        apply_case_diagnostics(result, case)
+        return result
+
+    def _project_legacy_replay_case(
+        self,
+        *,
+        harness: TraceReplayHarness,
+        eval_run_id: str,
+        case: EvalCase,
+        trial: int,
+        trace_path: Path,
+    ) -> EvalCaseResult:
+        final_state = harness.final_state
+        messages = harness.messages
+        if not messages or not isinstance(final_state, dict) or not final_state:
+            raise ValueError(
+                f"Legacy replay trace is missing required fields: {trace_path}"
+            )
+
+        tool_records = harness.tool_results
+        actual_order_status = self._replay_order_status(case, tool_records)
+        guard_block_reasons = [
+            str(record.error)
+            for record in tool_records
+            if record.status == "blocked" and record.error
+        ]
+        tool_errors = sum(1 for record in tool_records if record.status == "error")
+        guard_blocks = sum(
+            1
+            for record in tool_records
+            if record.status == "blocked"
+            and record.error != "explicit_confirmation_required"
+        )
+        successful_tool_calls = sum(
+            1 for record in tool_records if record.status == "success"
+        )
+        assistant_messages = [
+            str(message.get("content", ""))
+            for message in messages
+            if message.get("role") == "assistant"
+        ]
+        user_messages = [
+            str(message.get("content", ""))
+            for message in messages
+            if message.get("role") == "user"
+        ]
+        write_locks = list(final_state.get("write_locks") or [])
+        confirmation_status = str(
+            final_state.get("confirmation_status") or "not_required"
+        )
+        failure_label = classify_failure(
+            case=case,
+            authenticated_user_id=final_state.get("authenticated_user_id"),
+            final_intent="",
+            write_locks=write_locks,
+            actual_order_status=actual_order_status,
+            assistant_messages=assistant_messages,
+            tool_names=[record.tool_name for record in tool_records],
+            guard_block_reasons=guard_block_reasons,
+            tool_errors=tool_errors,
+            guard_blocks=guard_blocks,
+            pending_action=bool(final_state.get("pending_action")),
+            llm_errors=0,
+            confirmation_status=confirmation_status,
+            db_assertion_failures=[],
+        )
+        result = EvalCaseResult(
+            run_id=str(harness.run_id or harness.task_id or case.case_id),
+            session_id=str(
+                final_state.get("session_id")
+                or f"{eval_run_id}-{case.case_id}-trial-{trial}"
+            ),
+            case_id=case.case_id,
+            category=case.category,
+            trial=trial,
+            scenario_family=case.scenario_family or case.capability,
+            variant_type=case.variant_type or case.case_id,
+            language_variation_level=case.language_variation_level,
+            seed=getattr(case, "seed", None),
+            passed=failure_label is None,
+            failure_label=failure_label,
+            eval_backend="replay",
+            llm_token_usage=None,
+            llm_loop_iterations=0,
+            trace_artifact_path=str(trace_path),
+            authenticated_user_id=final_state.get("authenticated_user_id"),
+            final_intent="",
+            termination_reason=final_state.get("termination_reason"),
+            expected_write_lock=case.expected_write_lock,
+            write_locks=write_locks,
+            expected_order_status=case.expected_order_status,
+            actual_order_status=actual_order_status,
+            expected_confirmation_status=case.expected_confirmation_status,
+            actual_confirmation_status=confirmation_status,
+            expected_guard_block_reason=case.expected_guard_block_reason,
+            actual_guard_block_reasons=guard_block_reasons,
+            initial_db_hash=harness.metadata.get("initial_db_hash"),
+            final_db_hash=harness.metadata.get("final_db_hash"),
+            order_status_before=None,
+            order_status_after=actual_order_status,
+            duration_seconds=0.0,
+            tool_errors=tool_errors,
+            guard_blocks=guard_blocks,
+            tool_call_count=len(tool_records),
+            successful_tool_calls=successful_tool_calls,
+            failed_tool_calls=tool_errors,
+            blocked_tool_calls=guard_blocks,
+            trial_turn_count=len(user_messages),
+            message_count=len(messages),
+            policy_check_count=0,
+            replay_metadata={
+                "run_id": harness.run_id,
+                "session_id": final_state.get("session_id"),
+                "task_id": case.case_id,
+                "trace_artifact_path": str(trace_path),
+                "trial": trial,
+                "legacy_trace": True,
+            },
+            db_assertion_failures=[],
+        )
+        apply_case_diagnostics(result, case)
+        return result
+
+    def _apply_replay_turn_result(self, session: SessionState, turn_result: Any) -> None:
+        session.messages.append(
+            Message(role="assistant", content=turn_result.assistant_message)
+        )
+        if turn_result.pending_action_set:
+            session.confirmation_status = "required"
+        elif not session.pending_action:
+            session.confirmation_status = "not_required"
+
+    def _replay_confirmation_turn(
+        self,
+        *,
+        harness: TraceReplayHarness,
+        session: SessionState,
+        user_message: str,
+        resolver: ConfirmationResolver,
+        runtime: AgentRuntime,
+    ):
+        from app.agent.models import AgentTurnResult, TurnContext
+        from app.agent.runtime import _map_guard_error_to_user_message
+
+        turn = TurnContext()
+        resolution = resolver.resolve(user_message)
+        if resolution == "unknown":
+            return (
+                harness.replay(
+                    session,
+                    user_message,
+                    context_builder=runtime._context_builder,
+                ),
+                True,
+            )
+
+        session.confirmation_status = resolution
+        turn.add_step("preflight_confirmation", resolution=resolution)
+
+        if resolution == "confirmed":
+            action = session.pending_action
+            if action is None:
+                raise RuntimeError("Replay confirmation requested without pending action")
+            record = harness.consume_tool_result(
+                session=session,
+                tool_name=action.action_name,
+                arguments=action.arguments,
+                confirmed=True,
+            )
+            session.pending_action = None
+            if record.status == "success":
+                message = _CONFIRMED_REPLAY_MESSAGE
+            else:
+                message = _map_guard_error_to_user_message(str(record.error))
+            session.messages.append(Message(role="assistant", content=message))
+            return AgentTurnResult(assistant_message=message, turn=turn), False
+
+        if resolution == "denied":
+            session.pending_action = None
+            session.messages.append(Message(role="assistant", content=_DENIED_REPLAY_MESSAGE))
+            return (
+                AgentTurnResult(
+                    assistant_message=_DENIED_REPLAY_MESSAGE,
+                    turn=turn,
+                ),
+                False,
+            )
+
+        if resolution == "changed":
+            session.pending_action = None
+            session.messages.append(Message(role="assistant", content=_CHANGED_REPLAY_MESSAGE))
+            return (
+                AgentTurnResult(
+                    assistant_message=_CHANGED_REPLAY_MESSAGE,
+                    turn=turn,
+                ),
+                False,
+            )
+
+        return (
+            harness.replay(
+                session,
+                user_message,
+                context_builder=runtime._context_builder,
+            ),
+            True,
+        )
+
     def _progress_placeholder(self, *, case: EvalCase, trial: int) -> EvalCaseResult:
         return EvalCaseResult(
             run_id="",
@@ -471,7 +913,7 @@ class CuratedEvalRunner:
             final_intent="",
             termination_reason=None,
             expected_write_lock=case.expected_write_lock,
-            eval_backend="live" if self.live else "scripted",
+            eval_backend=self._eval_backend(),
         )
 
     def _order_status(self, runtime: AgentRuntime, case: EvalCase) -> Optional[str]:
@@ -498,6 +940,43 @@ class CuratedEvalRunner:
             )
         except Exception:
             return {}
+
+    def _replay_order_status(
+        self, case: EvalCase, tool_records: List[Any]
+    ) -> Optional[str]:
+        order_id = case.order_id
+        if not order_id:
+            return None
+        for record in reversed(tool_records):
+            if (
+                record.status == "success"
+                and record.tool_name != "get_order_details"
+                and self._record_order_status_matches(record, order_id)
+            ):
+                return record.observation.get("status")
+        for record in reversed(tool_records):
+            if (
+                record.tool_name == "get_order_details"
+                and record.status == "success"
+                and self._record_order_status_matches(record, order_id)
+            ):
+                return record.observation.get("status")
+        return None
+
+    def _record_order_status_matches(self, record: Any, order_id: str) -> bool:
+        observation = getattr(record, "observation", None)
+        if not isinstance(observation, dict):
+            return False
+        if "status" not in observation:
+            return False
+        expected = order_id.lstrip("#")
+        observed_order_id = observation.get("order_id")
+        if observed_order_id is not None:
+            return str(observed_order_id).lstrip("#") == expected
+        recorded_order_id = record.arguments.get("order_id")
+        if recorded_order_id is not None:
+            return str(recorded_order_id).lstrip("#") == expected
+        return False
 
     def _db_assertion_failures(
         self, runtime: AgentRuntime, case: EvalCase
@@ -530,6 +1009,112 @@ class CuratedEvalRunner:
             if node.endswith("_llm") and detail.get("status") == "error":
                 count += 1
         return count
+
+    def _eval_backend(self) -> str:
+        if self._is_replay_mode():
+            return "replay"
+        return "live" if self.live else "scripted"
+
+    def _is_replay_mode(self) -> bool:
+        return self.replay_trace_dir is not None or self.replay_case_path is not None
+
+    def _index_replay_traces(self, trace_dir: Path) -> Dict[str, Path]:
+        if not trace_dir.exists():
+            raise FileNotFoundError(f"Replay trace directory not found: {trace_dir}")
+        trace_index: Dict[str, Path] = {}
+        trace_paths = {
+            *trace_dir.glob("*.json"),
+            *trace_dir.glob("runs/*.json"),
+        }
+        for trace_path in sorted(trace_paths):
+            case_id = self._trace_case_id(trace_path)
+            trace_index[case_id] = trace_path
+        return trace_index
+
+    def _trace_case_id(self, trace_path: Path) -> str:
+        with trace_path.open(encoding="utf-8") as file:
+            trace = json.load(file)
+        case_id = (
+            trace.get("metadata", {}).get("task_id")
+            or trace.get("task_id")
+            or trace.get("final_state", {}).get("task_id")
+            or self._trace_case_id_from_filename(trace_path)
+        )
+        if not case_id:
+            raise ValueError(
+                f"Replay trace is missing case identity metadata: {trace_path}"
+            )
+        return str(case_id)
+
+    def _trace_case_id_from_filename(self, trace_path: Path) -> Optional[str]:
+        stem = trace_path.stem
+        if "-trial-" not in stem:
+            return None
+        prefix, _, _ = stem.rpartition("-trial-")
+        if not prefix:
+            return None
+        _, separator, case_id = prefix.rpartition("-")
+        if not separator or not case_id:
+            return None
+        return case_id
+
+    def _resolve_case_for_trace(self, trace_path: Path, *, subset: str) -> EvalCase:
+        if not trace_path.exists():
+            raise FileNotFoundError(f"Replay trace file not found: {trace_path}")
+        case_id = self._trace_case_id(trace_path)
+        for candidate_subset in self._candidate_replay_subsets(preferred=subset):
+            for case in get_cases(candidate_subset):
+                if case.case_id == case_id:
+                    return case
+        raise ValueError(
+            f"Replay trace case_id '{case_id}' does not match any known eval case"
+        )
+
+    def _replay_user_messages(
+        self, harness: TraceReplayHarness, case: EvalCase
+    ) -> List[str]:
+        messages = harness.user_messages
+        if messages:
+            return messages
+        return [
+            message.get("content", "")
+            for message in case.messages
+            if message.get("role") == "user"
+        ]
+
+    def _candidate_replay_subsets(self, *, preferred: Optional[str]) -> List[str]:
+        ordered: List[str] = []
+        if preferred:
+            ordered.append(preferred)
+        for subset in self._known_eval_subsets():
+            if subset != preferred:
+                ordered.append(subset)
+        return ordered
+
+    def _known_eval_subsets(self) -> List[str]:
+        try:
+            source = inspect.getsource(get_cases)
+            discovered = _GET_CASES_SUBSET_RE.findall(source)
+        except (OSError, TypeError):
+            discovered = []
+
+        ordered: List[str] = []
+        for subset in discovered:
+            if subset not in ordered:
+                ordered.append(subset)
+        if ordered:
+            return ordered
+        return [
+            "curated_mvp",
+            "generalized_mvp",
+            "synthetic_seeded_v1",
+            "generalization",
+            "generalization_exploratory",
+            "tau_retail_smoke",
+            "tau_retail_supported",
+            "tau_retail_train",
+            "tau_retail_test",
+        ]
 
     def _write_summary(
         self,

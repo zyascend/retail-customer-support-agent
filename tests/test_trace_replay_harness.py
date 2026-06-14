@@ -110,6 +110,26 @@ class ScriptedToolGatewayTests(unittest.TestCase):
             gateway.execute(state=None, tool_name="wrong_tool", arguments={})
         self.assertIn("Tool mismatch", str(ctx.exception))
 
+    def test_scripted_gateway_raises_on_argument_mismatch(self):
+        from app.agent.replay import ScriptedToolGateway
+
+        results = [
+            ToolCallRecord(
+                tool_name="get_order_details",
+                arguments={"order_id": "W123"},
+                tool_kind="read",
+                status="success",
+            ),
+        ]
+        gateway = ScriptedToolGateway(results=results)
+        with self.assertRaises(RuntimeError) as ctx:
+            gateway.execute(
+                state=None,
+                tool_name="get_order_details",
+                arguments={"order_id": "W999"},
+            )
+        self.assertIn("Tool mismatch", str(ctx.exception))
+
     def test_scripted_gateway_tracks_all_calls(self):
         from app.agent.replay import ScriptedToolGateway
 
@@ -272,3 +292,47 @@ class TraceReplayHarnessTests(unittest.TestCase):
             self.assertTrue(result.pending_action_set)
             self.assertIsNotNone(session.pending_action)
             self.assertEqual(session.pending_action.action_name, "cancel_pending_order")
+
+    def test_replay_harness_rejects_out_of_order_repeated_tool_arguments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            responses = [
+                ToolCallResponse(
+                    assistant_content="I'll check the second order.",
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_1",
+                            tool_name="get_order_details",
+                            arguments={"order_id": "W124"},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ).model_dump(),
+                ToolCallResponse(
+                    assistant_content="Order W124 is pending.",
+                    finish_reason="stop",
+                ).model_dump(),
+            ]
+            tool_calls = [
+                ToolCallRecord(
+                    tool_name="get_order_details",
+                    arguments={"order_id": "W123"},
+                    tool_kind="read",
+                    status="success",
+                    observation={"order_id": "W123", "status": "pending"},
+                ).model_dump(),
+                ToolCallRecord(
+                    tool_name="get_order_details",
+                    arguments={"order_id": "W124"},
+                    tool_kind="read",
+                    status="success",
+                    observation={"order_id": "W124", "status": "pending"},
+                ).model_dump(),
+            ]
+            trace_path = self._make_trace(tmp, responses, tool_calls)
+            registry = self._make_registry()
+
+            from app.agent.replay import TraceReplayHarness
+
+            with self.assertRaises(RuntimeError) as ctx:
+                TraceReplayHarness(trace_path, registry)
+            self.assertIn("Replay trace tool mismatch", str(ctx.exception))

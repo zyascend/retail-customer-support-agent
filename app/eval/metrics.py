@@ -267,6 +267,39 @@ def build_comparison_artifact(
         }
         for name in metric_names
     }
+    baseline_results = _results_by_case(baseline.get("results"))
+    candidate_results = _results_by_case(candidate.get("results"))
+    overlap_case_ids = sorted(set(baseline_results) & set(candidate_results))
+    baseline_only_case_ids = sorted(set(baseline_results) - set(candidate_results))
+    candidate_only_case_ids = sorted(set(candidate_results) - set(baseline_results))
+
+    fixed = []
+    new_failures = []
+    still_failing = []
+    failure_label_changed = []
+    for case_id in overlap_case_ids:
+        baseline_result = baseline_results[case_id]
+        candidate_result = candidate_results[case_id]
+        delta_entry = _case_delta_entry(
+            case_id=case_id,
+            baseline_result=baseline_result,
+            candidate_result=candidate_result,
+            baseline_report_artifact_path=baseline.get("report_artifact_path"),
+            candidate_report_artifact_path=candidate.get("report_artifact_path"),
+        )
+        baseline_passed = bool(baseline_result.get("passed"))
+        candidate_passed = bool(candidate_result.get("passed"))
+        if not baseline_passed and candidate_passed:
+            fixed.append(delta_entry)
+        elif baseline_passed and not candidate_passed:
+            new_failures.append(delta_entry)
+        elif not baseline_passed and not candidate_passed:
+            still_failing.append(delta_entry)
+            if baseline_result.get("failure_label") != candidate_result.get(
+                "failure_label"
+            ):
+                failure_label_changed.append(delta_entry)
+
     return {
         "schema_version": EVAL_COMPARISON_SCHEMA_VERSION,
         "report_type": "phase2_eval_comparison",
@@ -277,6 +310,15 @@ def build_comparison_artifact(
         "baseline_code_commit": baseline.get("code_commit"),
         "candidate_code_commit": candidate.get("code_commit"),
         "metric_deltas": metric_deltas,
+        "case_deltas": {
+            "overlap_case_count": len(overlap_case_ids),
+            "baseline_only_case_ids": baseline_only_case_ids,
+            "candidate_only_case_ids": candidate_only_case_ids,
+            "new_failures": new_failures,
+            "fixed": fixed,
+            "still_failing": still_failing,
+            "failure_label_changed": failure_label_changed,
+        },
         "failure_label_counts": {
             "baseline": baseline.get("failure_analysis", {}).get(
                 "failure_label_counts", {}
@@ -285,6 +327,71 @@ def build_comparison_artifact(
                 "failure_label_counts", {}
             ),
         },
+    }
+
+
+def _results_by_case(results: Optional[Iterable[Dict[str, Any]]]) -> Dict[str, Dict[str, Any]]:
+    if not results:
+        return {}
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        case_id = result.get("case_id")
+        if not case_id:
+            continue
+        if "passed" not in result:
+            continue
+        grouped.setdefault(case_id, []).append(result)
+    return {
+        case_id: _aggregate_case_results(case_results)
+        for case_id, case_results in grouped.items()
+    }
+
+
+def _aggregate_case_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    ordered = [result for result in results if isinstance(result, dict)]
+    if not ordered:
+        return {}
+    overall_passed = all(bool(result.get("passed")) for result in ordered)
+    representative_rows = [
+        result for result in ordered if bool(result.get("passed")) == overall_passed
+    ]
+    representative = max(
+        representative_rows,
+        key=lambda result: _case_result_sort_key(result, ordered),
+    )
+    return {
+        **representative,
+        "passed": overall_passed,
+    }
+
+
+def _case_result_sort_key(
+    result: Dict[str, Any], ordered_results: List[Dict[str, Any]]
+) -> tuple[int, int]:
+    trial = result.get("trial")
+    if not isinstance(trial, int):
+        trial = -1
+    return trial, ordered_results.index(result)
+
+
+def _case_delta_entry(
+    *,
+    case_id: str,
+    baseline_result: Dict[str, Any],
+    candidate_result: Dict[str, Any],
+    baseline_report_artifact_path: Optional[str],
+    candidate_report_artifact_path: Optional[str],
+) -> Dict[str, Any]:
+    return {
+        "case_id": case_id,
+        "baseline_failure_label": baseline_result.get("failure_label"),
+        "candidate_failure_label": candidate_result.get("failure_label"),
+        "baseline_trace_artifact_path": baseline_result.get("trace_artifact_path"),
+        "candidate_trace_artifact_path": candidate_result.get("trace_artifact_path"),
+        "baseline_report_artifact_path": baseline_report_artifact_path,
+        "candidate_report_artifact_path": candidate_report_artifact_path,
     }
 
 
