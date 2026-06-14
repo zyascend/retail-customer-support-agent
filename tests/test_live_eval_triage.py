@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
+
 from app.eval.live_triage import (
     classify_failure,
     format_markdown,
+    infer_root_cause,
+    summarize_failure,
     summarize_report,
 )
+from app.eval.triage_bundle import build_triage_bundle
 
 
 def _result(**overrides):
@@ -98,6 +103,87 @@ def test_classifies_runtime_error_when_result_shape_is_incomplete() -> None:
     result = {"failure_label": "tool_exception"}
 
     assert classify_failure(result) == "runtime_error"
+
+
+def test_infer_root_cause_maps_tool_selection_to_prompt_gap() -> None:
+    result = _result(
+        case_id="cancel_pending_order",
+        failure_label="wrong_tool",
+        tool_call_count=2,
+        successful_tool_calls=2,
+    )
+
+    assert infer_root_cause(result) == "prompt_gap"
+
+
+def test_summarize_failure_includes_actionable_root_cause() -> None:
+    failure = summarize_failure(
+        _result(
+            case_id="block_wrong_user_order_access",
+            failure_label="expected_guard_block_missing",
+            actual_guard_block_reasons=[],
+            tool_call_count=1,
+        )
+    )
+
+    assert failure["root_cause"] == "guard_policy_gap"
+    assert "suggested_next_action" in failure
+
+
+def test_build_triage_bundle_extracts_trace_context(tmp_path) -> None:
+    trace_path = tmp_path / "trace.json"
+    trace_path.write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"role": "user", "content": "Cancel order #W123."},
+                    {"role": "assistant", "content": "Please confirm."},
+                ],
+                "metadata": {"llm_responses": [{"finish_reason": "tool_calls"}]},
+                "tool_calls": [
+                    {
+                        "tool_name": "cancel_pending_order",
+                        "status": "blocked",
+                        "error": "ownership_violation",
+                        "block_context": {
+                            "resource_type": "order",
+                            "resource_id": "#W123",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = {
+        "case_id": "block_wrong_user_order_access",
+        "failure_label": "expected_guard_block_missing",
+        "trace_artifact_path": str(trace_path),
+        "expected_actual_diff": {
+            "order_status": {"expected": "pending", "actual": "cancelled"}
+        },
+    }
+
+    bundle = build_triage_bundle(result)
+
+    assert bundle["case_id"] == "block_wrong_user_order_access"
+    assert bundle["user_messages"] == ["Cancel order #W123."]
+    assert bundle["tool_calls"][0]["block_context"]["resource_id"] == "#W123"
+    assert bundle["db_assertion_diff"]["order_status"]["actual"] == "cancelled"
+
+
+def test_summarize_failure_includes_trace_derived_triage_bundle(tmp_path) -> None:
+    trace_path = tmp_path / "trace.json"
+    trace_path.write_text(
+        json.dumps({"messages": [{"role": "user", "content": "Lookup #W123"}]}),
+        encoding="utf-8",
+    )
+
+    failure = summarize_failure(
+        _result(trace_artifact_path=str(trace_path), failure_label="wrong_tool")
+    )
+
+    assert failure["triage_bundle"]["user_messages"] == ["Lookup #W123"]
 
 
 def test_markdown_includes_report_case_bucket_and_next_action() -> None:

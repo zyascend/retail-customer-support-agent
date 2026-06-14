@@ -16,7 +16,7 @@
 - Modify: `app/eval/cases.py`
 - Modify: `tests/test_eval_runner.py`
 
-- [ ] **Step 1: Write failing subset contract tests**
+- [x] **Step 1: Write failing subset contract tests**
 
 Add these tests to `tests/test_eval_runner.py`:
 
@@ -51,13 +51,13 @@ def test_live_guard_smoke_subset_pins_guard_cases(self):
     self.assertTrue(all(case.expected_no_write for case in cases))
 ```
 
-- [ ] **Step 2: Verify tests fail**
+- [x] **Step 2: Verify tests fail**
 
 Run: `uv run python -m pytest tests/test_eval_runner.py::CuratedEvalTests::test_live_smoke_core_subset_pins_representative_cases tests/test_eval_runner.py::CuratedEvalTests::test_live_guard_smoke_subset_pins_guard_cases -q`
 
 Expected: FAIL with unknown subset or different case ids.
 
-- [ ] **Step 3: Implement pinned subsets**
+- [x] **Step 3: Implement pinned subsets**
 
 Add this helper near the curated case definitions in `app/eval/cases.py`:
 
@@ -103,7 +103,7 @@ if subset == "live_guard_smoke":
     return _curated_cases_by_id(LIVE_GUARD_SMOKE_CASE_IDS, subset=subset)
 ```
 
-- [ ] **Step 4: Verify subset tests pass**
+- [x] **Step 4: Verify subset tests pass**
 
 Run: `uv run python -m pytest tests/test_eval_runner.py::CuratedEvalTests::test_live_smoke_core_subset_pins_representative_cases tests/test_eval_runner.py::CuratedEvalTests::test_live_guard_smoke_subset_pins_guard_cases -q`
 
@@ -117,7 +117,7 @@ Expected: PASS.
 - Modify: `app/eval/metrics.py`
 - Modify: `tests/test_eval_runner.py`
 
-- [ ] **Step 1: Write failing report metadata test**
+- [x] **Step 1: Write failing report metadata test**
 
 Add this test to `tests/test_eval_runner.py`:
 
@@ -141,15 +141,19 @@ def test_eval_report_contains_phase9_baseline_metadata(self):
     self.assertRegex(metadata["prompt_hash"], r"^[0-9a-f]{64}$")
     self.assertRegex(metadata["tool_schema_hash"], r"^[0-9a-f]{64}$")
     self.assertRegex(metadata["action_specs_hash"], r"^[0-9a-f]{64}$")
+    self.assertIn("total_token_usage", report["metrics"])
+    self.assertIn("average_llm_loop_iterations", report["metrics"])
+    self.assertIn("llm_loop_iterations", report["results"][0])
+    self.assertIn("llm_token_usage", report["results"][0])
 ```
 
-- [ ] **Step 2: Verify test fails**
+- [x] **Step 2: Verify test fails**
 
 Run: `uv run python -m pytest tests/test_eval_runner.py::CuratedEvalTests::test_eval_report_contains_phase9_baseline_metadata -q`
 
 Expected: FAIL because `baseline_metadata` is absent.
 
-- [ ] **Step 3: Implement metadata builder**
+- [x] **Step 3: Implement metadata builder**
 
 Create `app/eval/baseline.py`:
 
@@ -216,7 +220,25 @@ In `app/eval/metrics.py`, add to `build_report_artifact()`:
 "baseline_metadata": summary.baseline_metadata,
 ```
 
-- [ ] **Step 4: Verify metadata test passes**
+Also extend `compute_metrics()` so report-level metrics expose the existing per-case LLM fields:
+
+```python
+token_totals: Dict[str, int] = {}
+for result in result_list:
+    for key, value in (result.llm_token_usage or {}).items():
+        if isinstance(value, int):
+            token_totals[key] = token_totals.get(key, 0) + value
+loop_iterations = [result.llm_loop_iterations for result in result_list]
+...
+"total_token_usage": token_totals,
+"average_llm_loop_iterations": (
+    round(sum(loop_iterations) / total, 3) if total else 0.0
+),
+```
+
+Keep the existing field names `llm_token_usage`, `llm_loop_iterations`, `tool_call_count`, and `guard_blocks` for backwards compatibility. The Phase 9 docs can explain these are the concrete code fields for the higher-level `token_usage` and `guard_block_count` concepts.
+
+- [x] **Step 4: Verify metadata test passes**
 
 Run: `uv run python -m pytest tests/test_eval_runner.py::CuratedEvalTests::test_eval_report_contains_phase9_baseline_metadata -q`
 
@@ -226,11 +248,11 @@ Expected: PASS.
 
 **Files:**
 - Modify: `app/eval/live_triage.py`
-- Modify: `tests/test_live_triage.py`
+- Modify: `tests/test_live_eval_triage.py`
 
-- [ ] **Step 1: Write failing taxonomy tests**
+- [x] **Step 1: Write failing taxonomy tests**
 
-Create or extend `tests/test_live_triage.py`:
+Create or extend `tests/test_live_eval_triage.py`:
 
 ```python
 from app.eval.live_triage import infer_root_cause, summarize_failure
@@ -263,13 +285,13 @@ def test_summarize_failure_includes_actionable_root_cause() -> None:
     assert "suggested_next_action" in failure
 ```
 
-- [ ] **Step 2: Verify tests fail**
+- [x] **Step 2: Verify tests fail**
 
-Run: `uv run python -m pytest tests/test_live_triage.py -q`
+Run: `uv run python -m pytest tests/test_live_eval_triage.py -q`
 
 Expected: FAIL because `infer_root_cause()` and `root_cause` are absent.
 
-- [ ] **Step 3: Implement root cause mapping**
+- [x] **Step 3: Implement root cause mapping**
 
 In `app/eval/live_triage.py`, add constants:
 
@@ -318,9 +340,9 @@ And render it in `format_markdown()`:
 f"- Root cause: `{failure.get('root_cause')}`",
 ```
 
-- [ ] **Step 4: Verify taxonomy tests pass**
+- [x] **Step 4: Verify taxonomy tests pass**
 
-Run: `uv run python -m pytest tests/test_live_triage.py -q`
+Run: `uv run python -m pytest tests/test_live_eval_triage.py -q`
 
 Expected: PASS.
 
@@ -329,11 +351,11 @@ Expected: PASS.
 **Files:**
 - Create: `app/eval/triage_bundle.py`
 - Modify: `app/eval/live_triage.py`
-- Modify: `tests/test_live_triage.py`
+- Modify: `tests/test_live_eval_triage.py`
 
-- [ ] **Step 1: Write failing bundle test**
+- [x] **Step 1: Write failing bundle test**
 
-Add this test to `tests/test_live_triage.py`:
+Add this test to `tests/test_live_eval_triage.py`:
 
 ```python
 import json
@@ -379,13 +401,13 @@ def test_build_triage_bundle_extracts_trace_context(tmp_path) -> None:
     assert bundle["db_assertion_diff"]["order_status"]["actual"] == "cancelled"
 ```
 
-- [ ] **Step 2: Verify test fails**
+- [x] **Step 2: Verify test fails**
 
-Run: `uv run python -m pytest tests/test_live_triage.py::test_build_triage_bundle_extracts_trace_context -q`
+Run: `uv run python -m pytest tests/test_live_eval_triage.py::test_build_triage_bundle_extracts_trace_context -q`
 
 Expected: FAIL because `app.eval.triage_bundle` does not exist.
 
-- [ ] **Step 3: Implement bundle extraction**
+- [x] **Step 3: Implement bundle extraction**
 
 Create `app/eval/triage_bundle.py`:
 
@@ -452,9 +474,9 @@ from app.eval.triage_bundle import build_triage_bundle
 "triage_bundle": build_triage_bundle(result),
 ```
 
-- [ ] **Step 4: Verify bundle tests pass**
+- [x] **Step 4: Verify bundle tests pass**
 
-Run: `uv run python -m pytest tests/test_live_triage.py -q`
+Run: `uv run python -m pytest tests/test_live_eval_triage.py -q`
 
 Expected: PASS.
 
@@ -465,7 +487,7 @@ Expected: PASS.
 - Modify: `docs/portfolio-architecture.md`
 - Modify: `README.md`
 
-- [ ] **Step 1: Update docs**
+- [x] **Step 1: Update docs**
 
 Add a Phase 9 Review section to `docs/long-term-optimization-path.md` after the Phase 9 plan text:
 
@@ -510,7 +532,7 @@ uv run python -m app.cli.eval --subset live_smoke_core --trials 1 --max-workers 
 uv run python -m app.eval.live_triage artifacts/phase2/reports/<eval-run-id>.json
 ```
 
-- [ ] **Step 2: Run docs grep**
+- [x] **Step 2: Run docs grep**
 
 Run: `rg -n "live_smoke_core|live_guard_smoke|baseline_metadata|root cause|triage bundle" docs README.md`
 
@@ -526,7 +548,7 @@ Expected: output includes the new Phase 9 docs and README command.
 Run:
 
 ```bash
-uv run python -m pytest tests/test_eval_runner.py tests/test_live_triage.py -q
+uv run python -m pytest tests/test_eval_runner.py tests/test_live_eval_triage.py -q
 ```
 
 Expected: PASS.

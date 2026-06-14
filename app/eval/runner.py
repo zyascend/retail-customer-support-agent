@@ -20,6 +20,7 @@ from app.agent.providers import DeterministicProvider
 from app.agent.replay import TraceReplayHarness
 from app.agent.runtime import AgentRuntime
 from app.config import AppConfig
+from app.eval.baseline import build_baseline_metadata
 from app.eval.cases import EvalCase, get_cases
 from app.eval.metrics import (
     EVAL_RUN_SUMMARY_SCHEMA_VERSION,
@@ -125,6 +126,7 @@ class EvalRunSummary:
     results: List[EvalCaseResult]
     generalization_families: List[str] = field(default_factory=list)
     generalization_variant_count: int = 0
+    baseline_metadata: Dict[str, Any] = field(default_factory=dict)
 
     # ── Phase 5 ──
     eval_backend: str = "scripted_offline_demo"
@@ -251,6 +253,7 @@ class CuratedEvalRunner:
         code_commit = _git_commit()
         metrics = compute_metrics(results)
         failure_analysis = build_failure_analysis(results)
+        eval_backend = self._eval_backend()
         summary = EvalRunSummary(
             schema_version=EVAL_RUN_SUMMARY_SCHEMA_VERSION,
             artifact_created_at=created_at,
@@ -283,7 +286,14 @@ class CuratedEvalRunner:
             generalization_variant_count=len(results)
             if subset == "generalization"
             else 0,
-            eval_backend=self._eval_backend(),
+            baseline_metadata=build_baseline_metadata(
+                config=self.config,
+                subset=subset,
+                eval_backend=eval_backend,
+                live=self.live,
+                require_llm=self.require_llm,
+            ),
+            eval_backend=eval_backend,
         )
         self._write_summary(summary)
         self._write_report(summary)

@@ -318,6 +318,8 @@ User Message → AgentLoop tool call / offline_demo action → ToolGateway
 - **Trace**: `artifacts/phase1/runs/<id>.json`
 - **Dashboard**: `artifacts/phase3/dashboard/<id>/index.html`
 
+Phase 9 后，eval report 还包含 `baseline_metadata`：model、provider、prompt hash、tool schema hash、action specs hash 和 eval backend。Report metrics 汇总 `total_token_usage`、`average_llm_loop_iterations`、tool call count、guard block count、mutation error rate；失败 case 可通过 `app.eval.live_triage` 输出 root cause 和 trace-derived triage bundle。
+
 所有 artifact 包含 schema_version、dataset paths、code commit、model config、prompt hashes、DB hashes。
 
 ## 7. Workbench

@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from app.eval.triage_bundle import build_triage_bundle
+
 TOOL_PROTOCOL = "tool_protocol"
 TOOL_ERROR = "tool_error"
 TOOL_SELECTION = "tool_selection"
@@ -12,6 +14,15 @@ GUARD_BEHAVIOR = "guard_behavior"
 RESPONSE_ORACLE = "response_oracle"
 RUNTIME_ERROR = "runtime_error"
 UNKNOWN_LIVE_BEHAVIOR = "unknown_live_behavior"
+
+RUNTIME_BUG = "runtime_bug"
+TOOL_SCHEMA_GAP = "tool_schema_gap"
+PROMPT_GAP = "prompt_gap"
+MODEL_REASONING_GAP = "model_reasoning_gap"
+GUARD_POLICY_GAP = "guard_policy_gap"
+DATA_FIXTURE_GAP = "data_fixture_gap"
+PROVIDER_ERROR = "provider_error"
+EXPECTED_BEHAVIOR_UNCLEAR = "expected_behavior_unclear"
 
 
 _RUNNER_LABEL_TO_BUCKET = {
@@ -77,6 +88,7 @@ def summarize_failure(result: Mapping[str, Any]) -> dict[str, Any]:
         "trial": result.get("trial"),
         "subset": result.get("subset"),
         "bucket": bucket,
+        "root_cause": infer_root_cause(result),
         "failure_label": result.get("failure_label"),
         "failure_category": result.get("failure_category"),
         "failure_summary": result.get("failure_summary"),
@@ -96,8 +108,43 @@ def summarize_failure(result: Mapping[str, Any]) -> dict[str, Any]:
         "tool_mismatches": tool_name_context["tool_mismatches"],
         "db_assertion_failures": list(result.get("db_assertion_failures") or []),
         "expected_actual_diff": expected_actual_diff,
+        "triage_bundle": build_triage_bundle(result),
         "suggested_next_action": _NEXT_ACTIONS[bucket],
     }
+
+
+def infer_root_cause(result: Mapping[str, Any]) -> str:
+    if result.get("provider_error") or result.get("runtime_error"):
+        return PROVIDER_ERROR
+    label = str(result.get("failure_label") or "")
+    if label == "tool_exception":
+        return RUNTIME_BUG
+    if label in {
+        "wrong_tool",
+        "required_tool_missing",
+        "forbidden_tool_called",
+        "wrong_tool_sequence",
+    }:
+        return PROMPT_GAP
+    if label == "llm_json_failure":
+        return TOOL_SCHEMA_GAP
+    if label in {
+        "expected_guard_block_missing",
+        "guard_blocked",
+        "confirmation_status_mismatch",
+        "confirmation_failure",
+    }:
+        return GUARD_POLICY_GAP
+    if label in {
+        "db_state_mismatch",
+        "db_assertion_mismatch",
+        "unexpected_mutation",
+        "mutation_missing",
+    }:
+        return DATA_FIXTURE_GAP
+    if label == "response_mismatch":
+        return MODEL_REASONING_GAP
+    return EXPECTED_BEHAVIOR_UNCLEAR
 
 
 def summarize_report(report: Mapping[str, Any]) -> dict[str, Any]:
@@ -165,6 +212,7 @@ def format_markdown(summary: Mapping[str, Any]) -> str:
                 "",
                 f"### `{case_id}`",
                 f"- Bucket: `{bucket}`",
+                f"- Root cause: `{failure.get('root_cause')}`",
                 f"- Failure label: `{failure.get('failure_label')}`",
                 f"- Trial: {failure.get('trial')}",
             ]
