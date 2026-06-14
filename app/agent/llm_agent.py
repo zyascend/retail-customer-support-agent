@@ -283,14 +283,7 @@ class AgentLoop:
             if record.error == "explicit_confirmation_required":
                 return record, None  # caller handles pending
             else:
-                error_msg = ToolExecutionError(
-                    error_type="guard_blocked",
-                    message_for_llm=(
-                        f"Tool {tool_call.tool_name} was blocked: {record.error}. "
-                        "Explain this to the user and suggest alternatives."
-                    ),
-                    retryable=False,
-                )
+                error_msg = self._guard_block_error(tool_call.tool_name, record)
                 return record, {
                     "role": "tool",
                     "tool_call_id": tool_call.id,
@@ -601,17 +594,7 @@ class AgentLoop:
 
         # Build tool observation matching the guard block result
         if record.status == "blocked":
-            content = json.dumps(
-                {
-                    "status": "error",
-                    "error_type": "guard_blocked",
-                    "message_for_llm": (
-                        f"Tool {tool_name} was blocked: {record.error}. "
-                        "Explain this to the user and suggest alternatives."
-                    ),
-                    "retryable": False,
-                }
-            )
+            content = self._guard_block_error(tool_name, record).model_dump_json()
         elif record.status == "success":
             content = format_tool_observation(record.observation)
         else:
@@ -633,6 +616,24 @@ class AgentLoop:
         }
 
         return assistant_msg, tool_msg
+
+    @staticmethod
+    def _guard_block_error(tool_name: str, record: ToolCallRecord) -> ToolExecutionError:
+        observation = record.observation if isinstance(record.observation, dict) else {}
+        message_for_llm = observation.get("message_for_llm")
+        if not message_for_llm:
+            message_for_llm = (
+                f"Tool {tool_name} was blocked by the write guard. "
+                f"Reason: {record.error}. "
+                f"Context: {record.block_context}. "
+                "Explain the safe next step to the user without exposing sensitive data."
+            )
+        return ToolExecutionError(
+            error_type="guard_blocked",
+            message_for_llm=str(message_for_llm),
+            retryable=False,
+            block_context=record.block_context,
+        )
 
     @staticmethod
     def _assistant_message_dict(response: ToolCallResponse) -> dict[str, Any]:

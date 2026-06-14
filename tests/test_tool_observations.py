@@ -29,6 +29,20 @@ def test_priority_keys_precede_bulky_payload() -> None:
     assert content.index('"user_id"') < content.index('"payload"')
 
 
+def test_guard_block_context_is_visible_before_bulky_payload() -> None:
+    content = format_tool_observation(
+        {
+            "payload": {"text": "x" * 50},
+            "status": "blocked",
+            "block_reason": "ownership_violation",
+            "block_context": {"resource_type": "order", "resource_id": "#W123"},
+        }
+    )
+
+    assert content.index('"block_reason"') < content.index('"payload"')
+    assert content.index('"block_context"') < content.index('"payload"')
+
+
 def test_oversized_payload_preserves_priority_before_truncation() -> None:
     content = format_tool_observation(
         {

@@ -53,6 +53,7 @@ class ToolExecutionError(BaseModel):
     ]
     message_for_llm: str
     retryable: bool
+    block_context: Dict[str, Any] = Field(default_factory=dict)
     missing_args: List[str] = Field(default_factory=list)
     allowed_tools: Optional[List[str]] = None
 
@@ -89,6 +90,7 @@ class ToolCallRecord(BaseModel):
     status: Literal["success", "blocked", "error"]
     observation: Optional[Any] = None
     error: Optional[str] = None
+    block_context: Dict[str, Any] = Field(default_factory=dict)
     before_db_hash: Optional[str] = None
     after_db_hash: Optional[str] = None
     idempotency_key: Optional[str] = None

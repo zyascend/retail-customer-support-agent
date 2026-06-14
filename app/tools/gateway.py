@@ -44,12 +44,19 @@ class ToolGateway:
             idempotency_key = guard_result.idempotency_key
             resource_lock = guard_result.resource_lock
             if not guard_result.allowed:
+                observation = _guard_block_observation(
+                    tool_name=tool_name,
+                    block_reason=guard_result.block_reason,
+                    block_context=guard_result.block_context,
+                )
                 record = ToolCallRecord(
                     tool_name=tool_name,
                     arguments=arguments,
                     tool_kind=spec.kind,
                     status="blocked",
+                    observation=observation,
                     error=guard_result.block_reason,
+                    block_context=guard_result.block_context,
                     before_db_hash=before_hash,
                     after_db_hash=before_hash,
                     idempotency_key=idempotency_key,
@@ -61,6 +68,7 @@ class ToolGateway:
                     status="blocked",
                     tool_name=tool_name,
                     block_reason=guard_result.block_reason,
+                    block_context=guard_result.block_context,
                 )
                 return record
             normalized_args = guard_result.normalized_action.arguments
@@ -151,3 +159,25 @@ class ToolGateway:
         elif tool_name == "get_item_details" and isinstance(result, dict):
             item_id = str(args.get("item_id", ""))
             state.loaded_context.items[item_id] = result
+
+
+def _guard_block_observation(
+    *,
+    tool_name: str,
+    block_reason: str | None,
+    block_context: Dict[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "status": "blocked",
+        "error_type": "guard_blocked",
+        "tool_name": tool_name,
+        "block_reason": block_reason,
+        "block_context": block_context,
+        "message_for_llm": (
+            f"Tool {tool_name} was blocked by the write guard. "
+            f"Reason: {block_reason}. "
+            f"Context: {to_plain_data(block_context)}. "
+            "Explain the safe next step to the user without exposing sensitive data."
+        ),
+        "retryable": False,
+    }

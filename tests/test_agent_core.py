@@ -215,6 +215,23 @@ class WriteGuardTests(unittest.TestCase):
         self.assertFalse(result.allowed)
         self.assertEqual(result.block_reason, "authentication_required")
 
+    def test_authentication_block_has_structured_context(self):
+        state = SessionState(session_id="test")
+        result = self.guard.check(
+            state=state,
+            db=self.runtime.db,
+            action=ToolCall(
+                tool_name="cancel_pending_order",
+                arguments={"order_id": PENDING_ORDER, "reason": "no longer needed"},
+            ),
+            confirmed=True,
+        )
+
+        self.assertEqual(
+            result.block_context,
+            {"required": "authenticated_user"},
+        )
+
     def test_blocks_wrong_user_order_mutation(self):
         state = SessionState(
             session_id="test", authenticated_user_id=DELIVERED_USER
@@ -233,6 +250,53 @@ class WriteGuardTests(unittest.TestCase):
 
         self.assertFalse(result.allowed)
         self.assertEqual(result.block_reason, "ownership_violation")
+        self.assertEqual(result.block_context["resource_type"], "order")
+        self.assertEqual(result.block_context["resource_id"], PENDING_ORDER)
+        self.assertEqual(result.block_context["authenticated_user_id"], DELIVERED_USER)
+        self.assertEqual(result.block_context["owner_user_id"], PENDING_USER)
+
+    def test_read_before_write_block_has_structured_context(self):
+        state = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
+
+        result = self.guard.check(
+            state=state,
+            db=self.runtime.db,
+            action=ToolCall(
+                tool_name="cancel_pending_order",
+                arguments={"order_id": PENDING_ORDER, "reason": "no longer needed"},
+            ),
+            confirmed=True,
+        )
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.block_reason, "read_before_write_required")
+        self.assertEqual(
+            result.block_context,
+            {
+                "required_read_tool": "get_order_details",
+                "resource_type": "order",
+                "resource_id": PENDING_ORDER,
+            },
+        )
+
+    def test_confirmation_block_has_structured_context(self):
+        state = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
+        state.loaded_context.orders[PENDING_ORDER] = {"order_id": PENDING_ORDER}
+
+        result = self.guard.check(
+            state=state,
+            db=self.runtime.db,
+            action=ToolCall(
+                tool_name="cancel_pending_order",
+                arguments={"order_id": PENDING_ORDER, "reason": "no longer needed"},
+            ),
+            confirmed=False,
+        )
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.block_reason, "explicit_confirmation_required")
+        self.assertEqual(result.block_context["confirmation_required"], True)
+        self.assertIn("Cancel order", result.block_context["summary"])
 
     def test_blocks_invalid_order_statuses(self):
         cancel_state = SessionState(
@@ -272,9 +336,35 @@ class WriteGuardTests(unittest.TestCase):
         self.assertEqual(
             cancel_result.block_reason, "non_pending_order_cannot_be_cancelled"
         )
+        self.assertEqual(cancel_result.block_context["policy_area"], "order_status")
+        self.assertEqual(cancel_result.block_context["resource_id"], DELIVERED_ORDER)
+        self.assertEqual(
+            cancel_result.block_context["current_state"]["status"], "delivered"
+        )
+        self.assertEqual(cancel_result.block_context["allowed_values"], ["pending"])
         self.assertEqual(
             return_result.block_reason, "non_delivered_order_cannot_be_returned"
         )
+
+    def test_lock_conflict_block_has_structured_context(self):
+        state = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
+        state.loaded_context.orders[PENDING_ORDER] = {"order_id": PENDING_ORDER}
+        state.write_locks.append(f"order:{PENDING_ORDER}:cancel")
+
+        result = self.guard.check(
+            state=state,
+            db=self.runtime.db,
+            action=ToolCall(
+                tool_name="cancel_pending_order",
+                arguments={"order_id": PENDING_ORDER, "reason": "no longer needed"},
+            ),
+            confirmed=True,
+        )
+
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.block_reason, "duplicate_write_lock")
+        self.assertEqual(result.block_context["new_lock"], f"order:{PENDING_ORDER}:cancel")
+        self.assertEqual(result.block_context["existing_locks"], [f"order:{PENDING_ORDER}:cancel"])
 
     def test_idempotency_key_changes_with_arguments(self):
         state = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
@@ -385,6 +475,44 @@ class GatewayAndTraceTests(unittest.TestCase):
         self.assertEqual(record.status, "blocked")
         self.assertEqual(record.error, "explicit_confirmation_required")
         self.assertEqual(record.before_db_hash, record.after_db_hash)
+        self.assertEqual(record.block_context["confirmation_required"], True)
+        self.assertEqual(record.observation["status"], "blocked")
+        self.assertEqual(
+            record.observation["block_reason"], "explicit_confirmation_required"
+        )
+        self.assertEqual(
+            record.observation["block_context"], record.block_context
+        )
+        self.assertIn("message_for_llm", record.observation)
+
+    def test_trace_writer_preserves_guard_block_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = RetailAdapter(resolve_config()).create_runtime()
+            gateway = ToolGateway(registry=ToolRegistry(runtime.tools), runtime=runtime)
+            state = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
+            state.loaded_context.orders[PENDING_ORDER] = {"order_id": PENDING_ORDER}
+
+            gateway.execute(
+                state=state,
+                tool_name="cancel_pending_order",
+                arguments={"order_id": PENDING_ORDER, "reason": "no longer needed"},
+            )
+            path = TraceWriter(Path(tmp)).write(
+                run_id="trace-test",
+                state=state,
+                metadata={"runtime_source": "test"},
+            )
+            payload = json.loads(path.read_text(encoding="utf-8"))
+
+        tool_call = payload["tool_calls"][0]
+        self.assertEqual(
+            tool_call["block_context"]["confirmation_required"],
+            True,
+        )
+        self.assertEqual(
+            tool_call["observation"]["block_context"],
+            tool_call["block_context"],
+        )
 
     def test_trace_writer_outputs_valid_json(self):
         with tempfile.TemporaryDirectory() as tmp:
