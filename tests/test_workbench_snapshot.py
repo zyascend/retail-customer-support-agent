@@ -59,6 +59,7 @@ class WorkbenchSnapshotTests(unittest.TestCase):
                 tool_kind="write",
                 status="blocked",
                 error="explicit_confirmation_required",
+                block_context={"confirmation_required": True},
             )
         )
         state.audit_logs.append({"tool_name": "cancel_pending_order"})
@@ -71,6 +72,10 @@ class WorkbenchSnapshotTests(unittest.TestCase):
         )
         self.assertEqual(timeline[2]["status"], "blocked")
         self.assertEqual(timeline[2]["label"], "cancel_pending_order")
+        self.assertEqual(
+            timeline[2]["detail"]["block_context"],
+            {"confirmation_required": True},
+        )
 
     def test_timeline_preserves_message_and_step_chronology(self):
         state = SessionState(session_id="session-1")

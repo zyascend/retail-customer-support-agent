@@ -342,6 +342,66 @@ class TestAgentLoopWritePending:
 class TestAgentLoopGuardBlock:
     """Tests: guard blocks (non-confirmation) become tool errors."""
 
+    def test_guard_block_tool_observation_includes_block_context(self) -> None:
+        import json
+
+        from app.agent.llm_agent import AgentLoop
+        from app.agent.models import ToolCallRequest
+        from app.tools.retail_adapter import get_order_from_db
+
+        gateway = _gateway()
+        db = gateway.runtime.db
+        order = get_order_from_db(db, "#W5918442")
+        assert order is not None
+
+        session = _session(
+            authenticated_user_id="ava_moore_2033",
+            active_user_identity={"user_id": "ava_moore_2033"},
+        )
+        session.loaded_context.orders["#W5918442"] = order
+
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_cancel",
+                            tool_name="cancel_pending_order",
+                            arguments={
+                                "order_id": "#W5918442",
+                                "reason": "no longer needed",
+                            },
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                ToolCallResponse(
+                    assistant_content="I cannot modify orders for another account.",
+                    finish_reason="stop",
+                ),
+            ]
+        )
+        loop = AgentLoop(
+            provider=provider,
+            gateway=gateway,
+            registry=_registry(),
+            context_builder=_context_builder(),
+        )
+
+        loop.run_turn(session, "Cancel that order")
+
+        second_call_messages = provider.calls[1]["messages"]
+        tool_messages = [
+            message
+            for message in second_call_messages
+            if message.get("role") == "tool"
+        ]
+        assert tool_messages
+        payload = json.loads(tool_messages[-1]["content"])
+        assert payload["error_type"] == "guard_blocked"
+        assert payload["block_context"]["resource_type"] == "order"
+        assert payload["block_context"]["resource_id"] == "#W5918442"
+
     def test_cancel_delivered_order_guard_block(self) -> None:
         from app.agent.llm_agent import AgentLoop
         from app.agent.models import ToolCallRequest

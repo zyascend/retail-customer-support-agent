@@ -21,6 +21,7 @@ DEFERRED_WRITE_ACTIONS: set[str] = set()
 class WriteActionGuardResult:
     allowed: bool
     block_reason: Optional[str] = None
+    block_context: Dict[str, Any] = field(default_factory=dict)
     missing_requirements: List[str] = field(default_factory=list)
     required_user_confirmation: bool = True
     risk_level: str = "medium"
@@ -40,11 +41,20 @@ class WriteActionGuard:
         confirmed: bool,
     ) -> WriteActionGuardResult:
         if action.tool_name in DEFERRED_WRITE_ACTIONS:
-            return self._blocked("unsupported_in_mvp")
+            return self._blocked(
+                "unsupported_in_mvp",
+                context={"tool_name": action.tool_name},
+            )
         if action.tool_name not in WRITE_ACTIONS:
-            return self._blocked("unknown_write_action")
+            return self._blocked(
+                "unknown_write_action",
+                context={"tool_name": action.tool_name},
+            )
         if not state.authenticated_user_id:
-            return self._blocked("authentication_required")
+            return self._blocked(
+                "authentication_required",
+                context={"required": "authenticated_user"},
+            )
 
         normalized = ToolCall(
             tool_name=action.tool_name,
@@ -52,10 +62,17 @@ class WriteActionGuard:
         )
         ownership_reason = self._validate_ownership(state, db, normalized)
         if ownership_reason:
-            return self._blocked(ownership_reason)
+            return self._blocked(
+                ownership_reason,
+                context=self._ownership_context(state, db, normalized),
+            )
         read_reason = self._validate_read_before_write(state, normalized)
         if read_reason:
-            return self._blocked(read_reason, missing=["read_before_write"])
+            return self._blocked(
+                read_reason,
+                missing=["read_before_write"],
+                context=self._read_before_write_context(normalized),
+            )
 
         # Check confirmation before policy — users should confirm intent
         # before we check whether the operation is even possible.
@@ -63,16 +80,26 @@ class WriteActionGuard:
             return self._blocked(
                 "explicit_confirmation_required",
                 missing=["explicit_user_confirmation"],
+                context={
+                    "confirmation_required": True,
+                    "summary": self._summary(normalized),
+                },
             )
 
         policy_reason = self._validate_policy(db, normalized)
         if policy_reason:
-            return self._blocked(policy_reason)
+            return self._blocked(
+                policy_reason,
+                context=self._policy_context(policy_reason, db, normalized),
+            )
 
         lock = self._resource_lock(normalized)
         conflict = self._lock_conflict(state.write_locks, lock, normalized.tool_name)
         if conflict:
-            return self._blocked(conflict)
+            return self._blocked(
+                conflict,
+                context={"existing_locks": list(state.write_locks), "new_lock": lock},
+            )
 
         idempotency_key = stable_hash(
             {
@@ -91,11 +118,15 @@ class WriteActionGuard:
         )
 
     def _blocked(
-        self, reason: str, missing: Optional[List[str]] = None
+        self,
+        reason: str,
+        missing: Optional[List[str]] = None,
+        context: Optional[Dict[str, Any]] = None,
     ) -> WriteActionGuardResult:
         return WriteActionGuardResult(
             allowed=False,
             block_reason=reason,
+            block_context=context or {},
             missing_requirements=missing or [],
         )
 
@@ -144,6 +175,40 @@ class WriteActionGuard:
                 return "read_before_write_required"
         return None
 
+    def _ownership_context(
+        self, state: SessionState, db: Any, action: ToolCall
+    ) -> Dict[str, Any]:
+        if action.tool_name == "modify_user_address":
+            target_user_id = action.arguments.get("user_id")
+            return {
+                "resource_type": "user",
+                "resource_id": target_user_id,
+                "authenticated_user_id": state.authenticated_user_id,
+                "owner_user_id": target_user_id,
+            }
+
+        order_id = action.arguments.get("order_id")
+        order = get_order_from_db(db, order_id) if order_id else None
+        return {
+            "resource_type": "order",
+            "resource_id": order_id,
+            "authenticated_user_id": state.authenticated_user_id,
+            "owner_user_id": order.get("user_id") if order else None,
+        }
+
+    def _read_before_write_context(self, action: ToolCall) -> Dict[str, Any]:
+        if action.tool_name == "modify_user_address":
+            return {
+                "required_read_tool": "get_user_details",
+                "resource_type": "user",
+                "resource_id": action.arguments.get("user_id"),
+            }
+        return {
+            "required_read_tool": "get_order_details",
+            "resource_type": "order",
+            "resource_id": action.arguments.get("order_id"),
+        }
+
     def _validate_policy(self, db: Any, action: ToolCall) -> Optional[str]:
         args = action.arguments
         order_id = args.get("order_id")
@@ -185,6 +250,98 @@ class WriteActionGuard:
             if not get_user_from_db(db, args.get("user_id", "")):
                 return "user_not_found"
         return None
+
+    def _policy_context(
+        self, reason: str, db: Any, action: ToolCall
+    ) -> Dict[str, Any]:
+        args = action.arguments
+        order_id = args.get("order_id")
+        order = get_order_from_db(db, order_id) if order_id else None
+        order_status = order.get("status") if order else None
+
+        order_status_context = {
+            "policy_area": "order_status",
+            "resource_type": "order",
+            "resource_id": order_id,
+            "current_state": {"status": order_status},
+        }
+        if reason in {
+            "non_pending_order_cannot_be_cancelled",
+            "non_pending_order_cannot_be_modified",
+        }:
+            return {**order_status_context, "allowed_values": ["pending"]}
+        if reason in {
+            "non_delivered_order_cannot_be_returned",
+            "non_delivered_order_cannot_be_exchanged",
+        }:
+            return {**order_status_context, "allowed_values": ["delivered"]}
+        if reason == "invalid_cancel_reason":
+            return {
+                "policy_area": "cancel_reason",
+                "resource_type": "order",
+                "resource_id": order_id,
+                "current_state": {"reason": args.get("reason")},
+                "allowed_values": ["no longer needed", "ordered by mistake"],
+            }
+        if reason in {
+            "replacement_item_count_mismatch",
+            "exchange_item_count_mismatch",
+            "order_item_not_found",
+            "replacement_item_not_found",
+            "replacement_item_product_mismatch",
+            "replacement_item_unavailable",
+        }:
+            return {
+                "policy_area": "item_replacement",
+                "resource_type": "order",
+                "resource_id": order_id,
+                "current_state": {
+                    "item_ids": args.get("item_ids", []),
+                    "new_item_ids": args.get("new_item_ids", []),
+                },
+            }
+        if reason in {
+            "payment_method_not_owned",
+            "same_payment_method",
+            "gift_card_balance_insufficient",
+        }:
+            return {
+                "policy_area": "payment_method",
+                "resource_type": "order",
+                "resource_id": order_id,
+                "current_state": {
+                    "payment_method_id": args.get("payment_method_id"),
+                    "authenticated_user_id": order.get("user_id") if order else None,
+                },
+            }
+        if reason in {
+            "same_shipping_method",
+            "unknown_shipping_method",
+            "payment_method_required_for_upgrade",
+        }:
+            return {
+                "policy_area": "shipping_method",
+                "resource_type": "order",
+                "resource_id": order_id,
+                "current_state": {
+                    "shipping_method": args.get("shipping_method"),
+                    "current_shipping_method": order.get("shipping_method")
+                    if order
+                    else None,
+                },
+                "allowed_values": sorted(_get_shipping_methods(db)),
+            }
+        if reason == "user_not_found":
+            return {
+                "policy_area": "user_lookup",
+                "resource_type": "user",
+                "resource_id": args.get("user_id"),
+            }
+        return {
+            "policy_area": "unknown",
+            "resource_type": "order" if order_id else "unknown",
+            "resource_id": order_id,
+        }
 
     def _validate_item_replacements(
         self, db: Any, order: Dict[str, Any], args: Dict[str, Any]

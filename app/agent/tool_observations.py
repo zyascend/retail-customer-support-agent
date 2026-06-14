@@ -13,6 +13,8 @@ PRIORITY_OBSERVATION_KEYS = (
     "name",
     "pending_confirmation",
     "guard_decision",
+    "block_reason",
+    "block_context",
     "orders",
 )
 

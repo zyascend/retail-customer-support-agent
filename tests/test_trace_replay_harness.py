@@ -74,6 +74,7 @@ class ScriptedToolGatewayTests(unittest.TestCase):
                 tool_kind="write",
                 status="blocked",
                 error="explicit_confirmation_required",
+                block_context={"confirmation_required": True},
             ),
         ]
         gateway = ScriptedToolGateway(results=results)
@@ -85,6 +86,7 @@ class ScriptedToolGatewayTests(unittest.TestCase):
         r2 = gateway.execute(state=None, tool_name="cancel_pending_order", arguments={"order_id": "W123", "reason": "no longer needed"})
         self.assertEqual(r2.status, "blocked")
         self.assertEqual(r2.error, "explicit_confirmation_required")
+        self.assertEqual(r2.block_context, {"confirmation_required": True})
 
     def test_scripted_gateway_raises_when_exhausted(self):
         from app.agent.replay import ScriptedToolGateway
