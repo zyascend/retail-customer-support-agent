@@ -28,3 +28,6 @@ artifacts/
 *.sqlite
 *.sqlite3
 *.db
+.codegraph
+.claude
+.reasonix/
