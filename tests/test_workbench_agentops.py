@@ -14,6 +14,11 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
 class AgentOpsServiceTests(unittest.TestCase):
     def test_list_reports_returns_latest_report_summaries(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -29,10 +34,7 @@ class AgentOpsServiceTests(unittest.TestCase):
                         "provider": "deepseek",
                         "subset": "live_smoke_core",
                     },
-                    "results": [
-                        {"case_id": "case-a-1", "passed": True},
-                        {"case_id": "case-a-2", "passed": False},
-                    ],
+                    "results": [{"passed": True}, {"passed": False}],
                 },
             )
             _write_json(
@@ -46,7 +48,7 @@ class AgentOpsServiceTests(unittest.TestCase):
                         "provider": "deepseek",
                         "subset": "curated_mvp",
                     },
-                    "results": [{"case_id": "case-b-1", "passed": False}],
+                    "results": [{"passed": False}],
                 },
             )
 
@@ -67,3 +69,64 @@ class AgentOpsServiceTests(unittest.TestCase):
 
         self.assertEqual(context.exception.code, "report_not_found")
         self.assertEqual(context.exception.status_code, 404)
+
+    def test_get_report_rejects_path_traversal_run_id(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            service = AgentOpsService(artifact_dir=Path(tmp))
+
+            with self.assertRaises(WorkbenchAPIError) as context:
+                service.get_report("../secret")
+
+        self.assertEqual(context.exception.code, "invalid_report_id")
+        self.assertEqual(context.exception.status_code, 400)
+
+    def test_list_reports_skips_malformed_report_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            _write_json(
+                artifact_dir / "reports" / "valid.json",
+                {
+                    "eval_run_id": "valid",
+                    "created_at": "2026-06-15T03:00:00+00:00",
+                    "eval_backend": "live",
+                    "model": "deepseek-v4-flash",
+                    "baseline_metadata": {"provider": "deepseek", "subset": "curated_mvp"},
+                    "results": [{"passed": True}, {"passed": False}],
+                },
+            )
+            _write_text(artifact_dir / "reports" / "broken.json", "{not-json")
+
+            service = AgentOpsService(artifact_dir=artifact_dir)
+            reports = service.list_reports()
+
+        self.assertEqual([report.run_id for report in reports], ["valid"])
+
+    def test_get_report_raises_structured_error_for_malformed_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            _write_text(artifact_dir / "reports" / "broken.json", "{not-json")
+            service = AgentOpsService(artifact_dir=artifact_dir)
+
+            with self.assertRaises(WorkbenchAPIError) as context:
+                service.get_report("broken")
+
+        self.assertEqual(context.exception.code, "artifact_parse_error")
+        self.assertEqual(context.exception.status_code, 500)
+
+    def test_get_report_raises_structured_error_for_missing_required_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            _write_json(
+                artifact_dir / "reports" / "missing-fields.json",
+                {
+                    "created_at": "2026-06-15T03:00:00+00:00",
+                    "results": [],
+                },
+            )
+            service = AgentOpsService(artifact_dir=artifact_dir)
+
+            with self.assertRaises(WorkbenchAPIError) as context:
+                service.get_report("missing-fields")
+
+        self.assertEqual(context.exception.code, "artifact_parse_error")
+        self.assertEqual(context.exception.status_code, 500)
