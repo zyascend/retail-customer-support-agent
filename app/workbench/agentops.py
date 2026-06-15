@@ -135,7 +135,7 @@ class AgentOpsService:
             metadata=redact_value(payload.get("metadata", {})),
             timeline=timeline,
             turns=self._assemble_trace_turns(redacted_messages, redacted_llm_responses),
-            final_state=redact_value(payload.get("final_state", {})),
+            final_state=redact_value(self._trace_final_state(payload, path)),
             db_hashes={
                 "initial_db_hash": payload.get("metadata", {}).get("initial_db_hash"),
                 "final_db_hash": payload.get("metadata", {}).get("final_db_hash"),
@@ -398,6 +398,14 @@ class AgentOpsService:
                 )
             parsed.append(response)
         return parsed
+
+    def _trace_final_state(self, payload: dict[str, Any], path: Path) -> dict[str, Any]:
+        final_state = payload.get("final_state", {})
+        if not isinstance(final_state, dict):
+            raise self._trace_artifact_parse_error(
+                path, "Trace field 'final_state' must be a JSON object."
+            )
+        return final_state
 
     def _assemble_trace_turns(
         self, messages: list[dict[str, Any]], llm_responses: list[dict[str, Any]]

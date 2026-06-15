@@ -392,3 +392,27 @@ class AgentOpsServiceTests(unittest.TestCase):
 
                 self.assertEqual(context.exception.code, "artifact_parse_error")
                 self.assertEqual(context.exception.status_code, 500)
+
+    def test_get_trace_by_path_raises_structured_error_for_malformed_final_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            trace_path = artifact_dir / "traces" / "bad-final-state.json"
+            _write_json(
+                trace_path,
+                {
+                    "run_id": "bad-final-state",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "metadata": {"llm_responses": []},
+                    "tool_calls": [],
+                    "steps": [],
+                    "final_state": [],
+                },
+            )
+
+            service = AgentOpsService(artifact_dir=artifact_dir)
+
+            with self.assertRaises(WorkbenchAPIError) as context:
+                service.get_trace_by_path(str(trace_path))
+
+        self.assertEqual(context.exception.code, "artifact_parse_error")
+        self.assertEqual(context.exception.status_code, 500)
