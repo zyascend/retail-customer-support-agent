@@ -120,7 +120,7 @@ class WorkbenchSnapshotTests(unittest.TestCase):
 
         snapshot = snapshot_from_state(
             session_id="session-1",
-            mode="offline_demo",
+            mode="llm",
             llm_available=False,
             state=state,
             initial_db_hash="before",
@@ -154,7 +154,7 @@ class WorkbenchSnapshotTests(unittest.TestCase):
 
         snapshot = snapshot_from_state(
             session_id="session-1",
-            mode="offline_demo",
+            mode="llm",
             llm_available=False,
             state=state,
             initial_db_hash="same",

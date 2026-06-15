@@ -16,7 +16,7 @@ class WorkbenchSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
             session = manager.create_session(
-                mode="offline_demo", case_id="cancel_pending_order"
+                mode="llm", case_id="cancel_pending_order"
             )
 
             first = session.step()
@@ -36,7 +36,7 @@ class WorkbenchSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
             session = manager.create_session(
-                mode="offline_demo",
+                mode="llm",
                 case_id="cancel_success_s100_l1",
             )
 
@@ -50,7 +50,7 @@ class WorkbenchSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
             session = manager.create_session(
-                mode="offline_demo", case_id="cancel_pending_order"
+                mode="llm", case_id="cancel_pending_order"
             )
             original_send = session._send_user_content
             seen_contents = []
@@ -82,7 +82,7 @@ class WorkbenchSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
             session = manager.create_session(
-                mode="offline_demo", case_id="transfer_to_human"
+                mode="llm", case_id="transfer_to_human"
             )
 
             snapshot = session.send_message(
@@ -97,7 +97,7 @@ class WorkbenchSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
             session = manager.create_session(
-                mode="offline_demo", case_id="cancel_pending_order"
+                mode="llm", case_id="cancel_pending_order"
             )
             session.step()
 
@@ -116,7 +116,7 @@ class WorkbenchSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
             session = manager.create_session(
-                mode="offline_demo", case_id="transfer_to_human"
+                mode="llm", case_id="transfer_to_human"
             )
 
             snapshot = session.step()
@@ -142,7 +142,7 @@ class WorkbenchSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
             session = manager.create_session(
-                mode="offline_demo", case_id="cancel_pending_order"
+                mode="llm", case_id="cancel_pending_order"
             )
 
             def fail_handle_user_message(state, content):
@@ -166,7 +166,7 @@ class WorkbenchSessionTests(unittest.TestCase):
             manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
 
             with self.assertRaises(WorkbenchAPIError) as create_context:
-                manager.create_session(mode="offline_demo", case_id="missing_case")
+                manager.create_session(mode="llm", case_id="missing_case")
 
             self.assertEqual(create_context.exception.code, "case_not_found")
             self.assertEqual(create_context.exception.status_code, 404)
@@ -174,7 +174,7 @@ class WorkbenchSessionTests(unittest.TestCase):
                 create_context.exception.details, {"case_id": "missing_case"}
             )
 
-            session = manager.create_session(mode="offline_demo")
+            session = manager.create_session(mode="llm")
 
             with self.assertRaises(WorkbenchAPIError) as reset_context:
                 session.reset(case_id="missing_case")
@@ -193,7 +193,7 @@ class WorkbenchSessionTests(unittest.TestCase):
             )
             manager = WorkbenchSessionManager(config=config)
             session = manager.create_session(
-                mode="offline_demo", case_id="cancel_pending_order"
+                mode="llm", case_id="cancel_pending_order"
             )
             before_snapshot = session.step()
             before_messages = list(session.state.messages)
@@ -203,7 +203,7 @@ class WorkbenchSessionTests(unittest.TestCase):
                 session.reset(case_id="missing_case", mode="llm")
 
             self.assertEqual(context.exception.code, "case_not_found")
-            self.assertEqual(session.mode, "offline_demo")
+            self.assertEqual(session.mode, "llm")
             self.assertEqual(session.selected_case.case_id, "cancel_pending_order")
             self.assertEqual(session.script_cursor, 1)
             self.assertEqual(session.state.messages, before_messages)
@@ -216,7 +216,7 @@ class WorkbenchSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
             session = manager.create_session(
-                mode="offline_demo", case_id="cancel_pending_order"
+                mode="llm", case_id="cancel_pending_order"
             )
             before_snapshot = session.step()
             before_case = session.selected_case
@@ -239,7 +239,7 @@ class WorkbenchSessionTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 session.reset(case_id="return_delivered_order_item")
 
-            self.assertEqual(session.mode, "offline_demo")
+            self.assertEqual(session.mode, "llm")
             self.assertIs(session.selected_case, before_case)
             self.assertEqual(session.script_cursor, 1)
             self.assertEqual(session.state.messages, before_messages)
@@ -254,7 +254,7 @@ class WorkbenchSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
             session = manager.create_session(
-                mode="offline_demo", case_id="cancel_pending_order"
+                mode="llm", case_id="cancel_pending_order"
             )
             session.step()
             before_case = session.selected_case
@@ -295,7 +295,7 @@ class WorkbenchSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
             session = manager.create_session(
-                mode="offline_demo", case_id="block_wrong_user_order_access"
+                mode="llm", case_id="block_wrong_user_order_access"
             )
 
             snapshot = session.run_all()
@@ -319,7 +319,7 @@ class WorkbenchSessionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             manager = WorkbenchSessionManager(config=resolve_config(artifact_dir=tmp))
             session = manager.create_session(
-                mode="offline_demo", case_id="cancel_pending_order"
+                mode="llm", case_id="cancel_pending_order"
             )
 
             snapshot = session.run_all()

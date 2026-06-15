@@ -20,7 +20,7 @@ def build_baseline_metadata(
     require_llm: bool,
 ) -> dict[str, Any]:
     registry = ToolRegistry(RetailAdapter(config).create_runtime().tools)
-    provider = "deepseek" if live or require_llm else "offline_demo_harness"
+    provider = "deepseek" if live or require_llm else "no_provider"
     prompt_info = prompt_metadata()
     return {
         "subset": subset,

@@ -109,7 +109,7 @@ class WorkbenchAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["default_mode"], "offline_demo")
+        self.assertEqual(payload["default_mode"], "llm")
         self.assertFalse(payload["llm_available"])
         self.assertEqual(payload["case_catalog"]["subset"], "generalized_mvp")
         self.assertGreaterEqual(len(payload["case_catalog"]["demo_cases"]), 5)
@@ -141,7 +141,7 @@ class WorkbenchAPITests(unittest.TestCase):
             client = TestClient(app)
             created = client.post(
                 "/api/sessions",
-                json={"mode": "offline_demo", "case_id": "cancel_pending_order"},
+                json={"mode": "llm", "case_id": "cancel_pending_order"},
             ).json()
             session_id = created["session_id"]
 
@@ -161,7 +161,7 @@ class WorkbenchAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         snapshot = response.json()
-        self.assertEqual(snapshot["mode"], "offline_demo")
+        self.assertEqual(snapshot["mode"], "llm")
         self.assertIsNone(snapshot["selected_case_id"])
 
     def test_reset_accepts_no_body(self):
@@ -170,7 +170,7 @@ class WorkbenchAPITests(unittest.TestCase):
             client = TestClient(app)
             created = client.post(
                 "/api/sessions",
-                json={"mode": "offline_demo", "case_id": "cancel_pending_order"},
+                json={"mode": "llm", "case_id": "cancel_pending_order"},
             ).json()
             session_id = created["session_id"]
             client.post(f"/api/sessions/{session_id}/step")
@@ -180,7 +180,7 @@ class WorkbenchAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         snapshot = response.json()
         self.assertEqual(snapshot["session_id"], session_id)
-        self.assertEqual(snapshot["mode"], "offline_demo")
+        self.assertEqual(snapshot["mode"], "llm")
         self.assertEqual(snapshot["selected_case_id"], "cancel_pending_order")
         self.assertEqual(snapshot["script_cursor"], 0)
 
@@ -189,7 +189,7 @@ class WorkbenchAPITests(unittest.TestCase):
             app = create_app(config=resolve_config(artifact_dir=tmp))
             client = TestClient(app)
             session_id = client.post(
-                "/api/sessions", json={"mode": "offline_demo"}
+                "/api/sessions", json={"mode": "llm"}
             ).json()["session_id"]
 
             snapshot = client.post(
@@ -222,7 +222,7 @@ class WorkbenchAPITests(unittest.TestCase):
 
             response = client.post(
                 "/api/sessions",
-                json={"mode": "offline_demo", "case_id": "not_a_case"},
+                json={"mode": "llm", "case_id": "not_a_case"},
             )
 
         self.assertEqual(response.status_code, 404)

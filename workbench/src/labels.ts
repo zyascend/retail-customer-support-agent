@@ -1,7 +1,6 @@
 import type { TimelineEvent, WorkbenchMode } from "./types";
 
 const MODE_LABELS: Record<WorkbenchMode, string> = {
-  offline_demo: "离线演示",
   llm: "LLM 模式",
 };
 
@@ -57,15 +56,12 @@ const ACTION_LABELS: Record<string, string> = {
   exchange_delivered_order_items: "换货已送达商品",
   transfer_to_human_agents: "转接人工客服",
   context_loader: "上下文加载",
-  offline_demo_intent: "离线演示意图",
 };
 
 const EVENT_LABELS: Record<string, string> = {
   receive_message: "接收消息",
   preflight_identity: "预检身份",
   provider_unavailable: "Provider 不可用",
-  offline_demo_harness: "离线演示",
-  offline_demo_intent: "离线演示意图",
   conversation_gate: "会话确认",
   tool_executor: "工具执行",
   identity_resolver: "身份识别",

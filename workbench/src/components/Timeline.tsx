@@ -125,8 +125,6 @@ const ABBREV: Record<string, string> = {
   receive_message: "接收",
   preflight_identity: "身份",
   provider_unavailable: "转人工",
-  offline_demo_harness: "演示",
-  offline_demo_intent: "演示",
   conversation_gate: "会话",
   identity_resolver: "身份",
   intent_and_slot_extractor: "意图",
