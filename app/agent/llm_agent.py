@@ -142,6 +142,7 @@ class AgentLoop:
                     )
                     if refused_tool:
                         _forced_write_injected = True
+                        turn.premature_refusal_corrected_count += 1
                         turn.add_step(
                             "premature_refusal_corrected", tool=refused_tool
                         )
@@ -376,6 +377,7 @@ class AgentLoop:
                     raw_str = str(order_id)
                     if raw_str not in (clean_id, prefixed):
                         session.loaded_context.orders[raw_str] = load_record.observation
+                    turn.auto_load_count += 1
                     loaded = True
 
         # Auto-load user context for modify_user_address
@@ -401,6 +403,7 @@ class AgentLoop:
             )
             if load_record.status == "success" and isinstance(load_record.observation, dict):
                 session.loaded_context.users[str(user_id)] = load_record.observation
+                turn.auto_load_count += 1
                 loaded = True
 
         return loaded

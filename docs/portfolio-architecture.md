@@ -320,6 +320,8 @@ User Message → AgentLoop tool call / offline_demo action → ToolGateway
 
 Phase 9 后，eval report 还包含 `baseline_metadata`：model、provider、prompt hash、tool schema hash、action specs hash 和 eval backend。Report metrics 汇总 `total_token_usage`、`average_llm_loop_iterations`、tool call count、guard block count、mutation error rate；失败 case 可通过 `app.eval.live_triage` 输出 root cause 和 trace-derived triage bundle。
 
+Phase 10 后，LLM-visible tool schema 的 description 是选择契约：when-to-use、when-not-to-use、required-prior-read 和 guard-block guidance 都由 `ToolRegistry` 生成。参数 schema 继续从 registry/action specs 派生，并补强 order/item/payment pattern 约束。Report metrics 额外记录 `auto_load_count` 和 `premature_refusal_corrected_count`，用于观察 runtime safety net 是否在减少。
+
 所有 artifact 包含 schema_version、dataset paths、code commit、model config、prompt hashes、DB hashes。
 
 ## 7. Workbench

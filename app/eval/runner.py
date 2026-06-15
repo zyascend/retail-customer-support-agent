@@ -97,6 +97,8 @@ class EvalCaseResult:
     eval_backend: str = "scripted_offline_demo"
     llm_token_usage: Optional[Dict[str, Any]] = None
     llm_loop_iterations: int = 0
+    auto_load_count: int = 0
+    premature_refusal_corrected_count: int = 0
 
 
 @dataclass
@@ -422,8 +424,14 @@ class CuratedEvalRunner:
         # Phase 5: extract LLM metrics from turn contexts
         total_tokens = None
         total_loop_iterations = 0
+        auto_load_count = 0
+        premature_refusal_corrected_count = 0
         for turn_ctx in run_result.turn_contexts:
             total_loop_iterations += turn_ctx.loop_iterations
+            auto_load_count += turn_ctx.auto_load_count
+            premature_refusal_corrected_count += (
+                turn_ctx.premature_refusal_corrected_count
+            )
             if turn_ctx.llm_token_usage:
                 if total_tokens is None:
                     total_tokens = dict(turn_ctx.llm_token_usage)
@@ -486,6 +494,8 @@ class CuratedEvalRunner:
             eval_backend=self._eval_backend(),
             llm_token_usage=total_tokens,
             llm_loop_iterations=total_loop_iterations,
+            auto_load_count=auto_load_count,
+            premature_refusal_corrected_count=premature_refusal_corrected_count,
             trace_artifact_path=str(run_result.trace_artifact_path),
             authenticated_user_id=state.authenticated_user_id,
             final_intent="",
@@ -597,8 +607,14 @@ class CuratedEvalRunner:
 
         total_tokens = None
         total_loop_iterations = 0
+        auto_load_count = 0
+        premature_refusal_corrected_count = 0
         for turn_ctx in turn_contexts:
             total_loop_iterations += turn_ctx.loop_iterations
+            auto_load_count += turn_ctx.auto_load_count
+            premature_refusal_corrected_count += (
+                turn_ctx.premature_refusal_corrected_count
+            )
             if turn_ctx.llm_token_usage:
                 if total_tokens is None:
                     total_tokens = dict(turn_ctx.llm_token_usage)
@@ -658,6 +674,8 @@ class CuratedEvalRunner:
             eval_backend="replay",
             llm_token_usage=total_tokens,
             llm_loop_iterations=total_loop_iterations,
+            auto_load_count=auto_load_count,
+            premature_refusal_corrected_count=premature_refusal_corrected_count,
             trace_artifact_path=str(trace_path),
             authenticated_user_id=session.authenticated_user_id,
             final_intent="",

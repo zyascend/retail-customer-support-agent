@@ -161,11 +161,39 @@ class ToolRegistry:
         return schemas
 
     def _tool_description_for_llm(self, name: str) -> str:
-        desc = self._TOOL_DESCRIPTIONS.get(name)
-        if desc:
-            return desc
+        desc = self._TOOL_DESCRIPTIONS.get(name) or name
+        kind = self.kind(name)
+        if kind == "read":
+            return (
+                f"{desc} Read-only. When to use: load facts before answering or "
+                "before any related write. Do not use for writes."
+            )
+        if kind == "write":
+            prior_reads = self._required_prior_reads_for_tool(name)
+            constraints = self._tool_constraints_for_llm(name, kind)
+            return (
+                f"{desc} When to use: after the user requests this exact account "
+                "or order change. When not to use: do not use for lookup-only "
+                "questions or unrelated actions. Required prior reads: "
+                f"{prior_reads}. Guard blocks: if blocked, explain the guard "
+                f"reason from the tool observation. Constraints: {constraints}"
+            )
+        if name == "transfer_to_human_agents":
+            return (
+                f"{desc} When to use: after available tools cannot resolve the "
+                "request or the user explicitly asks for a human."
+            )
+        if name == "calculate":
+            return f"{desc} When to use: arithmetic only. Do not use for policy decisions."
+        return desc
+
+    def _required_prior_reads_for_tool(self, name: str) -> str:
+        if name == "modify_user_address":
+            return "get_user_details for the authenticated user_id"
+        if name in WRITE_TOOL_NAMES:
+            return "get_order_details for the target order_id"
         constraints = self._tool_constraints_for_llm(name, self.kind(name))
-        return f"{name}. {constraints}"
+        return constraints
 
     def _json_schema_for_tool(self, name: str) -> dict[str, Any]:
         required = self.required_args_for_tool(name)
@@ -207,8 +235,24 @@ class ToolRegistry:
 
     def _property_schema(self, tool_name: str, arg_name: str) -> dict[str, Any]:
         desc = self._arg_description(arg_name)
+        if arg_name == "order_id":
+            result = {"type": "string", "pattern": "^#W\\d+$"}
+            if desc:
+                result["description"] = desc
+            return result
         if arg_name in {"item_ids", "new_item_ids"}:
-            result = {"type": "array", "items": {"type": "string"}}
+            result = {
+                "type": "array",
+                "items": {"type": "string", "pattern": "^\\d+$"},
+            }
+            if desc:
+                result["description"] = desc
+            return result
+        if arg_name == "payment_method_id":
+            result = {
+                "type": "string",
+                "pattern": "^(credit_card|gift_card|paypal)_\\d+$",
+            }
             if desc:
                 result["description"] = desc
             return result

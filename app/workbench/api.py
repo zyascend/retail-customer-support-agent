@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.config import AppConfig, resolve_config
+from app.workbench.agentops import AgentOpsService
 from app.workbench.cases import build_case_catalog
 from app.workbench.errors import WorkbenchAPIError, error_payload
 from app.workbench.session import WorkbenchSessionManager
+
+DEFAULT_AGENTOPS_ARTIFACT_DIR = Path("artifacts/phase2")
+DEFAULT_WORKBENCH_ARTIFACT_DIR = Path("artifacts/workbench")
 
 
 class CreateSessionRequest(BaseModel):
@@ -31,12 +36,22 @@ class ResetRequest(BaseModel):
     mode: Optional[str] = None
 
 
-def create_app(config: Optional[AppConfig] = None) -> FastAPI:
-    resolved_config = config or resolve_config(artifact_dir="artifacts/phase4")
+def create_app(
+    config: Optional[AppConfig] = None,
+    *,
+    agentops_artifact_dir: str | Path | None = None,
+) -> FastAPI:
+    resolved_config = config or resolve_config(
+        artifact_dir=str(DEFAULT_WORKBENCH_ARTIFACT_DIR)
+    )
     manager = WorkbenchSessionManager(resolved_config)
+    agentops = AgentOpsService(
+        artifact_dir=_agentops_artifact_dir(agentops_artifact_dir=agentops_artifact_dir)
+    )
     app = FastAPI(title="Retail Agent Workbench API")
     app.state.config = resolved_config
     app.state.manager = manager
+    app.state.agentops = agentops
 
     app.add_middleware(
         CORSMiddleware,
@@ -63,6 +78,24 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             "model": resolved_config.default_agent_model,
             "case_catalog": build_case_catalog(),
         }
+
+    @app.get("/api/agentops/reports")
+    def list_agentops_reports() -> list[dict[str, Any]]:
+        return [report.model_dump() for report in agentops.list_reports()]
+
+    @app.get("/api/agentops/reports/{run_id}")
+    def get_agentops_report(run_id: str) -> dict[str, Any]:
+        return agentops.get_report(run_id).model_dump()
+
+    @app.get("/api/agentops/reports/{run_id}/cases/{case_id}")
+    def get_agentops_case(run_id: str, case_id: str) -> dict[str, Any]:
+        return agentops.get_case(run_id, case_id).model_dump()
+
+    @app.get("/api/agentops/traces/by-path")
+    def get_agentops_trace_by_path(
+        trace_path: str = Query(..., alias="path"),
+    ) -> dict[str, Any]:
+        return agentops.get_trace_by_path(trace_path).model_dump()
 
     @app.post("/api/sessions")
     def create_session(
@@ -107,3 +140,8 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         )
 
     return app
+
+
+def _agentops_artifact_dir(*, agentops_artifact_dir: str | Path | None) -> Path:
+    path = agentops_artifact_dir or DEFAULT_AGENTOPS_ARTIFACT_DIR
+    return Path(path).expanduser().resolve()

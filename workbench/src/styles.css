@@ -28,6 +28,7 @@ button {
 }
 
 button:disabled,
+input:disabled,
 select:disabled,
 textarea:disabled {
   cursor: not-allowed;
@@ -66,6 +67,30 @@ textarea:disabled {
   justify-content: flex-end;
   gap: 10px;
   min-width: 0;
+}
+
+.surface-tabs {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid #c9d2de;
+  border-radius: 999px;
+  background: #f4f6f8;
+  padding: 2px;
+}
+
+.surface-tabs button {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #475467;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.surface-tabs button.active {
+  background: #1f2937;
+  color: #ffffff;
 }
 
 .case-label {
@@ -178,6 +203,10 @@ textarea:disabled {
   padding: 10px 12px;
 }
 
+.error-banner.compact {
+  margin: 14px 0 0;
+}
+
 .loading-shell {
   margin: 12px;
   border: 1px solid #d9e1ec;
@@ -185,6 +214,256 @@ textarea:disabled {
   background: #ffffff;
   color: #667085;
   padding: 24px;
+}
+
+.agentops-placeholder {
+  padding: 12px;
+}
+
+.agentops-placeholder-card {
+  max-width: 760px;
+}
+
+.agentops-placeholder-card > p {
+  max-width: 620px;
+}
+
+.agentops-report-list {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agentops-report-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #e4e9f0;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 10px;
+}
+
+.agentops-report-list strong,
+.agentops-report-list span {
+  min-width: 0;
+}
+
+.agentops-report-list strong {
+  overflow: hidden;
+  color: #182230;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentops-report-list span {
+  color: #667085;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.agentops-grid {
+  display: grid;
+  grid-template-columns:
+    minmax(280px, 330px) minmax(360px, 1fr)
+    minmax(320px, 430px);
+  gap: 12px;
+  padding: 12px;
+}
+
+.agentops-browser,
+.agentops-timeline-column,
+.agentops-inspector {
+  grid-area: auto;
+  min-height: 0;
+}
+
+.agentops-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: calc(100dvh - 98px);
+  overflow: hidden;
+}
+
+.agentops-browser .field {
+  margin-bottom: 0;
+}
+
+.agentops-report-picker {
+  display: grid;
+  gap: 8px;
+  max-height: 208px;
+  overflow: auto;
+}
+
+.agentops-report-card,
+.case-list-item {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #d9e1ec;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px;
+  text-align: left;
+}
+
+.agentops-report-card {
+  display: grid;
+  gap: 4px;
+}
+
+.agentops-report-card.selected,
+.case-list-item.selected {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14);
+}
+
+.agentops-report-card strong,
+.case-list-item strong {
+  overflow: hidden;
+  color: #182230;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentops-report-card span,
+.agentops-report-card small,
+.case-list-item span,
+.case-list-item small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.agentops-report-facts,
+.agentops-trace-facts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.agentops-report-facts {
+  grid-template-columns: 1fr 1fr;
+}
+
+.agentops-report-facts div,
+.agentops-trace-facts div {
+  min-width: 0;
+  border: 1px solid #e4e9f0;
+  border-radius: 7px;
+  background: #f8fafc;
+  padding: 9px;
+}
+
+.agentops-trace-form {
+  display: grid;
+  gap: 8px;
+}
+
+.agentops-case-toolbar,
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agentops-case-toolbar {
+  justify-content: space-between;
+}
+
+.checkbox-row {
+  min-width: 0;
+  color: #344154;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.checkbox-row input {
+  width: auto;
+  min-width: auto;
+}
+
+.case-list {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.case-list-item {
+  display: grid;
+  gap: 5px;
+  position: relative;
+}
+
+.case-list-item.is-failing {
+  border-color: #f0b4ad;
+  background: #fff8f7;
+}
+
+.case-result {
+  justify-self: start;
+  border-radius: 999px;
+  padding: 4px 7px;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.case-result.passed {
+  background: #e8f8ef;
+  color: #126b3a;
+}
+
+.case-result.failed {
+  background: #feeceb;
+  color: #9f1f17;
+}
+
+.agentops-timeline-column {
+  display: grid;
+  grid-template-rows: auto minmax(280px, 1fr);
+  gap: 12px;
+}
+
+.agentops-timeline-column .timeline-panel {
+  grid-area: auto;
+  max-height: none;
+}
+
+.agentops-trace-card {
+  overflow: hidden;
+}
+
+.agentops-inspector {
+  max-height: calc(100dvh - 98px);
+  overflow: auto;
+}
+
+.agentops-inspector .inspector-facts {
+  margin-bottom: 12px;
+}
+
+.agentops-inspector-section pre {
+  max-height: 300px;
+}
+
+.empty-state.subtle {
+  background: #fbfcfe;
+  padding: 11px;
+}
+
+.inline-error {
+  margin: 0;
 }
 
 .segmented-control {
@@ -227,6 +506,7 @@ textarea:disabled {
 }
 
 select,
+input,
 textarea {
   width: 100%;
   min-width: 0;
@@ -238,6 +518,7 @@ textarea {
 }
 
 select:focus,
+input:focus,
 textarea:focus,
 button:focus-visible {
   outline: 2px solid #2563eb;
@@ -703,14 +984,24 @@ pre {
 }
 
 @media (max-width: 1100px) {
+  .agentops-grid,
   .dashboard-grid {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-grid {
     grid-template-areas:
       "run"
       "business"
       "conversation"
       "timeline"
       "inspector";
+  }
+
+  .agentops-browser,
+  .agentops-inspector {
+    max-height: none;
+    overflow: visible;
   }
 
   .fact-grid {
@@ -808,6 +1099,10 @@ select optgroup {
   }
 
   .dashboard-grid {
+    padding: 8px;
+  }
+
+  .agentops-grid {
     padding: 8px;
   }
 

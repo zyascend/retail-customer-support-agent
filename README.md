@@ -40,7 +40,7 @@ user message → pre-flight checks → AgentLoop → ToolGateway / WriteActionGu
 uv sync --extra dev
 
 # 2. 启动 Workbench 离线演示（offline_demo，无需 API Key）
-uv run phase4-workbench &           # Python API → :8000
+uv run workbench &                  # Python API → :8765
 cd workbench && npm install && npm run dev   # React 界面 → :5173
 
 # 3. 运行 scripted eval（`scripted_offline_demo` / offline_demo harness）
@@ -88,7 +88,9 @@ uv run python -m app.cli.eval --subset live_guard_smoke --trials 1 --max-workers
 uv run python -m app.eval.live_triage artifacts/phase2/reports/<eval-run-id>.json
 ```
 
-Eval report 会记录 `baseline_metadata`（model、provider、prompt/tool/action-spec hash）、`total_token_usage`、`average_llm_loop_iterations`、tool call / guard block 指标和失败 root cause。
+Eval report 会记录 `baseline_metadata`（model、provider、prompt/tool/action-spec hash）、`total_token_usage`、`average_llm_loop_iterations`、tool call / guard block 指标、`auto_load_count`、`premature_refusal_corrected_count` 和失败 root cause。
+
+Phase 10 后，LLM tool schema 的 description 包含 when-to-use / when-not-to-use / required-prior-read / guard-block guidance；参数 schema 也包含更强的 order/item/payment pattern 约束，方便用 `tool_schema_hash` 追踪 prompt/schema 优化影响。
 
 ## 项目结构
 

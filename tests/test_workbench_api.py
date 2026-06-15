@@ -1,11 +1,100 @@
+import json
+import os
 import tempfile
 import unittest
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from app.config import resolve_config
 from app.workbench.api import create_app
+
+
+def _write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_agentops_artifacts(artifact_dir: Path) -> Path:
+    trace_path = artifact_dir / "traces" / "eval-run-a" / "runs" / "case-a.json"
+    _write_json(
+        artifact_dir / "reports" / "eval-run-a.json",
+        {
+            "eval_run_id": "eval-run-a",
+            "created_at": "2026-06-15T01:00:00+00:00",
+            "eval_backend": "live",
+            "model": "deepseek-v4-flash",
+            "baseline_metadata": {
+                "provider": "deepseek",
+                "subset": "live_smoke_core",
+            },
+            "metrics": {"pass_rate": 0.0},
+            "results": [
+                {
+                    "case_id": "case-a",
+                    "subset": "live_smoke_core",
+                    "passed": False,
+                    "failure_label": "wrong_tool",
+                    "failure_category": "prompt_gap",
+                    "trace_artifact_path": str(trace_path),
+                    "expected_actual_diff": {
+                        "order_status": {"expected": "cancelled", "actual": "pending"}
+                    },
+                }
+            ],
+        },
+    )
+    _write_json(
+        trace_path,
+        {
+            "run_id": "case-a",
+            "messages": [
+                {"role": "user", "content": "cancel order #W1"},
+                {"role": "assistant", "content": "I need confirmation."},
+            ],
+            "metadata": {
+                "llm_responses": [
+                    {
+                        "assistant_content": "I need confirmation.",
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+            "tool_calls": [
+                {
+                    "tool_name": "cancel_pending_order",
+                    "arguments": {"order_id": "#W1"},
+                    "tool_kind": "write",
+                    "status": "blocked",
+                    "error": "explicit_confirmation_required",
+                    "block_context": {
+                        "confirmation_required": True,
+                        "summary": "Cancel order #W1.",
+                    },
+                    "observation": {"block_reason": "explicit_confirmation_required"},
+                }
+            ],
+            "steps": [],
+            "final_state": {
+                "confirmation_status": "required",
+                "pending_action": {"action_name": "cancel_pending_order"},
+            },
+        },
+    )
+    return trace_path
+
+
+@contextmanager
+def _temporary_cwd(path: Path) -> Iterator[None]:
+    original_cwd = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(original_cwd)
 
 
 class WorkbenchAPITests(unittest.TestCase):
@@ -173,6 +262,161 @@ class WorkbenchAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["code"], "empty_message")
+
+    def test_agentops_reports_list_returns_summaries_from_artifact_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            _write_agentops_artifacts(artifact_dir)
+            app = create_app(
+                config=resolve_config(artifact_dir=tmp),
+                agentops_artifact_dir=tmp,
+            )
+            client = TestClient(app)
+
+            response = client.get("/api/agentops/reports")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([report["run_id"] for report in payload], ["eval-run-a"])
+        self.assertEqual(
+            payload[0]["report_path"],
+            str((artifact_dir / "reports" / "eval-run-a.json").resolve()),
+        )
+        self.assertEqual(payload[0]["failure_case_count"], 1)
+        self.assertEqual(payload[0]["subset"], "live_smoke_core")
+
+    def test_default_app_reads_agentops_reports_from_phase2_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact_dir = cwd / "artifacts" / "phase2"
+            _write_agentops_artifacts(artifact_dir)
+            with _temporary_cwd(cwd):
+                app = create_app()
+                client = TestClient(app)
+
+                response = client.get("/api/agentops/reports")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([report["run_id"] for report in payload], ["eval-run-a"])
+        self.assertEqual(
+            payload[0]["report_path"],
+            str((artifact_dir / "reports" / "eval-run-a.json").resolve()),
+        )
+
+    def test_explicit_demo_artifact_dir_does_not_override_default_agentops_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            demo_artifact_dir = cwd / "artifacts" / "workbench"
+            agentops_artifact_dir = cwd / "artifacts" / "phase2"
+            _write_agentops_artifacts(agentops_artifact_dir)
+            with _temporary_cwd(cwd):
+                app = create_app(config=resolve_config(artifact_dir=str(demo_artifact_dir)))
+                client = TestClient(app)
+
+                response = client.get("/api/agentops/reports")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([report["run_id"] for report in payload], ["eval-run-a"])
+        self.assertEqual(
+            payload[0]["report_path"],
+            str((agentops_artifact_dir / "reports" / "eval-run-a.json").resolve()),
+        )
+
+    def test_agentops_report_detail_returns_cases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_agentops_artifacts(Path(tmp))
+            app = create_app(
+                config=resolve_config(artifact_dir=tmp),
+                agentops_artifact_dir=tmp,
+            )
+            client = TestClient(app)
+
+            response = client.get("/api/agentops/reports/eval-run-a")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["run_id"], "eval-run-a")
+        self.assertEqual(payload["metrics"], {"pass_rate": 0.0})
+        self.assertEqual(payload["cases"][0]["case_id"], "case-a")
+        self.assertEqual(payload["cases"][0]["root_cause"], "prompt_gap")
+
+    def test_agentops_case_detail_returns_merged_trace_and_report_signals(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            trace_path = _write_agentops_artifacts(Path(tmp))
+            app = create_app(
+                config=resolve_config(artifact_dir=tmp),
+                agentops_artifact_dir=tmp,
+            )
+            client = TestClient(app)
+
+            response = client.get("/api/agentops/reports/eval-run-a/cases/case-a")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["case_id"], "case-a")
+        self.assertEqual(payload["failure_label"], "wrong_tool")
+        self.assertEqual(payload["root_cause"], "prompt_gap")
+        self.assertEqual(payload["user_messages"], ["cancel order #W1"])
+        self.assertEqual(payload["assistant_messages"], ["I need confirmation."])
+        self.assertEqual(
+            payload["guard_context"],
+            [{"confirmation_required": True, "summary": "Cancel order #W1."}],
+        )
+        self.assertEqual(payload["db_assertion_diff"]["order_status"]["actual"], "pending")
+        self.assertEqual(payload["trace_summary"]["guard_block_count"], 1)
+        self.assertEqual(payload["trace_detail"]["trace_id"], "case-a")
+        self.assertEqual(payload["trace_detail"]["trace_artifact_path"], str(trace_path))
+
+    def test_agentops_trace_by_path_returns_trace_detail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            trace_path = _write_agentops_artifacts(Path(tmp))
+            app = create_app(
+                config=resolve_config(artifact_dir=tmp),
+                agentops_artifact_dir=tmp,
+            )
+            client = TestClient(app)
+
+            response = client.get(
+                "/api/agentops/traces/by-path",
+                params={"path": str(trace_path)},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["trace_id"], "case-a")
+        self.assertEqual(payload["trace_artifact_path"], str(trace_path))
+        self.assertEqual(payload["turns"][0]["messages"][0]["content"], "cancel order #W1")
+
+    def test_agentops_trace_by_path_rejects_relative_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = create_app(
+                config=resolve_config(artifact_dir=tmp),
+                agentops_artifact_dir=tmp,
+            )
+            client = TestClient(app)
+
+            response = client.get(
+                "/api/agentops/traces/by-path",
+                params={"path": "traces/case-a.json"},
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "invalid_trace_path")
+
+    def test_agentops_missing_report_returns_structured_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = create_app(
+                config=resolve_config(artifact_dir=tmp),
+                agentops_artifact_dir=tmp,
+            )
+            client = TestClient(app)
+
+            response = client.get("/api/agentops/reports/missing-run")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"]["code"], "report_not_found")
 
 
 if __name__ == "__main__":

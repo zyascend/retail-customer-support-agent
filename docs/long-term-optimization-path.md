@@ -412,6 +412,28 @@ block_context: dict[str, Any] = field(default_factory=dict)
 - schema 是否仍从单一事实来源派生。
 - auto-load/correction 是否被监控，而不是悄悄扩大。
 
+### Phase 10 Review
+
+Phase 10 将优化收敛在 LLM 可见契约，而不是新增 case-specific intent parser：
+
+- `ToolRegistry.tool_schemas_for_llm()` 的 description 从功能说明升级为选择契约，包含 when to use、when not to use、required prior reads 和 guard block 后的解释方式。
+- 参数 schema 继续从 registry/action specs 派生，并补强 `order_id`、`item_ids`、`new_item_ids`、`payment_method_id` 的 pattern 约束，保留已有 enum、required 和 `additionalProperties: false`。
+- `ContextBuilder` 的 state summary 新增 recent guard block 和 recent tool error，让模型下一轮能基于最近失败信号修正行为。
+- eval report metrics 新增 `auto_load_count` 和 `premature_refusal_corrected_count`，用于长期监控 runtime 兜底依赖是否下降。
+
+验证重点：
+
+- `tool_schema_hash` 会随 schema/description contract 变化进入 Phase 9 baseline metadata。
+- live smoke 需要继续观察 pass rate、token usage、tool call count、`auto_load_count` 和 `premature_refusal_corrected_count`。
+- Phase 11 可以基于这些指标做 trace compare/workbench，不需要先扩 tau coverage。
+
+2026-06-15 验证结果：
+
+- `curated_mvp` scripted：11/11，通过。
+- `curated_mvp` live：11/11，`total_tokens=72484`，`auto_load_count=0`，`premature_refusal_corrected_count=0`。
+- `live_smoke_core` live：6/6，`total_tokens=40003`，`auto_load_count=0`，`premature_refusal_corrected_count=0`。
+- `live_guard_smoke` live：3/3，`total_tokens=19777`，`auto_load_count=0`，`premature_refusal_corrected_count=0`。
+
 ## Phase 11：Replay Debugger and Workbench AgentOps
 
 ### 目标

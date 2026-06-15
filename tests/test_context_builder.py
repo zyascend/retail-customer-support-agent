@@ -95,3 +95,31 @@ def test_recent_messages_not_included() -> None:
         session.messages.append(Message(role="user", content=f"msg {i}"))
     summary = ContextBuilder(policy_text="dummy").build(session)
     assert "msg" not in summary
+
+
+def test_build_includes_recent_tool_error_and_guard_block() -> None:
+    session = SessionState(session_id="ctx-4", authenticated_user_id="U1")
+    session.tool_results.append(
+        ToolCallRecord(
+            tool_name="cancel_pending_order",
+            arguments={"order_id": "#W1", "reason": "no longer needed"},
+            tool_kind="write",
+            status="blocked",
+            error="ownership_violation",
+            block_context={"order_id": "#W1"},
+        )
+    )
+    session.tool_results.append(
+        ToolCallRecord(
+            tool_name="get_order_details",
+            arguments={"order_id": "#W404"},
+            tool_kind="read",
+            status="error",
+            error="order_not_found",
+        )
+    )
+
+    summary = ContextBuilder(policy_text="dummy").build(session)
+
+    assert "Recent guard block: cancel_pending_order ownership_violation" in summary
+    assert "Recent tool error: get_order_details order_not_found" in summary

@@ -10,6 +10,7 @@ import {
 } from "./api";
 import { BusinessState } from "./components/BusinessState";
 import { Conversation } from "./components/Conversation";
+import { AgentOpsWorkspace } from "./components/AgentOpsWorkspace";
 import { Inspector } from "./components/Inspector";
 import { RunControl } from "./components/RunControl";
 import { Timeline } from "./components/Timeline";
@@ -20,7 +21,10 @@ import type {
   WorkbenchSnapshot,
 } from "./types";
 
+type WorkbenchSurface = "demo" | "agentops";
+
 export function App() {
+  const [surface, setSurface] = useState<WorkbenchSurface>("demo");
   const [config, setConfig] = useState<WorkbenchConfig | null>(null);
   const [snapshot, setSnapshot] = useState<WorkbenchSnapshot | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -159,51 +163,83 @@ export function App() {
       <header className="topbar">
         <div>
           <h1>零售客服工作台</h1>
-          <p>零售客服 Agent 演示面板</p>
+          <p>
+            {surface === "demo"
+              ? "零售客服 Agent 演示面板"
+              : "AgentOps 运行报告与 Trace 调试台"}
+          </p>
         </div>
         <div className="topbar-status">
-          <span className="case-label">{selectedCase?.title || "正在加载案例"}</span>
-          <span className="mode-pill">
-            {modeLabel(snapshot?.mode || config?.default_mode)}
-          </span>
+          <nav className="surface-tabs" aria-label="工作台工作面">
+            <button
+              className={surface === "demo" ? "active" : ""}
+              onClick={() => setSurface("demo")}
+              type="button"
+            >
+              Demo
+            </button>
+            <button
+              className={surface === "agentops" ? "active" : ""}
+              onClick={() => setSurface("agentops")}
+              type="button"
+            >
+              AgentOps
+            </button>
+          </nav>
+          {surface === "demo" ? (
+            <>
+              <span className="case-label">{selectedCase?.title || "正在加载案例"}</span>
+              <span className="mode-pill">
+                {modeLabel(snapshot?.mode || config?.default_mode)}
+              </span>
+            </>
+          ) : (
+            <span className="mode-pill">只读分析</span>
+          )}
         </div>
       </header>
 
-      {error ? <div className="error-banner">{error}</div> : null}
+      {surface === "demo" ? (
+        <>
+          {error ? <div className="error-banner">{error}</div> : null}
 
-      {config && snapshot ? (
-        <section className="dashboard-grid" aria-label="工作台仪表盘">
-          <RunControl
-            busy={busy}
-            catalog={config.case_catalog}
-            llmAvailable={config.llm_available}
-            onModeChange={handleModeChange}
-            onReset={handleReset}
-            onRunAll={handleRunAll}
-            onSelectCase={handleSelectCase}
-            onSendMessage={handleSendMessage}
-            onStep={handleStep}
-            snapshot={snapshot}
-          />
-          <BusinessState
-            busy={busy}
-            onChange={() => handleSendMessage("change")}
-            onConfirm={() => handleSendMessage("yes")}
-            onDeny={() => handleSendMessage("no")}
-            snapshot={snapshot}
-          />
-          <Conversation snapshot={snapshot} />
-          <Timeline
-            events={snapshot.timeline}
-            onSelectEvent={setSelectedEventId}
-            selectedEventId={activeEvent?.id || null}
-          />
-          <Inspector event={activeEvent} snapshot={snapshot} />
-        </section>
+          {config && snapshot ? (
+            <section className="dashboard-grid" aria-label="工作台仪表盘">
+              <RunControl
+                busy={busy}
+                catalog={config.case_catalog}
+                llmAvailable={config.llm_available}
+                onModeChange={handleModeChange}
+                onReset={handleReset}
+                onRunAll={handleRunAll}
+                onSelectCase={handleSelectCase}
+                onSendMessage={handleSendMessage}
+                onStep={handleStep}
+                snapshot={snapshot}
+              />
+              <BusinessState
+                busy={busy}
+                onChange={() => handleSendMessage("change")}
+                onConfirm={() => handleSendMessage("yes")}
+                onDeny={() => handleSendMessage("no")}
+                snapshot={snapshot}
+              />
+              <Conversation snapshot={snapshot} />
+              <Timeline
+                events={snapshot.timeline}
+                onSelectEvent={setSelectedEventId}
+                selectedEventId={activeEvent?.id || null}
+              />
+              <Inspector event={activeEvent} snapshot={snapshot} />
+            </section>
+          ) : (
+            <section className="loading-shell" aria-live="polite">
+              正在加载工作台...
+            </section>
+          )}
+        </>
       ) : (
-        <section className="loading-shell" aria-live="polite">
-          正在加载工作台...
-        </section>
+        <AgentOpsWorkspace />
       )}
     </main>
   );
