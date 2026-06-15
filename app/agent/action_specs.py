@@ -172,25 +172,35 @@ def tool_constraints_for_llm(name: str) -> str:
         ),
         "modify_pending_order_items": (
             "order must be pending; new items must be same product as old; "
-            "new items must be available; count must match; requires user confirmation"
+            "new items must be available; count must match; when changing multiple "
+            "items in the same order, call once with parallel item_ids and "
+            "new_item_ids arrays; after success, calculate replacement charges or "
+            "gift-card balance instead of calling modify_pending_order_payment; "
+            "requires user confirmation"
         ),
         "modify_pending_order_payment": (
             "order must be pending; payment method must belong to user; "
-            "must differ from current; gift card must have sufficient balance; "
-            "requires user confirmation"
+            "must differ from current; do not use after modify_pending_order_items "
+            "just to cover replacement charges or answer balance questions; "
+            "gift card must have sufficient balance; requires user confirmation"
         ),
         "modify_user_address": (
             "target user must be authenticated user; "
             "address passed to user_id argument; requires user confirmation"
         ),
         "return_delivered_order_items": (
-            "order must be delivered; items must be in the order; "
-            "payment method must belong to user; requires user confirmation"
+            "order must be delivered; item_ids must be existing item IDs from "
+            "get_order_details for that exact order; "
+            "payment method must belong to user; if exactly one eligible payment "
+            "method is known, use it instead of asking; requires user confirmation"
         ),
         "exchange_delivered_order_items": (
-            "order must be delivered; old and new item counts must match; "
+            "order must be delivered; old item_ids must be existing item IDs from "
+            "get_order_details for that exact order; old and new item counts must match; "
             "new items must be same product as old; new items must be available; "
-            "payment method must belong to user; requires user confirmation"
+            "match all requested replacement options; payment method must belong "
+            "to user; if exactly one eligible payment method is known, use it "
+            "instead of asking; requires user confirmation"
         ),
         "modify_pending_order_shipping_method": (
             "order must be pending; new shipping method must differ from current; "

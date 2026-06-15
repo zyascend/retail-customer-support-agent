@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.agent.models import SessionState
+from app.agent.models import SessionState, ToolCallRecord
 
 
 class ContextBuilder:
@@ -36,6 +36,26 @@ class ContextBuilder:
                 order_parts.append(f"#{oid}={status} ({item_count} items)")
             parts.append("Orders: " + ", ".join(order_parts))
 
+        payment_parts = []
+        for user in session.loaded_context.users.values():
+            methods = user.get("payment_methods", {}) if isinstance(user, dict) else {}
+            if not isinstance(methods, dict):
+                continue
+            for method_id, method in methods.items():
+                if not isinstance(method, dict):
+                    payment_parts.append(str(method_id))
+                    continue
+                source = method.get("source")
+                balance = method.get("balance")
+                if balance is not None:
+                    payment_parts.append(f"{method_id}({source}, balance={balance})")
+                elif source:
+                    payment_parts.append(f"{method_id}({source})")
+                else:
+                    payment_parts.append(str(method_id))
+        if payment_parts:
+            parts.append("Payment methods: " + ", ".join(payment_parts))
+
         if session.pending_action:
             parts.append(
                 f"Pending: {session.pending_action.action_name} "
@@ -44,6 +64,18 @@ class ContextBuilder:
 
         if session.write_locks:
             parts.append(f"Locks: {', '.join(session.write_locks)}")
+
+        recent_successful_writes = [
+            record
+            for record in reversed(session.tool_results)
+            if record.tool_kind == "write" and record.status == "success"
+        ][:3]
+        if recent_successful_writes:
+            summaries = [
+                self._format_successful_write(record)
+                for record in reversed(recent_successful_writes)
+            ]
+            parts.append("Recent successful writes: " + "; ".join(summaries))
 
         recent_guard_block = next(
             (
@@ -76,5 +108,92 @@ class ContextBuilder:
 
         return "\n".join(parts)
 
+    @staticmethod
+    def _format_successful_write(record: ToolCallRecord) -> str:
+        fields = [record.tool_name]
+        if record.resource_lock:
+            fields.append(f"lock={record.resource_lock}")
+
+        order_id = record.arguments.get("order_id")
+        if order_id:
+            fields.append(f"order={order_id}")
+
+        item_ids = _string_list(record.arguments.get("item_ids"))
+        if item_ids:
+            fields.append("target_items=[" + ", ".join(item_ids) + "]")
+
+        new_item_ids = _string_list(record.arguments.get("new_item_ids"))
+        if item_ids and new_item_ids:
+            replacements = [
+                f"{old}->{new}" for old, new in zip(item_ids, new_item_ids, strict=False)
+            ]
+            fields.append("replacements=[" + ", ".join(replacements) + "]")
+
+        observation = record.observation if isinstance(record.observation, dict) else {}
+        status = observation.get("status")
+        if status:
+            fields.append(f"status={status}")
+
+        payment_parts = []
+        for payment in observation.get("payment_history", []) or []:
+            if not isinstance(payment, dict):
+                continue
+            amount = payment.get("amount")
+            method = payment.get("payment_method_id")
+            tx_type = payment.get("transaction_type")
+            if amount is None:
+                continue
+            if tx_type and method:
+                payment_parts.append(f"{tx_type} {amount} via {method}")
+            elif tx_type:
+                payment_parts.append(f"{tx_type} {amount}")
+            else:
+                payment_parts.append(str(amount))
+        if payment_parts:
+            fields.append("payments=[" + ", ".join(payment_parts) + "]")
+
+        item_parts = []
+        for item in observation.get("items", []) or []:
+            if not isinstance(item, dict):
+                continue
+            item_id = item.get("item_id")
+            name = item.get("name")
+            price = item.get("price")
+            if item_id and name and price is not None:
+                item_parts.append(f"{item_id} {name} {price}")
+        if item_parts:
+            fields.append("items=[" + ", ".join(item_parts[:5]) + "]")
+
+        target_total = _target_item_total(observation, item_ids)
+        if target_total is not None:
+            fields.append(f"target_item_total={target_total:.2f}")
+
+        return " ".join(fields)
+
     def estimate_tokens(self, text: str) -> int:
         return max(1, int(len(text.split()) / 0.75))
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value]
+
+
+def _target_item_total(observation: dict, item_ids: list[str]) -> float | None:
+    if not item_ids:
+        return None
+    wanted = set(item_ids)
+    total = 0.0
+    matched = False
+    for item in observation.get("items", []) or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("item_id")) not in wanted:
+            continue
+        price = item.get("price")
+        if price is None:
+            continue
+        total += float(price)
+        matched = True
+    return total if matched else None

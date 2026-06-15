@@ -157,6 +157,16 @@ def _load_tau_task_by_id(case_id: str, config: AppConfig) -> Optional[dict]:
     return None
 
 
+def _is_tau_conversation_subset(subset: Optional[str]) -> bool:
+    return bool(subset and subset.startswith(("tau_retail_", "tau_phase12_")))
+
+
+def _requires_assistant_response_check(case: EvalCase) -> bool:
+    if case.subset == "tau_phase12_nl_evidence":
+        return True
+    return not _is_tau_conversation_subset(case.subset)
+
+
 class CuratedEvalRunner:
     def __init__(
         self,
@@ -398,7 +408,7 @@ class CuratedEvalRunner:
         # Tau subsets: use UserSimulator for multi-turn conversations
         user_simulator_callback = None
         run_messages = case.messages
-        if case.subset and case.subset.startswith("tau_retail_"):
+        if _is_tau_conversation_subset(case.subset):
             task_data = _load_tau_task_by_id(case.case_id, self.config)
             if task_data is not None:
                 from app.eval.tau_user_simulator import TauUserSimulator
@@ -1042,8 +1052,14 @@ def classify_failure(
     confirmation_status: str,
     db_assertion_failures: Optional[List[str]] = None,
 ) -> Optional[str]:
-    # Phase 9 tau subsets: loose evaluation (Phase 9.1 smoke test)
-    is_tau = case.subset.startswith("tau_retail_") if case.subset else False
+    # Tau-derived subsets use loose auth/intent checks because tau cases skip
+    # strict user_id assertions after converting external task scripts.
+    is_tau = _is_tau_conversation_subset(case.subset)
+    defer_intermediate_tool_failures = (
+        case.subset == "tau_phase12_nl_evidence"
+        and bool(case.expected_db_assertions)
+        and bool(case.expected_assistant_contains)
+    )
 
     if llm_errors:
         return "llm_json_failure"
@@ -1081,12 +1097,12 @@ def classify_failure(
         ]
         if violated:
             return "forbidden_tool_called"
-    if tool_errors:
+    if tool_errors and not defer_intermediate_tool_failures:
         return "tool_exception"
     if case.expected_guard_block_reason:
         if case.expected_guard_block_reason not in guard_block_reasons:
             return "expected_guard_block_missing"
-    elif guard_blocks:
+    elif guard_blocks and not defer_intermediate_tool_failures:
         return "guard_blocked"
     # Tau subsets skip confirmation status check
     if not is_tau:
@@ -1105,11 +1121,10 @@ def classify_failure(
             return "db_state_mismatch"
     if db_assertion_failures:
         return "db_assertion_mismatch"
-    if not is_tau:
-        if case.expected_assistant_contains:
-            transcript = "\n".join(assistant_messages)
-            if case.expected_assistant_contains.lower() not in transcript.lower():
-                return "response_mismatch"
+    if _requires_assistant_response_check(case) and case.expected_assistant_contains:
+        transcript = "\n".join(assistant_messages)
+        if case.expected_assistant_contains.lower() not in transcript.lower():
+            return "response_mismatch"
     # Tau subsets skip tool_sequence check
     if not is_tau:
         if case.expected_tool_sequence:

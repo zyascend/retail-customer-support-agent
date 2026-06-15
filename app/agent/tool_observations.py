@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-TOOL_OBSERVATION_LIMIT = 1200
+TOOL_OBSERVATION_LIMIT = 4000
 PRIORITY_OBSERVATION_KEYS = (
     "status",
     "order_status",

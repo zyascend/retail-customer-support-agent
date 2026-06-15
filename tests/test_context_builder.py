@@ -123,3 +123,109 @@ def test_build_includes_recent_tool_error_and_guard_block() -> None:
 
     assert "Recent guard block: cancel_pending_order ownership_violation" in summary
     assert "Recent tool error: get_order_details order_not_found" in summary
+
+
+def test_build_includes_recent_successful_write_amount_context() -> None:
+    session = SessionState(session_id="ctx-5", authenticated_user_id="U1")
+    session.tool_results.append(
+        ToolCallRecord(
+            tool_name="return_delivered_order_items",
+            arguments={
+                "order_id": "#W1",
+                "item_ids": ["I1"],
+                "payment_method_id": "paypal_1",
+            },
+            tool_kind="write",
+            status="success",
+            resource_lock="item:I1:return",
+            observation={
+                "order_id": "#W1",
+                "status": "return requested",
+                "payment_history": [
+                    {
+                        "amount": 25.5,
+                        "payment_method_id": "paypal_1",
+                        "transaction_type": "refund",
+                    }
+                ],
+                "items": [
+                    {"item_id": "I1", "name": "Widget", "price": 25.5},
+                ],
+            },
+        )
+    )
+
+    summary = ContextBuilder(policy_text="dummy").build(session)
+
+    assert "Recent successful writes:" in summary
+    assert "return_delivered_order_items" in summary
+    assert "item:I1:return" in summary
+    assert "refund 25.5 via paypal_1" in summary
+    assert "I1 Widget 25.5" in summary
+
+
+def test_successful_return_write_includes_target_item_total() -> None:
+    session = SessionState(session_id="ctx-6", authenticated_user_id="U1")
+    session.tool_results.append(
+        ToolCallRecord(
+            tool_name="return_delivered_order_items",
+            arguments={
+                "order_id": "#W2",
+                "item_ids": ["I1", "I3"],
+                "payment_method_id": "paypal_1",
+            },
+            tool_kind="write",
+            status="success",
+            resource_lock="item:I1,I3:return",
+            observation={
+                "order_id": "#W2",
+                "status": "return requested",
+                "payment_history": [
+                    {
+                        "amount": 999.0,
+                        "payment_method_id": "paypal_1",
+                        "transaction_type": "payment",
+                    }
+                ],
+                "items": [
+                    {"item_id": "I1", "name": "Skateboard", "price": 200.8},
+                    {"item_id": "I2", "name": "Tent", "price": 500.0},
+                    {"item_id": "I3", "name": "Backpack", "price": 193.38},
+                ],
+            },
+        )
+    )
+
+    summary = ContextBuilder(policy_text="dummy").build(session)
+
+    assert "target_items=[I1, I3]" in summary
+    assert "target_item_total=394.18" in summary
+
+
+def test_successful_modify_write_includes_replacement_ids() -> None:
+    session = SessionState(session_id="ctx-7", authenticated_user_id="U1")
+    session.tool_results.append(
+        ToolCallRecord(
+            tool_name="modify_pending_order_items",
+            arguments={
+                "order_id": "#W3",
+                "item_ids": ["old1"],
+                "new_item_ids": ["new1"],
+                "payment_method_id": "gift_card_1",
+            },
+            tool_kind="write",
+            status="success",
+            resource_lock="order:#W3:modify_items",
+            observation={
+                "order_id": "#W3",
+                "status": "pending (item modified)",
+                "items": [
+                    {"item_id": "new1", "name": "Desk Lamp", "price": 135.24},
+                ],
+            },
+        )
+    )
+
+    summary = ContextBuilder(policy_text="dummy").build(session)
+
+    assert "replacements=[old1->new1]" in summary

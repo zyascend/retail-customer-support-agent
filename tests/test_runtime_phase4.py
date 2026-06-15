@@ -3,8 +3,14 @@ from __future__ import annotations
 import tempfile
 from dataclasses import replace
 
-from app.agent.models import PendingAction, SessionState
-from app.agent.providers import DisabledLLMProvider
+from app.agent.models import (
+    Message,
+    PendingAction,
+    SessionState,
+    ToolCallRequest,
+    ToolCallResponse,
+)
+from app.agent.providers import DisabledLLMProvider, ScriptedToolCallingProvider
 from app.agent.runtime import AgentRuntime
 from app.config import resolve_config
 from app.tools.retail_adapter import get_order_from_db
@@ -102,6 +108,113 @@ class TestRuntimePreflightConfirmation:
 
             msg = runtime.handle_user_message(session, "yes confirm")
             assert "completed" in msg.lower() or "Done" in msg
+
+    def test_confirmed_action_returns_to_llm_for_remaining_requested_work(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            provider = ScriptedToolCallingProvider(
+                responses=[
+                    ToolCallResponse(
+                        tool_calls=[
+                            ToolCallRequest(
+                                id="call_cancel_first",
+                                tool_name="cancel_pending_order",
+                                arguments={
+                                    "order_id": "#W5199551",
+                                    "reason": "no longer needed",
+                                },
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ToolCallResponse(
+                        tool_calls=[
+                            ToolCallRequest(
+                                id="call_cancel_second",
+                                tool_name="cancel_pending_order",
+                                arguments={
+                                    "order_id": "#W8665881",
+                                    "reason": "no longer needed",
+                                },
+                            )
+                        ],
+                        finish_reason="tool_calls",
+                    ),
+                    ToolCallResponse(
+                        assistant_content="I cancelled both pending orders.",
+                        finish_reason="stop",
+                    ),
+                ]
+            )
+            runtime = AgentRuntime(config, provider=provider)
+            session = SessionState(session_id="test-confirm-continue")
+            session.authenticated_user_id = "fatima_johnson_7581"
+            db = runtime.retail_runtime.db
+            first_order = get_order_from_db(db, "#W5199551")
+            second_order = get_order_from_db(db, "#W8665881")
+            session.loaded_context.orders["#W5199551"] = first_order
+            session.loaded_context.orders["#W8665881"] = second_order
+
+            first_msg = runtime.handle_user_message(
+                session,
+                (
+                    "Cancel all pending orders because they are no longer needed, "
+                    "including #W5199551 and #W8665881."
+                ),
+            )
+            assert "confirm" in first_msg.lower()
+
+            second_msg = runtime.handle_user_message(session, "yes confirm")
+
+            assert "confirm" in second_msg.lower()
+            assert len(provider.calls) >= 2
+            assert session.pending_action is not None
+            assert session.pending_action.action_name == "cancel_pending_order"
+            assert session.pending_action.arguments["order_id"] == "#W8665881"
+
+    def test_confirmation_continuation_preserves_original_request_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            provider = ScriptedToolCallingProvider(
+                responses=[
+                    ToolCallResponse(
+                        assistant_content="I can continue the full original request.",
+                        finish_reason="stop",
+                    ),
+                ]
+            )
+            runtime = AgentRuntime(config, provider=provider)
+            session = SessionState(session_id="test-confirm-original-context")
+            original_request = (
+                "Return the skateboard, garden hose, backpack, keyboard, and bed, "
+                "then tell me the total refund amount."
+            )
+            session.messages.append(Message(role="user", content=original_request))
+            for index in range(4):
+                session.messages.append(
+                    Message(role="assistant", content=f"Intermediate reply {index}")
+                )
+                session.messages.append(
+                    Message(role="user", content=f"Intermediate user turn {index}")
+                )
+            session.authenticated_user_id = "isabella_johansson_2152"
+            db = runtime.retail_runtime.db
+            order = get_order_from_db(db, "#W3792453")
+            session.loaded_context.orders["#W3792453"] = order
+            session.pending_action = PendingAction(
+                action_name="return_delivered_order_items",
+                arguments={
+                    "order_id": "#W3792453",
+                    "item_ids": ["4293355847"],
+                    "payment_method_id": "paypal_3024827",
+                },
+                user_facing_summary="Return one item",
+            )
+
+            runtime.handle_user_message(session, "yes confirm")
+
+            continuation_messages = provider.calls[0]["messages"]
+            assert original_request in continuation_messages[-1]["content"]
 
     def test_deny_clears_pending(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

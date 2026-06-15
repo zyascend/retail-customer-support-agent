@@ -1,11 +1,18 @@
 """Tests for tau3 task loader and EvalCase converter."""
 
+import json
+from pathlib import Path
+
+from app.config import AppConfig
 from app.eval.cases import EvalCase
 from app.eval.runner import classify_failure
 from app.eval.tau_loader import (
     _build_user_message,
     _derive_db_assertions,
     convert_task_to_eval_case,
+    get_phase12_candidate_cases,
+    get_phase12_nl_evidence_cases,
+    get_phase12_schema_ready_cases,
 )
 
 # Sample tau3 task matching the real format
@@ -144,6 +151,256 @@ class TestConvertTaskToEvalCase:
         assert "get_order_details" in case.expected_tool_names
 
 
+def test_get_phase12_candidate_cases_returns_safe_partial_candidates(tmp_path):
+    retail_dir = tmp_path / "domains" / "retail"
+    retail_dir.mkdir(parents=True)
+    tasks = [
+        {
+            "id": 1,
+            "user_scenario": {
+                "instructions": {
+                    "reason_for_call": "You want to check the status of order #W123.",
+                    "known_info": "Your email is test@example.com.",
+                    "unknown_info": "",
+                }
+            },
+            "evaluation_criteria": {
+                "actions": [
+                    {
+                        "name": "get_order_details",
+                        "arguments": {"order_id": "#W123"},
+                    }
+                ],
+                "nl_assertions": ["Agent should tell the user the status."],
+                "reward_basis": ["DB", "NL_ASSERTION"],
+            },
+        }
+    ]
+    (retail_dir / "tasks.json").write_text(json.dumps(tasks), encoding="utf-8")
+    (retail_dir / "split_tasks.json").write_text(
+        json.dumps({"train": ["1"], "test": [], "base": ["1"]}),
+        encoding="utf-8",
+    )
+
+    cases = get_phase12_candidate_cases(_config(tmp_path), limit=1)
+
+    assert [case.case_id for case in cases] == ["tau_1"]
+    assert cases[0].subset == "tau_phase12_candidates"
+
+
+def test_get_phase12_schema_ready_cases_returns_auxiliary_only_candidates(tmp_path):
+    retail_dir = tmp_path / "domains" / "retail"
+    retail_dir.mkdir(parents=True)
+    tasks = [
+        {
+            "id": 49,
+            "user_scenario": {
+                "instructions": {
+                    "reason_for_call": "You want to exchange an item and know the price difference.",
+                    "known_info": "Your email is test@example.com.",
+                    "unknown_info": "",
+                }
+            },
+            "evaluation_criteria": {
+                "actions": [
+                    {"name": "calculate", "arguments": {"expression": "12.00 - 10.00"}},
+                    {
+                        "name": "exchange_delivered_order_items",
+                        "arguments": {
+                            "order_id": "#W123",
+                            "item_ids": ["111"],
+                            "new_item_ids": ["222"],
+                            "payment_method_id": "credit_card_123",
+                        },
+                    },
+                ],
+                "nl_assertions": None,
+                "reward_basis": ["DB"],
+            },
+        },
+        {
+            "id": 50,
+            "user_scenario": {
+                "instructions": {
+                    "reason_for_call": "You want to calculate a refund and hear the amount.",
+                    "known_info": "Your email is test@example.com.",
+                    "unknown_info": "",
+                }
+            },
+            "evaluation_criteria": {
+                "actions": [{"name": "calculate", "arguments": {"expression": "5 + 2"}}],
+                "nl_assertions": ["Agent should tell the user the amount."],
+                "reward_basis": ["DB", "NL_ASSERTION"],
+            },
+        },
+    ]
+    (retail_dir / "tasks.json").write_text(json.dumps(tasks), encoding="utf-8")
+    (retail_dir / "split_tasks.json").write_text(
+        json.dumps({"train": ["49", "50"], "test": [], "base": ["49", "50"]}),
+        encoding="utf-8",
+    )
+
+    cases = get_phase12_schema_ready_cases(_config(tmp_path), limit=10)
+
+    assert [case.case_id for case in cases] == ["tau_49"]
+    assert cases[0].subset == "tau_phase12_schema_ready"
+    assert cases[0].expected_tool_names == [
+        "calculate",
+        "exchange_delivered_order_items",
+    ]
+
+
+def test_get_phase12_nl_evidence_cases_requires_extracted_response_fragment(tmp_path):
+    retail_dir = tmp_path / "domains" / "retail"
+    retail_dir.mkdir(parents=True)
+    tasks = [
+        {
+            "id": 16,
+            "user_scenario": {
+                "instructions": {
+                    "reason_for_call": (
+                        "You want to return several items and know the total refund."
+                    ),
+                    "known_info": "You are Fatima Johnson in zipcode 78712.",
+                    "unknown_info": "",
+                }
+            },
+            "evaluation_criteria": {
+                "actions": [
+                    {"name": "calculate", "arguments": {"expression": "1 + 2"}},
+                    {
+                        "name": "return_delivered_order_items",
+                        "arguments": {
+                            "order_id": "#W123",
+                            "item_ids": ["111"],
+                            "payment_method_id": "paypal_123",
+                        },
+                    },
+                ],
+                "nl_assertions": [
+                    "Agent should tell the user the total refund amount is $8,276.23."
+                ],
+                "reward_basis": ["DB", "NL_ASSERTION"],
+            },
+        },
+        {
+            "id": 17,
+            "user_scenario": {
+                "instructions": {
+                    "reason_for_call": "You want to calculate something.",
+                    "known_info": "Your email is test@example.com.",
+                    "unknown_info": "",
+                }
+            },
+            "evaluation_criteria": {
+                "actions": [{"name": "calculate", "arguments": {"expression": "5 + 2"}}],
+                "nl_assertions": ["Agent should answer politely."],
+                "reward_basis": ["DB", "NL_ASSERTION"],
+            },
+        },
+    ]
+    (retail_dir / "tasks.json").write_text(json.dumps(tasks), encoding="utf-8")
+    (retail_dir / "split_tasks.json").write_text(
+        json.dumps({"train": ["16", "17"], "test": [], "base": ["16", "17"]}),
+        encoding="utf-8",
+    )
+
+    cases = get_phase12_nl_evidence_cases(_config(tmp_path), limit=10)
+
+    assert [case.case_id for case in cases] == ["tau_16"]
+    assert cases[0].subset == "tau_phase12_nl_evidence"
+    assert cases[0].expected_assistant_contains == "$8,276.23"
+    assert cases[0].max_turns == 10
+
+
+def test_get_cases_supports_phase12_candidate_subset(monkeypatch):
+    from app.eval.cases import get_cases
+
+    sentinel_config = object()
+    expected_cases = [
+        EvalCase(
+            case_id="tau_1",
+            category="lookup",
+            messages=[{"role": "user", "content": "test"}],
+            expected_user_id="",
+            expected_intent="lookup",
+            subset="tau_phase12_candidates",
+        )
+    ]
+
+    monkeypatch.setattr("app.config.resolve_config", lambda: sentinel_config)
+
+    def fake_get_phase12_candidate_cases(config):
+        assert config is sentinel_config
+        return expected_cases
+
+    monkeypatch.setattr(
+        "app.eval.tau_loader.get_phase12_candidate_cases",
+        fake_get_phase12_candidate_cases,
+    )
+
+    assert get_cases("tau_phase12_candidates") == expected_cases
+
+
+def test_get_cases_supports_phase12_schema_ready_subset(monkeypatch):
+    from app.eval.cases import get_cases
+
+    sentinel_config = object()
+    expected_cases = [
+        EvalCase(
+            case_id="tau_49",
+            category="exchange_items",
+            messages=[{"role": "user", "content": "test"}],
+            expected_user_id="",
+            expected_intent="exchange_items",
+            subset="tau_phase12_schema_ready",
+        )
+    ]
+
+    monkeypatch.setattr("app.config.resolve_config", lambda: sentinel_config)
+
+    def fake_get_phase12_schema_ready_cases(config):
+        assert config is sentinel_config
+        return expected_cases
+
+    monkeypatch.setattr(
+        "app.eval.tau_loader.get_phase12_schema_ready_cases",
+        fake_get_phase12_schema_ready_cases,
+    )
+
+    assert get_cases("tau_phase12_schema_ready") == expected_cases
+
+
+def test_get_cases_supports_phase12_nl_evidence_subset(monkeypatch):
+    from app.eval.cases import get_cases
+
+    sentinel_config = object()
+    expected_cases = [
+        EvalCase(
+            case_id="tau_16",
+            category="return",
+            messages=[{"role": "user", "content": "test"}],
+            expected_user_id="",
+            expected_intent="return_items",
+            expected_assistant_contains="$8,276.23",
+            subset="tau_phase12_nl_evidence",
+        )
+    ]
+
+    monkeypatch.setattr("app.config.resolve_config", lambda: sentinel_config)
+
+    def fake_get_phase12_nl_evidence_cases(config):
+        assert config is sentinel_config
+        return expected_cases
+
+    monkeypatch.setattr(
+        "app.eval.tau_loader.get_phase12_nl_evidence_cases",
+        fake_get_phase12_nl_evidence_cases,
+    )
+
+    assert get_cases("tau_phase12_nl_evidence") == expected_cases
+
+
 class TestTauLooseEvaluation:
     def test_tau_subset_skips_user_id_check(self):
         """For tau subsets, auth mismatch does not trigger auth_failure."""
@@ -164,6 +421,30 @@ class TestTauLooseEvaluation:
             db_assertion_failures=None,
         )
         # Should NOT be auth_failure for tau subsets
+        assert result != "auth_failure"
+
+    def test_phase12_tau_subset_skips_user_id_check(self):
+        """Phase 12 tau subsets use the same loose auth handling as tau retail."""
+        result = classify_failure(
+            case=_make_tau_case(
+                expected_user_id="",
+                subset="tau_phase12_schema_ready",
+            ),
+            authenticated_user_id="some_other_user",
+            final_intent="lookup",
+            write_locks=[],
+            actual_order_status=None,
+            assistant_messages=["Here is your order status."],
+            tool_names=["calculate"],
+            guard_block_reasons=[],
+            tool_errors=0,
+            guard_blocks=0,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="",
+            db_assertion_failures=None,
+        )
+
         assert result != "auth_failure"
 
     def test_tau_subset_still_checks_tools(self):
@@ -206,6 +487,29 @@ class TestTauLooseEvaluation:
         )
         assert result == "unexpected_mutation"
 
+    def test_phase12_nl_evidence_subset_checks_response_fragment(self):
+        result = classify_failure(
+            case=_make_tau_case(
+                expected_tool_names=["calculate"],
+                expected_assistant_contains="$8,276.23",
+                subset="tau_phase12_nl_evidence",
+            ),
+            authenticated_user_id="",
+            final_intent="return_items",
+            actual_order_status=None,
+            write_locks=[],
+            assistant_messages=["The refund has been handled."],
+            tool_names=["calculate"],
+            guard_block_reasons=[],
+            tool_errors=0,
+            guard_blocks=0,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="",
+            db_assertion_failures=None,
+        )
+        assert result == "response_mismatch"
+
 
 def _make_tau_case(**overrides) -> EvalCase:
     """Helper to create a minimal tau EvalCase for testing."""
@@ -220,3 +524,16 @@ def _make_tau_case(**overrides) -> EvalCase:
         subset="tau_retail_smoke",
     )
     return replace(base, **overrides)
+
+
+def _config(root: Path) -> AppConfig:
+    return AppConfig(
+        tau3_retail_root=root,
+        tau2_bench_root=root,
+        artifact_dir=root / "artifacts",
+        deepseek_api_key="",
+        deepseek_base_url="",
+        default_agent_model="test",
+        agent_llm_timeout_seconds=1.0,
+        agent_llm_max_retries=0,
+    )
