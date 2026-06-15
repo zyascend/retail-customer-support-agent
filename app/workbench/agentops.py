@@ -108,6 +108,15 @@ class AgentOpsService:
                 status_code=400,
                 details={"trace_path": raw_path},
             )
+        trace_root = (self.artifact_dir / "traces").resolve()
+        resolved_path = path.resolve()
+        if trace_root != resolved_path and trace_root not in resolved_path.parents:
+            raise WorkbenchAPIError(
+                code="invalid_trace_path",
+                message="Trace path must stay within the artifact trace directory.",
+                status_code=400,
+                details={"trace_path": raw_path},
+            )
         if not path.exists():
             raise WorkbenchAPIError(
                 code="trace_not_found",
@@ -117,10 +126,7 @@ class AgentOpsService:
             )
 
         payload = self._load_trace_payload(path)
-        trace_state = SessionState(session_id=str(payload.get("run_id", path.stem)))
-        trace_state.messages.extend(self._trace_messages(payload, path))
-        trace_state.steps.extend(self._trace_steps(payload, path))
-        trace_state.tool_results.extend(self._trace_tool_calls(payload, path))
+        trace_state = self._trace_state(payload, path)
         timeline = build_timeline(trace_state)
         llm_responses = self._trace_llm_responses(payload, path)
         redacted_messages = redact_value([message.model_dump() for message in trace_state.messages])
@@ -134,7 +140,11 @@ class AgentOpsService:
             trace_artifact_path=str(path),
             metadata=redact_value(payload.get("metadata", {})),
             timeline=timeline,
-            turns=self._assemble_trace_turns(redacted_messages, redacted_llm_responses),
+            turns=self._assemble_trace_turns(
+                redacted_messages,
+                redacted_llm_responses,
+                [step.model_dump() for step in trace_state.steps],
+            ),
             final_state=redact_value(self._trace_final_state(payload, path)),
             db_hashes={
                 "initial_db_hash": payload.get("metadata", {}).get("initial_db_hash"),
@@ -319,6 +329,14 @@ class AgentOpsService:
             )
         return payload
 
+    def _trace_state(self, payload: dict[str, Any], path: Path) -> SessionState:
+        state = SessionState(session_id=str(payload.get("run_id", path.stem)))
+        state.messages.extend(self._trace_messages(payload, path))
+        state.steps.extend(self._trace_steps(payload, path))
+        state.tool_results.extend(self._trace_tool_calls(payload, path))
+        state.audit_logs.extend(self._trace_write_audit_logs(payload, path))
+        return state
+
     def _trace_messages(self, payload: dict[str, Any], path: Path) -> list[Message]:
         messages = payload.get("messages", [])
         if not isinstance(messages, list):
@@ -408,10 +426,14 @@ class AgentOpsService:
         return final_state
 
     def _assemble_trace_turns(
-        self, messages: list[dict[str, Any]], llm_responses: list[dict[str, Any]]
+        self,
+        messages: list[dict[str, Any]],
+        llm_responses: list[dict[str, Any]],
+        steps: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         turns: list[dict[str, Any]] = []
         current_messages: list[dict[str, Any]] = []
+        receive_message_count = sum(1 for step in steps if step.get("node") == "receive_message")
 
         for message in messages:
             if message.get("role") == "user" and current_messages:
@@ -437,10 +459,58 @@ class AgentOpsService:
         if not turns:
             return [{"index": 0, "messages": [], "llm_responses": llm_responses}]
 
-        for index, response in enumerate(llm_responses):
-            target_index = min(index, len(turns) - 1)
-            turns[target_index]["llm_responses"].append(response)
+        if receive_message_count > 0:
+            llm_index = 0
+            for turn_index in range(min(receive_message_count, len(turns))):
+                is_last_runtime_turn = turn_index == receive_message_count - 1
+                remaining_responses = len(llm_responses) - llm_index
+                remaining_runtime_turns = receive_message_count - turn_index
+                if remaining_responses <= 0:
+                    break
+                if is_last_runtime_turn:
+                    next_index = len(llm_responses)
+                else:
+                    next_index = llm_index + max(
+                        1, remaining_responses - (remaining_runtime_turns - 1)
+                    )
+                turns[turn_index]["llm_responses"].extend(llm_responses[llm_index:next_index])
+                llm_index = next_index
+            if llm_index < len(llm_responses):
+                turns[min(receive_message_count - 1, len(turns) - 1)]["llm_responses"].extend(
+                    llm_responses[llm_index:]
+                )
+            return turns
+
+        llm_index = 0
+        for turn in turns:
+            assistant_message_count = sum(
+                1 for message in turn["messages"] if message.get("role") == "assistant"
+            )
+            next_index = min(llm_index + assistant_message_count, len(llm_responses))
+            turn["llm_responses"].extend(llm_responses[llm_index:next_index])
+            llm_index = next_index
+            if llm_index >= len(llm_responses):
+                break
+        if llm_index < len(llm_responses):
+            turns[-1]["llm_responses"].extend(llm_responses[llm_index:])
         return turns
+
+    def _trace_write_audit_logs(
+        self, payload: dict[str, Any], path: Path
+    ) -> list[dict[str, Any]]:
+        write_audit_logs = payload.get("write_audit_logs", [])
+        if not isinstance(write_audit_logs, list):
+            raise self._trace_artifact_parse_error(
+                path, "Trace field 'write_audit_logs' must be a list."
+            )
+        parsed: list[dict[str, Any]] = []
+        for item in write_audit_logs:
+            if not isinstance(item, dict):
+                raise self._trace_artifact_parse_error(
+                    path, "Each trace write audit entry must be a JSON object."
+                )
+            parsed.append(item)
+        return parsed
 
     def _trace_artifact_parse_error(self, path: Path, message: str) -> WorkbenchAPIError:
         return WorkbenchAPIError(

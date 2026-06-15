@@ -343,6 +343,112 @@ class AgentOpsServiceTests(unittest.TestCase):
         self.assertEqual(detail.turns[0]["llm_responses"][0]["assistant_content"], "I found your account.")
         self.assertEqual(detail.turns[1]["llm_responses"][0]["assistant_content"], "I can help with that.")
 
+    def test_get_trace_by_path_keeps_multiple_llm_responses_in_same_user_turn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            trace_path = artifact_dir / "traces" / "trace-multi-llm.json"
+            _write_json(
+                trace_path,
+                {
+                    "run_id": "trace-multi-llm",
+                    "messages": [
+                        {"role": "user", "content": "cancel order #W9"},
+                        {"role": "assistant", "content": "Let me check that."},
+                        {"role": "assistant", "content": "I need confirmation before canceling."},
+                        {"role": "user", "content": "yes, confirm it"},
+                        {"role": "assistant", "content": "Confirmed."},
+                    ],
+                    "metadata": {
+                        "llm_responses": [
+                            {"assistant_content": "Let me check that.", "finish_reason": "tool_calls"},
+                            {
+                                "assistant_content": "I need confirmation before canceling.",
+                                "finish_reason": "stop",
+                            },
+                            {"assistant_content": "Confirmed.", "finish_reason": "stop"},
+                        ]
+                    },
+                    "tool_calls": [],
+                    "steps": [
+                        {"node": "receive_message", "status": "ok", "detail": {}},
+                        {"node": "policy_reasoner", "status": "ok", "detail": {}},
+                        {"node": "write_action_guard", "status": "ok", "detail": {}},
+                        {"node": "receive_message", "status": "ok", "detail": {}},
+                        {"node": "policy_reasoner", "status": "ok", "detail": {}},
+                    ],
+                    "final_state": {},
+                },
+            )
+
+            service = AgentOpsService(artifact_dir=artifact_dir)
+            detail = service.get_trace_by_path(str(trace_path))
+
+        self.assertEqual(len(detail.turns), 2)
+        self.assertEqual(len(detail.turns[0]["llm_responses"]), 2)
+        self.assertEqual(
+            [item["assistant_content"] for item in detail.turns[0]["llm_responses"]],
+            ["Let me check that.", "I need confirmation before canceling."],
+        )
+        self.assertEqual(
+            [item["assistant_content"] for item in detail.turns[1]["llm_responses"]],
+            ["Confirmed."],
+        )
+
+    def test_get_trace_by_path_rejects_absolute_path_outside_trace_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            outside_path = artifact_dir / "outside-trace.json"
+            _write_json(
+                outside_path,
+                {
+                    "run_id": "outside-trace",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "metadata": {"llm_responses": []},
+                    "tool_calls": [],
+                    "steps": [],
+                    "final_state": {},
+                },
+            )
+
+            service = AgentOpsService(artifact_dir=artifact_dir)
+
+            with self.assertRaises(WorkbenchAPIError) as context:
+                service.get_trace_by_path(str(outside_path))
+
+        self.assertEqual(context.exception.code, "invalid_trace_path")
+        self.assertEqual(context.exception.status_code, 400)
+
+    def test_get_trace_by_path_includes_write_audit_events_in_timeline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            trace_path = artifact_dir / "traces" / "trace-audit.json"
+            _write_json(
+                trace_path,
+                {
+                    "run_id": "trace-audit",
+                    "messages": [{"role": "user", "content": "cancel order #W3"}],
+                    "metadata": {"llm_responses": []},
+                    "tool_calls": [],
+                    "steps": [],
+                    "write_audit_logs": [
+                        {
+                            "tool_name": "cancel_pending_order",
+                            "status": "blocked",
+                            "timestamp": "2026-06-15T01:23:45+00:00",
+                            "event": "write_blocked",
+                        }
+                    ],
+                    "final_state": {},
+                },
+            )
+
+            service = AgentOpsService(artifact_dir=artifact_dir)
+            detail = service.get_trace_by_path(str(trace_path))
+
+        write_audit_events = [item for item in detail.timeline if item["kind"] == "write_audit"]
+        self.assertEqual(len(write_audit_events), 1)
+        self.assertEqual(write_audit_events[0]["label"], "cancel_pending_order")
+
     def test_get_trace_by_path_raises_structured_error_for_malformed_nested_entries(self):
         malformed_payloads = {
             "bad-message": {
