@@ -166,7 +166,13 @@ def _has_write_action(actions: list[dict]) -> bool:
     return any(a.get("name", "") in WRITE_TOOLS for a in actions)
 
 
-def convert_task_to_eval_case(task: dict, subset: str) -> Optional[EvalCase]:
+def convert_task_to_eval_case(
+    task: dict,
+    subset: str,
+    *,
+    expected_assistant_contains: str | None = None,
+    max_turns: int = 5,
+) -> Optional[EvalCase]:
     """Convert a single tau3 task to an EvalCase.
 
     Args:
@@ -200,9 +206,10 @@ def convert_task_to_eval_case(task: dict, subset: str) -> Optional[EvalCase]:
         expected_intent=expected_intent,
         expected_tool_names=action_names,
         expected_tool_sequence=list(action_names),
+        expected_assistant_contains=expected_assistant_contains,
         expected_no_write=not has_write,
         expected_db_assertions=db_assertions,
-        max_turns=5,
+        max_turns=max_turns,
         subset=subset,
         capability=capability,
         scenario_family="tau3",
@@ -279,6 +286,134 @@ def get_tau_supported_cases(config: AppConfig) -> list[EvalCase]:
             case = convert_task_to_eval_case(task, "tau_retail_supported")
             if case is not None:
                 cases.append(case)
+    return cases
+
+
+def get_phase12_candidate_cases(
+    config: AppConfig,
+    *,
+    limit: int = 10,
+) -> list[EvalCase]:
+    """Return safe partial tau tasks for Phase 12 expansion evidence."""
+    from app.analysis.tau_task_analyzer import (
+        _resolve_tau3_retail_dir,
+        classify_task,
+        load_splits,
+        load_tasks,
+        select_phase12_next_candidates,
+    )
+
+    retail_dir = _resolve_tau3_retail_dir(config)
+    tasks = load_tasks(retail_dir)
+    splits = load_splits(retail_dir)
+    classifications = [classify_task(task, splits) for task in tasks]
+    candidates = select_phase12_next_candidates(classifications, limit=limit)
+    tasks_by_id = {str(task["id"]): task for task in tasks}
+
+    cases: list[EvalCase] = []
+    for candidate in candidates:
+        task = tasks_by_id.get(candidate.task_id)
+        if task is None:
+            continue
+        case = convert_task_to_eval_case(task, "tau_phase12_candidates")
+        if case is not None:
+            cases.append(case)
+    return cases
+
+
+def _nl_response_fragment(task: dict) -> str | None:
+    """Extract a compact response fragment from tau NL assertions.
+
+    Phase 12 evidence should avoid brittle full-sentence matching. Currency
+    amounts are the highest-signal NL assertions in the current schema-gap queue.
+    """
+    assertions = task.get("evaluation_criteria", {}).get("nl_assertions") or []
+    for assertion in assertions:
+        match = re.search(r"\$[\d,]+(?:\.\d{2})?", assertion)
+        if match:
+            return match.group(0)
+    return None
+
+
+def get_phase12_nl_evidence_cases(
+    config: AppConfig,
+    *,
+    limit: int = 10,
+) -> list[EvalCase]:
+    """Return Phase 12 schema-gap tasks with extractable NL response evidence."""
+    from app.analysis.tau_task_analyzer import (
+        _resolve_tau3_retail_dir,
+        classify_task,
+        load_splits,
+        load_tasks,
+        select_phase12_next_candidates,
+    )
+
+    retail_dir = _resolve_tau3_retail_dir(config)
+    tasks = load_tasks(retail_dir)
+    splits = load_splits(retail_dir)
+    classifications = [classify_task(task, splits) for task in tasks]
+    candidates = select_phase12_next_candidates(classifications, limit=1000)
+    tasks_by_id = {str(task["id"]): task for task in tasks}
+
+    cases: list[EvalCase] = []
+    for candidate in candidates:
+        if candidate.category != "schema_gap":
+            continue
+        task = tasks_by_id.get(candidate.task_id)
+        if task is None:
+            continue
+        fragment = _nl_response_fragment(task)
+        if fragment is None:
+            continue
+        case = convert_task_to_eval_case(
+            task,
+            "tau_phase12_nl_evidence",
+            expected_assistant_contains=fragment,
+            max_turns=10,
+        )
+        if case is not None:
+            cases.append(case)
+        if len(cases) >= limit:
+            break
+    return cases
+
+
+def get_phase12_schema_ready_cases(
+    config: AppConfig,
+    *,
+    limit: int = 10,
+) -> list[EvalCase]:
+    """Return Phase 12 tasks whose only blocker is already-exposed auxiliary tools."""
+    from app.analysis.tau_task_analyzer import (
+        _resolve_tau3_retail_dir,
+        analyze_phase12_gap,
+        classify_task,
+        load_splits,
+        load_tasks,
+    )
+
+    retail_dir = _resolve_tau3_retail_dir(config)
+    tasks = load_tasks(retail_dir)
+    splits = load_splits(retail_dir)
+    ready_ids: list[str] = []
+    for task in tasks:
+        classification = classify_task(task, splits)
+        gap = analyze_phase12_gap(classification)
+        if gap.category == "schema_ready":
+            ready_ids.append(gap.task_id)
+            if len(ready_ids) >= limit:
+                break
+
+    cases: list[EvalCase] = []
+    tasks_by_id = {str(task["id"]): task for task in tasks}
+    for task_id in ready_ids:
+        case = convert_task_to_eval_case(
+            tasks_by_id[task_id],
+            "tau_phase12_schema_ready",
+        )
+        if case is not None:
+            cases.append(case)
     return cases
 
 

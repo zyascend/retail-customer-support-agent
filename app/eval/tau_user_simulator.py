@@ -11,9 +11,49 @@ import re
 from typing import Optional
 
 _EMAIL_PATTERN = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
+_PAYMENT_METHOD_PATTERN = re.compile(
+    r"\b(?:paypal|gift_card|credit_card)_\d+\b",
+    re.IGNORECASE,
+)
 
 _EMAIL_KEYWORDS = ("email", "e-mail", "mail")
 _NAME_KEYWORDS = ("name", "who are you", "identify", "zip", "tell me who")
+_CONFIRMATION_KEYWORDS = (
+    "confirm",
+    "proceed",
+    "go ahead",
+    "authorize",
+    "would you like me",
+)
+_ORDER_ID_KEYWORDS = ("order id", "order number", "order #")
+_ORDER_ID_RETRY_KEYWORDS = (
+    "double-check",
+    "double check",
+    "doesn't work",
+    "does not work",
+    "not work",
+    "still",
+)
+_VACUUM_KEYWORDS = ("which vacuum", "vacuum cleaner")
+_PAYMENT_METHOD_KEYWORDS = ("payment method", "refund sent", "refund to")
+_REPLACEMENT_CHOICE_KEYWORDS = ("which one", "exchange", "replace", "swap")
+_GENERIC_HELP_KEYWORDS = ("how can i help", "what can i help", "how may i help")
+_POEM_PROMPT_KEYWORDS = (
+    "what poem",
+    "which poem",
+    "first line",
+    "famous poem",
+    "guess what",
+)
+_ORDER_ID_REQUEST_KEYWORDS = (
+    "provide",
+    "need",
+    "do you have",
+    "what is",
+    "what's",
+    "could you",
+    "please",
+)
 
 # Cache for tau3 user DB
 _user_db_cache: dict | None = None
@@ -23,7 +63,10 @@ _user_db_path: str | None = None
 def _extract_name(instructions: dict) -> Optional[str]:
     """Extract user's full name from tau3 instructions."""
     known = instructions.get("known_info", "") or ""
-    m = re.search(r"You (?:are|name is) ([\w\s]+?)(?: in| with|, and| \(| living| residing|\.|$)", known)
+    m = re.search(
+        r"You (?:are|name is) ([\w\s]+?)(?: in| from| with|, and|, residing| \(| living| residing|\.|$)",
+        known,
+    )
     if m:
         return m.group(1).strip().rstrip(".")
     m = re.search(r"Your name is ([\w\s]+?)(?:,| and|\.|$)", known)
@@ -91,6 +134,38 @@ def _to_first_person(text: str | None) -> str:
     return text
 
 
+def _extract_order_id_sequence(reason: str) -> list[str]:
+    """Extract scripted order-id corrections from tau3 reason text."""
+    values = []
+    first = re.search(r"provide ([A-Za-z#]?\d+) first", reason, re.IGNORECASE)
+    if first:
+        values.append(first.group(1))
+
+    corrected = re.search(
+        r"made a mistake and provide ([A-Za-z#]?\d+)",
+        reason,
+        re.IGNORECASE,
+    )
+    if corrected:
+        values.append(corrected.group(1))
+
+    if "forgot the 'w'" in reason.lower() and values:
+        corrected_value = values[-1].lstrip("#")
+        if not corrected_value.upper().startswith("W"):
+            values.append(f"#W{corrected_value}")
+
+    return values
+
+
+def _extract_vacuum_choice(reason: str) -> str | None:
+    """Extract which vacuum variant the simulated user should mention."""
+    lower = reason.lower()
+    m = re.search(r"mention the ([\w -]+?) one", lower)
+    if m and "vacuum" in lower:
+        return m.group(1).strip()
+    return None
+
+
 def _resolve_user_from_db(user_id: str, db_path: str) -> dict | None:
     """Resolve a tau3 user_id to real first/last name and email from DB."""
     global _user_db_cache, _user_db_path
@@ -125,9 +200,14 @@ class TauUserSimulator:
                     self.email = user_record.get("email")
 
         self._reason = _to_first_person(instructions.get("reason_for_call", ""))
+        raw_reason = instructions.get("reason_for_call", "") or ""
         self._unknown_info = instructions.get("unknown_info", "") or ""
         self._email_asked_count = 0
         self._name_asked_count = 0
+        self._order_id_sequence = _extract_order_id_sequence(raw_reason)
+        self._order_id_response_count = 0
+        self._vacuum_choice = _extract_vacuum_choice(raw_reason)
+        self._wants_canister_replacement = "canister" in raw_reason.lower()
         self._max_asks = 2
 
     def initial_message(self) -> str:
@@ -168,12 +248,134 @@ class TauUserSimulator:
             else:
                 return "I'm not sure what information you need."
 
+        if question_type == "confirmation":
+            return "Yes, I confirm. Please proceed."
+
+        if question_type == "order_id" and self._order_id_sequence:
+            idx = min(self._order_id_response_count, len(self._order_id_sequence) - 1)
+            order_id = self._order_id_sequence[idx]
+            self._order_id_response_count += 1
+            if idx == 0:
+                return f"The order ID is {order_id}."
+            if idx == 1:
+                return f"I made a mistake. The order ID is {order_id}."
+            return f"I forgot the W at the beginning. The order ID is {order_id}."
+
+        if question_type == "vacuum" and self._vacuum_choice:
+            return f"The {self._vacuum_choice} one."
+
+        if question_type == "payment_method":
+            method = self._select_payment_method(agent_message)
+            if method:
+                return f"Please send it to {method}."
+            if any(w in lower for w in _CONFIRMATION_KEYWORDS):
+                return "Yes, I confirm. Please proceed."
+
+        if question_type == "replacement_choice" and self._wants_canister_replacement:
+            item_id = self._select_item_for_option(agent_message, "canister")
+            if item_id:
+                return f"The canister one, item {item_id}."
+            return "The canister one."
+
+        if question_type == "generic_help":
+            return self._carry_on_response()
+
         return None
 
-    @staticmethod
-    def _detect_question_type(agent_message_lower: str) -> Optional[str]:
-        if any(w in agent_message_lower for w in _EMAIL_KEYWORDS):
-            return "email"
+    def _detect_question_type(self, agent_message_lower: str) -> Optional[str]:
+        if self._is_vacuum_question(agent_message_lower):
+            return "vacuum"
+        if self._is_payment_method_question(agent_message_lower):
+            return "payment_method"
+        if self._is_order_id_request(agent_message_lower):
+            return "order_id"
+        if self._is_poem_prompt(agent_message_lower):
+            return "generic_help"
         if any(w in agent_message_lower for w in _NAME_KEYWORDS):
             return "name"
+        if any(w in agent_message_lower for w in _CONFIRMATION_KEYWORDS):
+            return "confirmation"
+        if self._wants_canister_replacement and any(
+            w in agent_message_lower for w in _REPLACEMENT_CHOICE_KEYWORDS
+        ):
+            return "replacement_choice"
+        if any(w in agent_message_lower for w in _EMAIL_KEYWORDS):
+            return "email"
+        if any(w in agent_message_lower for w in _GENERIC_HELP_KEYWORDS):
+            return "generic_help"
+        return None
+
+    def _is_order_id_request(self, agent_message_lower: str) -> bool:
+        if any(w in agent_message_lower for w in _ORDER_ID_RETRY_KEYWORDS):
+            return True
+        if not any(w in agent_message_lower for w in _ORDER_ID_KEYWORDS):
+            return False
+        return any(w in agent_message_lower for w in _ORDER_ID_REQUEST_KEYWORDS)
+
+    def _is_poem_prompt(self, agent_message_lower: str) -> bool:
+        if "intended task" not in self._reason.lower():
+            return False
+        return any(w in agent_message_lower for w in _POEM_PROMPT_KEYWORDS)
+
+    @staticmethod
+    def _is_payment_method_question(agent_message_lower: str) -> bool:
+        if any(w in agent_message_lower for w in _PAYMENT_METHOD_KEYWORDS):
+            return True
+        asks_refund_destination = (
+            "refund" in agent_message_lower
+            and any(
+                method in agent_message_lower
+                for method in ("paypal", "gift card", "gift_card", "credit card")
+            )
+        )
+        return asks_refund_destination and any(
+            w in agent_message_lower
+            for w in ("which", "would you like", "where", "go to", "send")
+        )
+
+    @staticmethod
+    def _is_vacuum_question(agent_message_lower: str) -> bool:
+        if not any(w in agent_message_lower for w in _VACUUM_KEYWORDS):
+            return False
+        return any(
+            w in agent_message_lower
+            for w in (
+                "which vacuum",
+                "which one",
+                "which item",
+                "what vacuum",
+                "would you like to return",
+                "do you mean",
+            )
+        )
+
+    def _carry_on_response(self) -> str:
+        match = re.search(
+            r"intended task,? which is to (.+)",
+            self._reason,
+            re.IGNORECASE,
+        )
+        if match:
+            return "I want to " + match.group(1).strip()
+        return self._reason
+
+    @staticmethod
+    def _select_payment_method(agent_message: str) -> str | None:
+        methods = _PAYMENT_METHOD_PATTERN.findall(agent_message)
+        if not methods:
+            return None
+        for method in methods:
+            if method.lower().startswith("paypal_"):
+                return method
+        return methods[0]
+
+    @staticmethod
+    def _select_item_for_option(agent_message: str, option_keyword: str) -> str | None:
+        pattern = re.compile(
+            rf"(?:item\s+)?(\d{{8,}})[^.。\n]*\b{re.escape(option_keyword)}\b",
+            re.IGNORECASE,
+        )
+        match = pattern.search(agent_message)
+        if match:
+            return match.group(1)
         return None

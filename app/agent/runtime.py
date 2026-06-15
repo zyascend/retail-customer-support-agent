@@ -271,6 +271,9 @@ class AgentRuntime:
             )
             session.pending_action = None
             if record.status == "success":
+                continued = self._continue_after_confirmed_action(session)
+                if continued is not None:
+                    return continued
                 msg = "Done. I have completed the requested update."
             else:
                 msg = _map_guard_error_to_user_message(str(record.error))
@@ -288,6 +291,59 @@ class AgentRuntime:
             return msg
 
         return None
+
+    def _continue_after_confirmed_action(self, session: SessionState) -> Optional[str]:
+        provider = self.provider
+        if provider is None or isinstance(provider, DeterministicProvider):
+            return None
+
+        loop = AgentLoop(
+            provider=provider,
+            gateway=self.gateway,
+            registry=self.registry,
+            context_builder=self._context_builder,
+        )
+        result = loop.run_turn(
+            session,
+            self._confirmed_action_continuation_prompt(session),
+        )
+        self._turn_contexts.append(result.turn)
+        session.messages.append(Message(role="assistant", content=result.assistant_message))
+        if result.pending_action_set:
+            session.confirmation_status = "required"
+        elif not session.pending_action:
+            session.confirmation_status = "confirmed"
+        return result.assistant_message
+
+    def _confirmed_action_continuation_prompt(self, session: SessionState) -> str:
+        original_request = self._original_user_request_context(session)
+        if original_request:
+            return (
+                "The user confirmed and the pending action has now been executed "
+                "successfully. Continue any remaining parts of the original user "
+                f"request:\n\n{original_request}\n\n"
+                "If nothing remains, provide a concise final summary."
+            )
+        return (
+            "The user confirmed and the pending action has now been executed "
+            "successfully. Continue any remaining parts of the user's original "
+            "request. If nothing remains, provide a concise final summary."
+        )
+
+    def _original_user_request_context(self, session: SessionState) -> str:
+        candidates: list[str] = []
+        for message in session.messages:
+            if message.role != "user":
+                continue
+            content = message.content.strip()
+            if not content:
+                continue
+            if len(content) < 40 and self._resolver.resolve(content) != "unknown":
+                continue
+            candidates.append(content)
+        if not candidates:
+            return ""
+        return max(candidates, key=len)
 
     def _preflight_identity(self, session: SessionState, content: str) -> None:
         # Email shortcut

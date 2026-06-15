@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from app.agent.models import SessionState
 from app.config import resolve_config
 from app.eval.cases import EvalCase, get_cases
 from app.eval.metrics import (
@@ -757,6 +758,100 @@ class CuratedEvalTests(unittest.TestCase):
 
         self.assertEqual(label, "db_assertion_mismatch")
 
+    def test_tau_phase12_nl_evidence_defers_recovered_tool_errors_to_final_checks(self):
+        case = EvalCase(
+            case_id="tau_recovered_tool_error",
+            category="return",
+            messages=[],
+            expected_user_id=None,
+            expected_intent="",
+            expected_tool_names=["return_delivered_order_items"],
+            expected_assistant_contains="$1.00",
+            expected_db_assertions={"order_id": "#W1"},
+            subset="tau_phase12_nl_evidence",
+        )
+
+        label = classify_failure(
+            case=case,
+            authenticated_user_id="user",
+            final_intent="",
+            write_locks=["item:1:return"],
+            actual_order_status=None,
+            assistant_messages=["The total refund is $1.00."],
+            tool_names=["get_order_details", "return_delivered_order_items"],
+            guard_block_reasons=["non_delivered_order_cannot_be_returned"],
+            tool_errors=1,
+            guard_blocks=1,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="confirmed",
+            db_assertion_failures=[],
+        )
+
+        self.assertIsNone(label)
+
+    def test_tau_phase12_nl_evidence_still_checks_response_after_tool_errors(self):
+        case = EvalCase(
+            case_id="tau_recovered_tool_error_bad_response",
+            category="return",
+            messages=[],
+            expected_user_id=None,
+            expected_intent="",
+            expected_tool_names=["return_delivered_order_items"],
+            expected_assistant_contains="$1.00",
+            expected_db_assertions={"order_id": "#W1"},
+            subset="tau_phase12_nl_evidence",
+        )
+
+        label = classify_failure(
+            case=case,
+            authenticated_user_id="user",
+            final_intent="",
+            write_locks=["item:1:return"],
+            actual_order_status=None,
+            assistant_messages=["The return is complete."],
+            tool_names=["get_order_details", "return_delivered_order_items"],
+            guard_block_reasons=[],
+            tool_errors=1,
+            guard_blocks=0,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="confirmed",
+            db_assertion_failures=[],
+        )
+
+        self.assertEqual(label, "response_mismatch")
+
+    def test_curated_cases_still_fail_on_tool_errors_before_final_checks(self):
+        case = EvalCase(
+            case_id="curated_tool_error",
+            category="return",
+            messages=[],
+            expected_user_id="user",
+            expected_intent="return",
+            expected_tool_names=["return_delivered_order_items"],
+            expected_assistant_contains="$1.00",
+        )
+
+        label = classify_failure(
+            case=case,
+            authenticated_user_id="user",
+            final_intent="return",
+            write_locks=["item:1:return"],
+            actual_order_status=None,
+            assistant_messages=["The total refund is $1.00."],
+            tool_names=["return_delivered_order_items"],
+            guard_block_reasons=[],
+            tool_errors=1,
+            guard_blocks=0,
+            pending_action=False,
+            llm_errors=0,
+            confirmation_status="confirmed",
+            db_assertion_failures=[],
+        )
+
+        self.assertEqual(label, "tool_exception")
+
     def test_phase5_capability_matrix_lists_implemented_cases(self):
         matrix = Path("docs/phase5-capability-matrix.md").read_text(encoding="utf-8")
         self.assertIn("## Implemented Cases", matrix)
@@ -1118,6 +1213,73 @@ class CuratedEvalTests(unittest.TestCase):
 
         self.assertEqual(summary.results[0].case_id, tau_case.case_id)
         self.assertIn("tau_retail_smoke", requested_subsets)
+
+    def test_phase12_tau_subset_uses_tau_user_simulator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            captured: dict[str, object] = {}
+            case = EvalCase(
+                case_id="tau_49",
+                category="exchange",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "Raw converted tau instruction should not be used.",
+                    }
+                ],
+                expected_user_id="",
+                expected_intent="",
+                expected_tool_names=["calculate"],
+                subset="tau_phase12_schema_ready",
+            )
+            task = {
+                "id": 49,
+                "user_scenario": {
+                    "instructions": {
+                        "known_info": "You are Casey Morgan in zip code 10001.",
+                        "reason_for_call": "You want to exchange an item.",
+                    }
+                },
+            }
+
+            class FakeRuntime:
+                def __init__(self, *args, **kwargs):
+                    self.retail_runtime = SimpleNamespace(db={})
+
+                def run_script(
+                    self,
+                    *,
+                    messages,
+                    session_id,
+                    task_id,
+                    max_turns,
+                    user_simulator_callback=None,
+                ):
+                    captured["messages"] = messages
+                    captured["callback"] = user_simulator_callback
+                    state = SessionState(session_id=session_id, task_id=task_id)
+                    state.messages = []
+                    return SimpleNamespace(
+                        run_id="fake-run",
+                        state=state,
+                        trace_artifact_path=artifact_dir / "missing-trace.json",
+                        turn_contexts=[],
+                    )
+
+            with (
+                patch("app.eval.runner.AgentRuntime", FakeRuntime),
+                patch("app.eval.runner._load_tau_task_by_id", return_value=task),
+            ):
+                CuratedEvalRunner(
+                    config=config,
+                    artifact_dir=artifact_dir,
+                )._run_case("eval-phase12", case, 0)
+
+        self.assertIsNotNone(captured["callback"])
+        self.assertNotEqual(captured["messages"], case.messages)
+        self.assertIn("I want to exchange an item", captured["messages"][0]["content"])
+        self.assertIn("My name is Casey Morgan", captured["messages"][0]["content"])
 
     def test_replay_case_resolution_accepts_none_subset(self):
         with tempfile.TemporaryDirectory() as tmp:

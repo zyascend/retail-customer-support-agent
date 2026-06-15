@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.agent.context_builder import ContextBuilder
 from app.agent.models import (
     SessionState,
+    ToolCallRecord,
     ToolCallResponse,
 )
 from app.agent.providers import ScriptedToolCallingProvider
@@ -132,6 +135,44 @@ class TestAgentLoopReadTools:
         assert len(session.tool_results) == 1
         assert session.tool_results[0].tool_name == "get_order_details"
         assert session.tool_results[0].status == "success"
+
+    def test_order_id_argument_is_normalized_before_tool_execution(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+        from app.agent.models import ToolCallRequest
+
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    tool_calls=[
+                        ToolCallRequest(
+                            id="call_1",
+                            tool_name="get_order_details",
+                            arguments={"order_id": "9502127"},
+                        )
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                ToolCallResponse(
+                    assistant_content="Found order #W9502127.",
+                    finish_reason="stop",
+                ),
+            ]
+        )
+        session = _session(authenticated_user_id="daiki_johnson_9523")
+        loop = AgentLoop(
+            provider=provider,
+            gateway=_gateway(),
+            registry=_registry(),
+            context_builder=_context_builder(),
+        )
+
+        result = loop.run_turn(session, "The order ID is 9502127.")
+
+        assert session.tool_results[0].arguments["order_id"] == "#W9502127"
+        assert any(
+            step.node == "order_id_argument_normalized"
+            for step in result.turn.steps
+        )
 
     def test_order_status_is_visible_in_tool_observation(self) -> None:
         from app.agent.llm_agent import AgentLoop
@@ -594,6 +635,76 @@ class TestAgentLoopToolErrors:
 
 class TestAgentLoopIntegration:
     """Tests: full integration with context builder and turn tracking."""
+
+    def test_llm_agent_prompt_preserves_multi_part_money_contract(self) -> None:
+        prompt = Path("prompts/llm_agent_system_v001.md").read_text(encoding="utf-8")
+
+        assert "multi-part" in prompt
+        assert "remaining parts" in prompt
+        assert "calculate" in prompt
+        assert "total refund" in prompt
+        assert "Do not retry a successful write" in prompt
+        assert "target item prices" in prompt
+        assert "old item price minus the new item price" in prompt
+        assert "recent order" in prompt
+
+    def test_return_summary_adds_refund_and_remaining_totals(self) -> None:
+        from app.agent.llm_agent import AgentLoop
+
+        session = _session()
+        session.loaded_context.orders["#W9502127"] = {
+            "order_id": "#W9502127",
+            "status": "return requested",
+            "payment_history": [
+                {"amount": 2623.69, "transaction_type": "payment"},
+            ],
+            "items": [
+                {"item_id": "2872451762", "name": "Vacuum Cleaner", "price": 622.12},
+                {"item_id": "9534205511", "name": "Air Purifier", "price": 473.43},
+                {"item_id": "6243981804", "name": "Patio Umbrella", "price": 329.85},
+                {"item_id": "3877338112", "name": "Dumbbell Set", "price": 545.68},
+                {"item_id": "6259501109", "name": "Vacuum Cleaner", "price": 652.61},
+            ],
+        }
+        session.tool_results.append(
+            ToolCallRecord(
+                tool_name="return_delivered_order_items",
+                arguments={
+                    "order_id": "#W9502127",
+                    "item_ids": ["2872451762", "9534205511"],
+                    "payment_method_id": "paypal_2433177",
+                },
+                tool_kind="write",
+                status="success",
+            )
+        )
+        provider = ScriptedToolCallingProvider(
+            responses=[
+                ToolCallResponse(
+                    assistant_content="The remaining items total $1,528.14.",
+                    finish_reason="stop",
+                )
+            ]
+        )
+        loop = AgentLoop(
+            provider=provider,
+            gateway=_gateway(),
+            registry=_registry(),
+            context_builder=_context_builder(),
+        )
+
+        result = loop.run_turn(
+            session,
+            "Return the air purifier and canister vacuum, tell me the total refund "
+            "and the total amount paid for the remaining items.",
+        )
+
+        assert "$1,095.55" in result.assistant_message
+        assert "$1,528.14" in result.assistant_message
+        assert any(
+            step.node == "return_refund_summary_response_corrected"
+            for step in result.turn.steps
+        )
 
     def test_context_summary_in_prompt(self) -> None:
         from app.agent.llm_agent import AgentLoop

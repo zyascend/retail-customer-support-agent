@@ -35,6 +35,35 @@ class TaskClassification:
 
 
 @dataclass
+class Phase12GapAnalysis:
+    """Phase 12 expansion category for a tau task."""
+
+    task_id: str
+    category: str
+    priority: int
+    blocking_reasons: list[str] = field(default_factory=list)
+    can_expand_without_runtime_parser: bool = True
+
+
+@dataclass
+class Phase12LiveEvidence:
+    """Latest live evidence for a Phase 12 eval slice."""
+
+    eval_run_id: str
+    subset: str
+    eval_backend: str
+    created_at: str
+    passed_count: int
+    case_count: int
+    pass_rate: float
+    tool_call_success_rate: float
+    mutation_error_rate: float
+    promotable: bool
+    promoted_task_ids: list[str] = field(default_factory=list)
+    failure_labels: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
 class TaskSpaceStats:
     """Aggregate statistics across all tasks."""
     total_tasks: int = 0
@@ -207,6 +236,228 @@ def classify_task(task: dict, splits: dict) -> TaskClassification:
         reward_basis=list(ec.get("reward_basis", [])),
         notes="All tools supported, no NL assertions, no policy concerns.",
     )
+
+
+def analyze_phase12_gap(classification: TaskClassification) -> Phase12GapAnalysis:
+    """Map a task classification to the Phase 12 capability expansion queue."""
+    if classification.status == "supported":
+        return Phase12GapAnalysis(
+            task_id=classification.task_id,
+            category="ready",
+            priority=0,
+        )
+
+    if classification.missing_tools:
+        missing = ", ".join(classification.missing_tools)
+        category = "tool_gap"
+        priority = 10
+        reasons = [f"missing auxiliary/schema support: {missing}"]
+        can_expand = False
+        if all(tool in AUXILIARY_TOOLS for tool in classification.missing_tools):
+            category = "schema_gap"
+            can_expand = True
+            if not classification.has_nl_assertion and not classification.has_policy_keywords:
+                category = "schema_ready"
+                priority = 5
+                reasons = [f"auxiliary tools already exposed: {missing}"]
+        return Phase12GapAnalysis(
+            task_id=classification.task_id,
+            category=category,
+            priority=priority,
+            blocking_reasons=reasons,
+            can_expand_without_runtime_parser=can_expand,
+        )
+
+    if classification.has_policy_keywords:
+        return Phase12GapAnalysis(
+            task_id=classification.task_id,
+            category="guard_policy_review",
+            priority=20,
+            blocking_reasons=["policy-sensitive wording requires guard review"],
+        )
+
+    if classification.has_nl_assertion:
+        return Phase12GapAnalysis(
+            task_id=classification.task_id,
+            category="prompt_or_response_gap",
+            priority=30,
+            blocking_reasons=["NL assertion requires response evidence"],
+        )
+
+    return Phase12GapAnalysis(
+        task_id=classification.task_id,
+        category="fixture_or_unknown_gap",
+        priority=40,
+        blocking_reasons=["unsupported task shape or fixture gap"],
+        can_expand_without_runtime_parser=False,
+    )
+
+
+def compute_phase12_coverage_rungs(
+    classifications: list[TaskClassification],
+    *,
+    total_supported_target: int = 69,
+    promoted_task_ids: list[str] | None = None,
+) -> dict:
+    """Compute Phase 12 target rung status for supported tau tasks."""
+    current = sum(1 for c in classifications if c.status == "supported")
+    supported_ids = {c.task_id for c in classifications if c.status == "supported"}
+    promoted_ids = set(promoted_task_ids or [])
+    live_promoted_count = len(promoted_ids - supported_ids)
+    effective_supported = current + live_promoted_count
+    return {
+        "current_supported": current,
+        "live_promoted_count": live_promoted_count,
+        "effective_supported": effective_supported,
+        "target_total": total_supported_target,
+        "total_tasks": len(classifications),
+        "stable_40_plus": effective_supported >= 40,
+        "stable_50_plus": effective_supported >= 50,
+        "stable_55_plus": effective_supported >= 55,
+        "remaining_to_40": max(0, 40 - effective_supported),
+        "remaining_to_50": max(0, 50 - effective_supported),
+        "remaining_to_55": max(0, 55 - effective_supported),
+        "remaining_to_all_tasks": max(0, len(classifications) - effective_supported),
+    }
+
+
+def build_phase12_coverage_rung_plan(
+    classifications: list[TaskClassification],
+    *,
+    promoted_task_ids: list[str] | None = None,
+) -> dict:
+    """Summarize the current rung and whether safe candidates can reach the next one."""
+    rungs = compute_phase12_coverage_rungs(
+        classifications,
+        promoted_task_ids=promoted_task_ids,
+    )
+    current = rungs["effective_supported"]
+    safe_candidates = select_phase12_next_candidates(
+        classifications,
+        limit=1000,
+        promoted_task_ids=promoted_task_ids,
+    )
+    safe_candidate_count = len(safe_candidates)
+    schema_ready_count = sum(
+        1 for candidate in safe_candidates if candidate.category == "schema_ready"
+    )
+    projected = current + safe_candidate_count
+
+    if current >= 55:
+        current_rung = "stable_55_plus"
+        next_target = None
+    elif current >= 50:
+        current_rung = "stable_50_plus"
+        next_target = 55
+    elif current >= 40:
+        current_rung = "stable_40_plus"
+        next_target = 50
+    else:
+        current_rung = "below_40"
+        next_target = 40
+
+    remaining = 0 if next_target is None else max(0, next_target - current)
+    return {
+        "current_rung": current_rung,
+        "next_target": next_target,
+        "remaining_to_next": remaining,
+        "safe_candidate_count": safe_candidate_count,
+        "schema_ready_count": schema_ready_count,
+        "projected_supported_after_safe_candidates": projected,
+        "can_reach_next_with_safe_candidates": (
+            True if next_target is None else projected >= next_target
+        ),
+    }
+
+
+def load_phase12_live_evidence(
+    artifact_dir: Path = Path("artifacts/phase2"),
+    *,
+    subset: str = "tau_phase12_schema_ready",
+) -> Phase12LiveEvidence | None:
+    """Load the latest live eval evidence for a Phase 12 subset."""
+    eval_runs_dir = artifact_dir / "eval_runs"
+    if not eval_runs_dir.exists():
+        return None
+
+    candidates: list[dict] = []
+    for path in eval_runs_dir.glob("*.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if payload.get("subset") != subset:
+            continue
+        if payload.get("eval_backend") != "live":
+            continue
+        candidates.append(payload)
+
+    if not candidates:
+        return None
+
+    latest = max(
+        candidates,
+        key=lambda item: str(item.get("created_at") or item.get("artifact_created_at") or ""),
+    )
+    metrics = latest.get("metrics") or {}
+    passed_count = int(latest.get("passed_count") or 0)
+    case_count = int(latest.get("case_count") or 0)
+    mutation_error_rate = float(metrics.get("mutation_error_rate") or 0.0)
+    pass_rate = float(latest.get("pass_rate") or 0.0)
+    tool_call_success_rate = float(metrics.get("tool_call_success_rate") or 0.0)
+    promotable = (
+        case_count > 0 and passed_count == case_count and mutation_error_rate == 0.0
+    )
+    promoted_task_ids: list[str] = []
+    failure_labels: dict[str, int] = {}
+    if promotable:
+        for result in latest.get("results") or []:
+            if not result.get("passed"):
+                continue
+            case_id = str(result.get("case_id") or "")
+            if case_id.startswith("tau_"):
+                case_id = case_id[4:]
+            if case_id:
+                promoted_task_ids.append(case_id)
+    else:
+        for result in latest.get("results") or []:
+            label = str(result.get("failure_label") or "")
+            if not label:
+                continue
+            failure_labels[label] = failure_labels.get(label, 0) + 1
+    return Phase12LiveEvidence(
+        eval_run_id=str(latest.get("eval_run_id") or ""),
+        subset=str(latest.get("subset") or subset),
+        eval_backend=str(latest.get("eval_backend") or ""),
+        created_at=str(latest.get("created_at") or latest.get("artifact_created_at") or ""),
+        passed_count=passed_count,
+        case_count=case_count,
+        pass_rate=pass_rate,
+        tool_call_success_rate=tool_call_success_rate,
+        mutation_error_rate=mutation_error_rate,
+        promotable=promotable,
+        promoted_task_ids=promoted_task_ids,
+        failure_labels=failure_labels,
+    )
+
+
+def select_phase12_next_candidates(
+    classifications: list[TaskClassification],
+    *,
+    limit: int = 10,
+    promoted_task_ids: list[str] | None = None,
+) -> list[Phase12GapAnalysis]:
+    """Return safe non-supported tasks prioritized for Phase 12 expansion."""
+    promoted_ids = set(promoted_task_ids or [])
+    gaps = [
+        analyze_phase12_gap(classification)
+        for classification in classifications
+        if classification.status != "supported"
+        and classification.task_id not in promoted_ids
+    ]
+    safe_gaps = [gap for gap in gaps if gap.can_expand_without_runtime_parser]
+    safe_gaps.sort(key=lambda gap: (gap.priority, int(gap.task_id)))
+    return safe_gaps[:limit]
 
 
 @dataclass
@@ -456,8 +707,27 @@ def render_report(
     data_source_path: str,
     unsupported_tool_info: dict,
     missing_tool_info: dict,
+    phase12_live_evidence: Phase12LiveEvidence | None = None,
+    phase12_additional_live_evidence: list[Phase12LiveEvidence] | None = None,
 ) -> str:
     """Render the complete Markdown analysis report."""
+    evidence_items = [
+        item
+        for item in [
+            phase12_live_evidence,
+            *(phase12_additional_live_evidence or []),
+        ]
+        if item is not None
+    ]
+    promoted_task_ids = sorted(
+        {
+            task_id
+            for item in evidence_items
+            if item.promotable
+            for task_id in item.promoted_task_ids
+        },
+        key=int,
+    )
     lines: list[str] = []
     _section_1_overview(lines, stats, data_source_path)
     _section_2_task_space(lines, stats)
@@ -467,6 +737,23 @@ def render_report(
     _section_6_capability(lines, cap_agg)
     _section_7_known_issues(lines)
     _section_8_recommendations(lines, classifications, stats)
+    _section_9_phase12_queue(
+        lines,
+        compute_phase12_coverage_rungs(
+            classifications,
+            promoted_task_ids=promoted_task_ids,
+        ),
+        build_phase12_coverage_rung_plan(
+            classifications,
+            promoted_task_ids=promoted_task_ids,
+        ),
+        select_phase12_next_candidates(
+            classifications,
+            promoted_task_ids=promoted_task_ids,
+        ),
+        phase12_live_evidence,
+        phase12_additional_live_evidence or [],
+    )
     return "\n".join(lines)
 
 
@@ -786,6 +1073,121 @@ def _section_8_recommendations(
     lines.append("")
 
 
+def _section_9_phase12_queue(
+    lines: list[str],
+    coverage_rungs: dict,
+    rung_plan: dict,
+    next_candidates: list[Phase12GapAnalysis],
+    live_evidence: Phase12LiveEvidence | None = None,
+    additional_live_evidence: list[Phase12LiveEvidence] | None = None,
+) -> None:
+    lines.append("## 9. Phase 12 Coverage Expansion Queue")
+    lines.append("")
+    lines.append("### 9.1 Coverage rungs")
+    lines.append("")
+    lines.append("| Metric | Value |")
+    lines.append("|--------|-------|")
+    for key in (
+        "current_supported",
+        "live_promoted_count",
+        "effective_supported",
+        "target_total",
+        "total_tasks",
+        "stable_40_plus",
+        "stable_50_plus",
+        "stable_55_plus",
+        "remaining_to_40",
+        "remaining_to_50",
+        "remaining_to_55",
+        "remaining_to_all_tasks",
+    ):
+        lines.append(f"| {key} | {coverage_rungs[key]} |")
+    for key in (
+        "current_rung",
+        "next_target",
+        "remaining_to_next",
+        "safe_candidate_count",
+        "schema_ready_count",
+        "projected_supported_after_safe_candidates",
+        "can_reach_next_with_safe_candidates",
+    ):
+        lines.append(f"| {key} | {rung_plan[key]} |")
+    lines.append("")
+
+    lines.append("### 9.2 Next candidates")
+    lines.append("")
+    if not next_candidates:
+        lines.append("No safe non-supported candidates found for Phase 12 expansion.")
+        lines.append("")
+    else:
+        lines.append("| Task ID | Category | Priority | Blocking reasons |")
+        lines.append("|---------|----------|----------|------------------|")
+        for candidate in next_candidates:
+            reasons = "; ".join(candidate.blocking_reasons) or "-"
+            lines.append(
+                f"| {candidate.task_id} | {candidate.category} "
+                f"| {candidate.priority} | {reasons} |"
+            )
+        lines.append("")
+
+    lines.append("### 9.3 Phase 12 Live Evidence")
+    lines.append("")
+    if live_evidence is None:
+        lines.append("No live evidence artifact found for Phase 12 schema-ready slice.")
+        lines.append("")
+    else:
+        lines.append("| Metric | Value |")
+        lines.append("|--------|-------|")
+        lines.append(f"| eval_run_id | {live_evidence.eval_run_id} |")
+        lines.append(f"| subset | {live_evidence.subset} |")
+        lines.append(f"| eval_backend | {live_evidence.eval_backend} |")
+        lines.append(f"| created_at | {live_evidence.created_at} |")
+        lines.append(f"| passed_count | {live_evidence.passed_count} |")
+        lines.append(f"| case_count | {live_evidence.case_count} |")
+        lines.append(
+            "| promoted_task_ids | "
+            f"{', '.join(live_evidence.promoted_task_ids) or '-'} |"
+        )
+        lines.append(f"| pass_rate | {live_evidence.pass_rate:.4f} |")
+        lines.append(
+            f"| tool_call_success_rate | {live_evidence.tool_call_success_rate:.4f} |"
+        )
+        lines.append(f"| mutation_error_rate | {live_evidence.mutation_error_rate:.4f} |")
+        lines.append(f"| promotable | {live_evidence.promotable} |")
+        lines.append("")
+
+    additional = additional_live_evidence or []
+    if additional:
+        lines.append("#### Additional Phase 12 Evidence")
+        lines.append("")
+        lines.append(
+            "| Subset | Eval Run | Passed | Pass Rate | Promotable | Failure labels |"
+        )
+        lines.append(
+            "|--------|----------|--------|-----------|------------|----------------|"
+        )
+        for evidence in additional:
+            failure_labels = ", ".join(
+                f"{label}={count}"
+                for label, count in sorted(evidence.failure_labels.items())
+            ) or "-"
+            lines.append(
+                f"| {evidence.subset} | {evidence.eval_run_id} | "
+                f"{evidence.passed_count}/{evidence.case_count} | "
+                f"{evidence.pass_rate:.4f} | {evidence.promotable} | "
+                f"{failure_labels} |"
+            )
+        lines.append("")
+
+    lines.append("### 9.4 Expansion rule")
+    lines.append("")
+    lines.append(
+        "Phase 12 coverage must come from tool/schema/prompt/guard changes, "
+        "not runtime case-specific parser branches."
+    )
+    lines.append("")
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -848,6 +1250,14 @@ def analyze_and_report(config: AppConfig | None = None) -> str:
         data_source_path=str(retail_dir),
         unsupported_tool_info=unsupported_tool_info,
         missing_tool_info=missing_tool_info,
+        phase12_live_evidence=load_phase12_live_evidence(),
+        phase12_additional_live_evidence=[
+            evidence
+            for evidence in [
+                load_phase12_live_evidence(subset="tau_phase12_nl_evidence")
+            ]
+            if evidence is not None
+        ],
     )
     return report
 
