@@ -269,6 +269,10 @@ class AgentOpsServiceTests(unittest.TestCase):
             [{"confirmation_required": True, "summary": "Cancel order #W1."}],
         )
         self.assertEqual(detail.db_assertion_diff["order_status"]["actual"], "pending")
+        self.assertEqual(detail.trace_detail.trace_id, "case-a")
+        self.assertEqual(
+            Path(detail.trace_detail.trace_artifact_path).resolve(), trace_path.resolve()
+        )
 
     def test_get_case_detail_resolves_relative_report_trace_path(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -307,6 +311,9 @@ class AgentOpsServiceTests(unittest.TestCase):
             detail = service.get_case("eval-run-a", "case-a")
 
         self.assertEqual(detail.trace_artifact_path, "traces/eval-run-a/runs/case-a.json")
+        self.assertEqual(
+            Path(detail.trace_detail.trace_artifact_path).resolve(), trace_path.resolve()
+        )
         self.assertEqual(detail.user_messages, ["hi"])
 
     def test_get_trace_by_path_returns_timeline_and_redacted_messages(self):

@@ -40,6 +40,18 @@ class AgentOpsReportDetail(BaseModel):
     cases: list[AgentOpsReportCaseSummary] = Field(default_factory=list)
 
 
+class AgentOpsTraceDetail(BaseModel):
+    trace_id: str
+    trace_artifact_path: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    timeline: list[dict[str, Any]] = Field(default_factory=list)
+    turns: list[dict[str, Any]] = Field(default_factory=list)
+    final_state: dict[str, Any] = Field(default_factory=dict)
+    db_hashes: dict[str, Any] = Field(default_factory=dict)
+    llm_responses: list[dict[str, Any]] = Field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class AgentOpsCaseDetail(BaseModel):
     case_id: str
     run_id: str
@@ -54,15 +66,4 @@ class AgentOpsCaseDetail(BaseModel):
     db_assertion_diff: dict[str, Any] = Field(default_factory=dict)
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     trace_summary: dict[str, Any] = Field(default_factory=dict)
-
-
-class AgentOpsTraceDetail(BaseModel):
-    trace_id: str
-    trace_artifact_path: str
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    timeline: list[dict[str, Any]] = Field(default_factory=list)
-    turns: list[dict[str, Any]] = Field(default_factory=list)
-    final_state: dict[str, Any] = Field(default_factory=dict)
-    db_hashes: dict[str, Any] = Field(default_factory=dict)
-    llm_responses: list[dict[str, Any]] = Field(default_factory=list)
-    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    trace_detail: AgentOpsTraceDetail

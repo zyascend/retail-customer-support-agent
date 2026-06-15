@@ -142,22 +142,12 @@ export function AgentOpsWorkspace() {
       }
 
       setSelectedCase(detail);
-
-      if (!detail.trace_artifact_path) {
+      if (!isCurrent(traceRequestRef, traceRequestId, mountedRef)) {
         return;
       }
 
-      setTraceLoading(true);
-      const trace = await getAgentOpsTraceByPath(detail.trace_artifact_path);
-      if (
-        !isCurrent(caseRequestRef, caseRequestId, mountedRef) ||
-        !isCurrent(traceRequestRef, traceRequestId, mountedRef)
-      ) {
-        return;
-      }
-
-      setSelectedTrace(trace);
-      setSelectedEventId(selectInitialTraceEvent(trace.timeline));
+      setSelectedTrace(detail.trace_detail);
+      setSelectedEventId(selectInitialTraceEvent(detail.trace_detail.timeline));
     } catch (exc) {
       if (isCurrent(caseRequestRef, caseRequestId, mountedRef)) {
         setError(errorMessage(exc, "AgentOps 案例或 Trace 加载失败"));

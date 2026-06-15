@@ -93,6 +93,7 @@ class AgentOpsService:
                     1 for call in trace.tool_calls if call.get("status") == "blocked"
                 ),
             },
+            trace_detail=trace,
         )
 
     def _trace_path_from_report_case(self, raw_path: str | None) -> str:

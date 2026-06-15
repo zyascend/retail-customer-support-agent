@@ -49,6 +49,7 @@ export interface AgentOpsCaseDetail {
   db_assertion_diff: Record<string, unknown>;
   tool_calls: Array<Record<string, unknown>>;
   trace_summary: Record<string, unknown>;
+  trace_detail: AgentOpsTraceDetail;
 }
 
 export interface AgentOpsTraceDetail {

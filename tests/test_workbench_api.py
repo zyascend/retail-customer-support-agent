@@ -318,7 +318,7 @@ class WorkbenchAPITests(unittest.TestCase):
 
     def test_agentops_case_detail_returns_merged_trace_and_report_signals(self):
         with tempfile.TemporaryDirectory() as tmp:
-            _write_agentops_artifacts(Path(tmp))
+            trace_path = _write_agentops_artifacts(Path(tmp))
             app = create_app(config=resolve_config(artifact_dir=tmp))
             client = TestClient(app)
 
@@ -337,6 +337,8 @@ class WorkbenchAPITests(unittest.TestCase):
         )
         self.assertEqual(payload["db_assertion_diff"]["order_status"]["actual"], "pending")
         self.assertEqual(payload["trace_summary"]["guard_block_count"], 1)
+        self.assertEqual(payload["trace_detail"]["trace_id"], "case-a")
+        self.assertEqual(payload["trace_detail"]["trace_artifact_path"], str(trace_path))
 
     def test_agentops_trace_by_path_returns_trace_detail(self):
         with tempfile.TemporaryDirectory() as tmp:
