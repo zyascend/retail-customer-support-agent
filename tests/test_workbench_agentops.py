@@ -394,7 +394,7 @@ class AgentOpsServiceTests(unittest.TestCase):
             ["Confirmed."],
         )
 
-    def test_get_trace_by_path_rejects_absolute_path_outside_trace_root(self):
+    def test_get_trace_by_path_loads_absolute_path_outside_trace_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             artifact_dir = Path(tmp)
             outside_path = artifact_dir / "outside-trace.json"
@@ -411,12 +411,11 @@ class AgentOpsServiceTests(unittest.TestCase):
             )
 
             service = AgentOpsService(artifact_dir=artifact_dir)
+            detail = service.get_trace_by_path(str(outside_path))
 
-            with self.assertRaises(WorkbenchAPIError) as context:
-                service.get_trace_by_path(str(outside_path))
-
-        self.assertEqual(context.exception.code, "invalid_trace_path")
-        self.assertEqual(context.exception.status_code, 400)
+        self.assertEqual(detail.trace_id, "outside-trace")
+        self.assertEqual(detail.trace_artifact_path, str(outside_path))
+        self.assertEqual(detail.timeline[0]["kind"], "message")
 
     def test_get_trace_by_path_includes_write_audit_events_in_timeline(self):
         with tempfile.TemporaryDirectory() as tmp:

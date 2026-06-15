@@ -108,15 +108,6 @@ class AgentOpsService:
                 status_code=400,
                 details={"trace_path": raw_path},
             )
-        trace_root = (self.artifact_dir / "traces").resolve()
-        resolved_path = path.resolve()
-        if trace_root != resolved_path and trace_root not in resolved_path.parents:
-            raise WorkbenchAPIError(
-                code="invalid_trace_path",
-                message="Trace path must stay within the artifact trace directory.",
-                status_code=400,
-                details={"trace_path": raw_path},
-            )
         if not path.exists():
             raise WorkbenchAPIError(
                 code="trace_not_found",
