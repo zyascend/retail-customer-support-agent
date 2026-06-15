@@ -267,7 +267,10 @@ class WorkbenchAPITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             artifact_dir = Path(tmp)
             _write_agentops_artifacts(artifact_dir)
-            app = create_app(config=resolve_config(artifact_dir=tmp))
+            app = create_app(
+                config=resolve_config(artifact_dir=tmp),
+                agentops_artifact_dir=tmp,
+            )
             client = TestClient(app)
 
             response = client.get("/api/agentops/reports")
@@ -301,10 +304,33 @@ class WorkbenchAPITests(unittest.TestCase):
             str((artifact_dir / "reports" / "eval-run-a.json").resolve()),
         )
 
+    def test_explicit_demo_artifact_dir_does_not_override_default_agentops_reports(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            demo_artifact_dir = cwd / "artifacts" / "workbench"
+            agentops_artifact_dir = cwd / "artifacts" / "phase2"
+            _write_agentops_artifacts(agentops_artifact_dir)
+            with _temporary_cwd(cwd):
+                app = create_app(config=resolve_config(artifact_dir=str(demo_artifact_dir)))
+                client = TestClient(app)
+
+                response = client.get("/api/agentops/reports")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([report["run_id"] for report in payload], ["eval-run-a"])
+        self.assertEqual(
+            payload[0]["report_path"],
+            str((agentops_artifact_dir / "reports" / "eval-run-a.json").resolve()),
+        )
+
     def test_agentops_report_detail_returns_cases(self):
         with tempfile.TemporaryDirectory() as tmp:
             _write_agentops_artifacts(Path(tmp))
-            app = create_app(config=resolve_config(artifact_dir=tmp))
+            app = create_app(
+                config=resolve_config(artifact_dir=tmp),
+                agentops_artifact_dir=tmp,
+            )
             client = TestClient(app)
 
             response = client.get("/api/agentops/reports/eval-run-a")
@@ -319,7 +345,10 @@ class WorkbenchAPITests(unittest.TestCase):
     def test_agentops_case_detail_returns_merged_trace_and_report_signals(self):
         with tempfile.TemporaryDirectory() as tmp:
             trace_path = _write_agentops_artifacts(Path(tmp))
-            app = create_app(config=resolve_config(artifact_dir=tmp))
+            app = create_app(
+                config=resolve_config(artifact_dir=tmp),
+                agentops_artifact_dir=tmp,
+            )
             client = TestClient(app)
 
             response = client.get("/api/agentops/reports/eval-run-a/cases/case-a")
@@ -343,7 +372,10 @@ class WorkbenchAPITests(unittest.TestCase):
     def test_agentops_trace_by_path_returns_trace_detail(self):
         with tempfile.TemporaryDirectory() as tmp:
             trace_path = _write_agentops_artifacts(Path(tmp))
-            app = create_app(config=resolve_config(artifact_dir=tmp))
+            app = create_app(
+                config=resolve_config(artifact_dir=tmp),
+                agentops_artifact_dir=tmp,
+            )
             client = TestClient(app)
 
             response = client.get(
@@ -359,7 +391,10 @@ class WorkbenchAPITests(unittest.TestCase):
 
     def test_agentops_trace_by_path_rejects_relative_path(self):
         with tempfile.TemporaryDirectory() as tmp:
-            app = create_app(config=resolve_config(artifact_dir=tmp))
+            app = create_app(
+                config=resolve_config(artifact_dir=tmp),
+                agentops_artifact_dir=tmp,
+            )
             client = TestClient(app)
 
             response = client.get(
@@ -372,7 +407,10 @@ class WorkbenchAPITests(unittest.TestCase):
 
     def test_agentops_missing_report_returns_structured_error(self):
         with tempfile.TemporaryDirectory() as tmp:
-            app = create_app(config=resolve_config(artifact_dir=tmp))
+            app = create_app(
+                config=resolve_config(artifact_dir=tmp),
+                agentops_artifact_dir=tmp,
+            )
             client = TestClient(app)
 
             response = client.get("/api/agentops/reports/missing-run")

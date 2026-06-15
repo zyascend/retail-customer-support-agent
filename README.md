@@ -40,7 +40,7 @@ user message → pre-flight checks → AgentLoop → ToolGateway / WriteActionGu
 uv sync --extra dev
 
 # 2. 启动 Workbench 离线演示（offline_demo，无需 API Key）
-uv run phase4-workbench &           # Python API → :8000
+uv run workbench &                  # Python API → :8765
 cd workbench && npm install && npm run dev   # React 界面 → :5173
 
 # 3. 运行 scripted eval（`scripted_offline_demo` / offline_demo harness）

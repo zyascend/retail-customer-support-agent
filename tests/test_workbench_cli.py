@@ -41,6 +41,22 @@ class WorkbenchCLITests(unittest.TestCase):
         self.assertFalse(kwargs["reload"])
         self.assertNotIn("factory", kwargs)
 
+    def test_demo_artifact_dir_does_not_override_agentops_artifact_dir(self):
+        app = object()
+        with TemporaryDirectory() as tmp:
+            with (
+                patch("app.workbench.cli.create_app", return_value=app) as create_app,
+                patch("uvicorn.run"),
+            ):
+                exit_code = workbench_main(["--artifact-dir", tmp])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(create_app.call_args.kwargs["config"].artifact_dir, Path(tmp))
+        self.assertEqual(
+            create_app.call_args.kwargs["agentops_artifact_dir"],
+            Path("artifacts/phase2").resolve(),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
