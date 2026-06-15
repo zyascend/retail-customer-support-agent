@@ -294,3 +294,101 @@ class AgentOpsServiceTests(unittest.TestCase):
         self.assertEqual(
             detail.turns[0]["messages"][0]["content"], "email me at [redacted-email]"
         )
+
+    def test_get_trace_by_path_rejects_relative_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            service = AgentOpsService(artifact_dir=artifact_dir)
+
+            with self.assertRaises(WorkbenchAPIError) as context:
+                service.get_trace_by_path("traces/trace-a.json")
+
+        self.assertEqual(context.exception.code, "invalid_trace_path")
+        self.assertEqual(context.exception.status_code, 400)
+
+    def test_get_trace_by_path_splits_multiple_user_turns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            trace_path = artifact_dir / "traces" / "trace-b.json"
+            _write_json(
+                trace_path,
+                {
+                    "run_id": "trace-b",
+                    "messages": [
+                        {"role": "user", "content": "my email is alex@example.com"},
+                        {"role": "assistant", "content": "I found your account."},
+                        {"role": "user", "content": "cancel order #W2"},
+                        {"role": "assistant", "content": "I can help with that."},
+                    ],
+                    "metadata": {
+                        "llm_responses": [
+                            {"assistant_content": "I found your account.", "finish_reason": "stop"},
+                            {"assistant_content": "I can help with that.", "finish_reason": "stop"},
+                        ]
+                    },
+                    "tool_calls": [],
+                    "steps": [],
+                    "final_state": {},
+                },
+            )
+
+            service = AgentOpsService(artifact_dir=artifact_dir)
+            detail = service.get_trace_by_path(str(trace_path))
+
+        self.assertEqual(len(detail.turns), 2)
+        self.assertEqual(detail.turns[0]["messages"][0]["content"], "my email is [redacted-email]")
+        self.assertEqual(detail.turns[0]["messages"][1]["content"], "I found your account.")
+        self.assertEqual(detail.turns[1]["messages"][0]["content"], "cancel order #W2")
+        self.assertEqual(detail.turns[1]["messages"][1]["content"], "I can help with that.")
+        self.assertEqual(detail.turns[0]["llm_responses"][0]["assistant_content"], "I found your account.")
+        self.assertEqual(detail.turns[1]["llm_responses"][0]["assistant_content"], "I can help with that.")
+
+    def test_get_trace_by_path_raises_structured_error_for_malformed_nested_entries(self):
+        malformed_payloads = {
+            "bad-message": {
+                "run_id": "bad-message",
+                "messages": [{"role": "user", "content": {"text": "hi"}}],
+                "metadata": {"llm_responses": []},
+                "tool_calls": [],
+                "steps": [],
+                "final_state": {},
+            },
+            "bad-step": {
+                "run_id": "bad-step",
+                "messages": [{"role": "user", "content": "hi"}],
+                "metadata": {"llm_responses": []},
+                "tool_calls": [],
+                "steps": [{"node": "write_action_guard", "status": "ok", "detail": []}],
+                "final_state": {},
+            },
+            "bad-tool-call": {
+                "run_id": "bad-tool-call",
+                "messages": [{"role": "user", "content": "hi"}],
+                "metadata": {"llm_responses": []},
+                "tool_calls": [
+                    {
+                        "tool_name": "cancel_pending_order",
+                        "arguments": {"order_id": "#W1"},
+                        "tool_kind": "danger",
+                        "status": "blocked",
+                    }
+                ],
+                "steps": [],
+                "final_state": {},
+            },
+        }
+
+        for name, payload in malformed_payloads.items():
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    artifact_dir = Path(tmp)
+                    trace_path = artifact_dir / "traces" / f"{name}.json"
+                    _write_json(trace_path, payload)
+
+                    service = AgentOpsService(artifact_dir=artifact_dir)
+
+                    with self.assertRaises(WorkbenchAPIError) as context:
+                        service.get_trace_by_path(str(trace_path))
+
+                self.assertEqual(context.exception.code, "artifact_parse_error")
+                self.assertEqual(context.exception.status_code, 500)

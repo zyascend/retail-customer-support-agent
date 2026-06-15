@@ -101,6 +101,13 @@ class AgentOpsService:
                 status_code=400,
             )
         path = Path(raw_path)
+        if not path.is_absolute():
+            raise WorkbenchAPIError(
+                code="invalid_trace_path",
+                message="Trace path must be absolute.",
+                status_code=400,
+                details={"trace_path": raw_path},
+            )
         if not path.exists():
             raise WorkbenchAPIError(
                 code="trace_not_found",
@@ -108,61 +115,33 @@ class AgentOpsService:
                 status_code=404,
                 details={"trace_path": raw_path},
             )
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise WorkbenchAPIError(
-                code="artifact_parse_error",
-                message="Trace artifact could not be parsed.",
-                status_code=500,
-                details={"trace_path": str(path)},
-            ) from exc
-        if not isinstance(payload, dict):
-            raise WorkbenchAPIError(
-                code="artifact_parse_error",
-                message="Trace artifact must be a JSON object.",
-                status_code=500,
-                details={"trace_path": str(path)},
-            )
 
-        messages = redact_value(payload.get("messages", []))
-        llm_responses = redact_value(payload.get("metadata", {}).get("llm_responses", []))
-        tool_calls = redact_value(payload.get("tool_calls", []))
-
+        payload = self._load_trace_payload(path)
         trace_state = SessionState(session_id=str(payload.get("run_id", path.stem)))
-        for message in payload.get("messages", []):
-            trace_state.messages.append(Message(**message))
-        for step in payload.get("steps", []):
-            trace_state.steps.append(
-                AgentStep(
-                    node=str(step.get("node", "")),
-                    status=step.get("status", "ok"),
-                    detail=step.get("detail", {}),
-                )
-            )
-        for call in payload.get("tool_calls", []):
-            trace_state.tool_results.append(ToolCallRecord(**call))
+        trace_state.messages.extend(self._trace_messages(payload, path))
+        trace_state.steps.extend(self._trace_steps(payload, path))
+        trace_state.tool_results.extend(self._trace_tool_calls(payload, path))
         timeline = build_timeline(trace_state)
+        llm_responses = self._trace_llm_responses(payload, path)
+        redacted_messages = redact_value([message.model_dump() for message in trace_state.messages])
+        redacted_llm_responses = redact_value(llm_responses)
+        redacted_tool_calls = redact_value(
+            [record.model_dump() for record in trace_state.tool_results]
+        )
 
         return AgentOpsTraceDetail(
             trace_id=str(payload.get("run_id") or path.stem),
             trace_artifact_path=str(path),
             metadata=redact_value(payload.get("metadata", {})),
             timeline=timeline,
-            turns=[
-                {
-                    "index": 0,
-                    "messages": messages,
-                    "llm_responses": llm_responses,
-                }
-            ],
+            turns=self._assemble_trace_turns(redacted_messages, redacted_llm_responses),
             final_state=redact_value(payload.get("final_state", {})),
             db_hashes={
                 "initial_db_hash": payload.get("metadata", {}).get("initial_db_hash"),
                 "final_db_hash": payload.get("metadata", {}).get("final_db_hash"),
             },
-            llm_responses=llm_responses,
-            tool_calls=tool_calls,
+            llm_responses=redacted_llm_responses,
+            tool_calls=redacted_tool_calls,
         )
 
     def _report_paths(self) -> list[Path]:
@@ -172,9 +151,9 @@ class AgentOpsService:
         return sorted(report_dir.glob("*.json"))
 
     def _report_result(self, run_id: str, case_id: str) -> dict[str, Any]:
-        path = self.artifact_dir / "reports" / f"{run_id}.json"
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        for result in payload.get("results", []):
+        path = self._report_path_for_run_id(run_id)
+        payload = self._load_payload(path)
+        for result in self._results(payload, path):
             if result.get("case_id") == case_id:
                 return result
         raise WorkbenchAPIError(
@@ -325,4 +304,140 @@ class AgentOpsService:
             message=message,
             status_code=500,
             details={"report_path": str(path)},
+        )
+
+    def _load_trace_payload(self, path: Path) -> dict[str, Any]:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise self._trace_artifact_parse_error(
+                path, "Trace artifact could not be parsed."
+            ) from exc
+        if not isinstance(payload, dict):
+            raise self._trace_artifact_parse_error(
+                path, "Trace artifact must be a JSON object."
+            )
+        return payload
+
+    def _trace_messages(self, payload: dict[str, Any], path: Path) -> list[Message]:
+        messages = payload.get("messages", [])
+        if not isinstance(messages, list):
+            raise self._trace_artifact_parse_error(
+                path, "Trace field 'messages' must be a list."
+            )
+        parsed: list[Message] = []
+        for message in messages:
+            if not isinstance(message, dict):
+                raise self._trace_artifact_parse_error(
+                    path, "Each trace message entry must be a JSON object."
+                )
+            try:
+                parsed.append(Message(**message))
+            except ValidationError as exc:
+                raise self._trace_artifact_parse_error(
+                    path, "Trace message entry could not be parsed."
+                ) from exc
+        return parsed
+
+    def _trace_steps(self, payload: dict[str, Any], path: Path) -> list[AgentStep]:
+        steps = payload.get("steps", [])
+        if not isinstance(steps, list):
+            raise self._trace_artifact_parse_error(path, "Trace field 'steps' must be a list.")
+        parsed: list[AgentStep] = []
+        for step in steps:
+            if not isinstance(step, dict):
+                raise self._trace_artifact_parse_error(
+                    path, "Each trace step entry must be a JSON object."
+                )
+            try:
+                parsed.append(AgentStep(**step))
+            except ValidationError as exc:
+                raise self._trace_artifact_parse_error(
+                    path, "Trace step entry could not be parsed."
+                ) from exc
+        return parsed
+
+    def _trace_tool_calls(
+        self, payload: dict[str, Any], path: Path
+    ) -> list[ToolCallRecord]:
+        tool_calls = payload.get("tool_calls", [])
+        if not isinstance(tool_calls, list):
+            raise self._trace_artifact_parse_error(
+                path, "Trace field 'tool_calls' must be a list."
+            )
+        parsed: list[ToolCallRecord] = []
+        for call in tool_calls:
+            if not isinstance(call, dict):
+                raise self._trace_artifact_parse_error(
+                    path, "Each trace tool call entry must be a JSON object."
+                )
+            try:
+                parsed.append(ToolCallRecord(**call))
+            except ValidationError as exc:
+                raise self._trace_artifact_parse_error(
+                    path, "Trace tool call entry could not be parsed."
+                ) from exc
+        return parsed
+
+    def _trace_llm_responses(self, payload: dict[str, Any], path: Path) -> list[dict[str, Any]]:
+        metadata = payload.get("metadata", {})
+        if not isinstance(metadata, dict):
+            raise self._trace_artifact_parse_error(
+                path, "Trace field 'metadata' must be a JSON object."
+            )
+        llm_responses = metadata.get("llm_responses", [])
+        if not isinstance(llm_responses, list):
+            raise self._trace_artifact_parse_error(
+                path, "Trace field 'metadata.llm_responses' must be a list."
+            )
+        parsed: list[dict[str, Any]] = []
+        for response in llm_responses:
+            if not isinstance(response, dict):
+                raise self._trace_artifact_parse_error(
+                    path, "Each trace llm response entry must be a JSON object."
+                )
+            parsed.append(response)
+        return parsed
+
+    def _assemble_trace_turns(
+        self, messages: list[dict[str, Any]], llm_responses: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        turns: list[dict[str, Any]] = []
+        current_messages: list[dict[str, Any]] = []
+
+        for message in messages:
+            if message.get("role") == "user" and current_messages:
+                turns.append(
+                    {
+                        "index": len(turns),
+                        "messages": current_messages,
+                        "llm_responses": [],
+                    }
+                )
+                current_messages = []
+            current_messages.append(message)
+
+        if current_messages:
+            turns.append(
+                {
+                    "index": len(turns),
+                    "messages": current_messages,
+                    "llm_responses": [],
+                }
+            )
+
+        if not turns:
+            return [{"index": 0, "messages": [], "llm_responses": llm_responses}]
+
+        for index, response in enumerate(llm_responses):
+            target_index = min(index, len(turns) - 1)
+            turns[target_index]["llm_responses"].append(response)
+        return turns
+
+    def _trace_artifact_parse_error(self, path: Path, message: str) -> WorkbenchAPIError:
+        return WorkbenchAPIError(
+            code="artifact_parse_error",
+            message=message,
+            status_code=500,
+            details={"trace_path": str(path)},
         )
