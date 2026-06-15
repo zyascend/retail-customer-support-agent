@@ -55,7 +55,9 @@ class AgentOpsService:
                 details={"run_id": run_id, "case_id": case_id},
             )
         result_payload = self._report_result(run_id, case_id)
-        trace = self.get_trace_by_path(case.trace_artifact_path or "")
+        trace = self.get_trace_by_path(
+            self._trace_path_from_report_case(case.trace_artifact_path)
+        )
         return AgentOpsCaseDetail(
             case_id=case.case_id,
             run_id=run_id,
@@ -92,6 +94,17 @@ class AgentOpsService:
                 ),
             },
         )
+
+    def _trace_path_from_report_case(self, raw_path: str | None) -> str:
+        if not raw_path:
+            return ""
+        path = Path(raw_path)
+        if path.is_absolute():
+            return str(path)
+        artifact_relative_path = self.artifact_dir / path
+        if artifact_relative_path.exists():
+            return str(artifact_relative_path.resolve())
+        return str((Path.cwd() / path).resolve())
 
     def get_trace_by_path(self, raw_path: str) -> AgentOpsTraceDetail:
         if not raw_path:

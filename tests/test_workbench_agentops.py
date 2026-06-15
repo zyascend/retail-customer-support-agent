@@ -270,6 +270,45 @@ class AgentOpsServiceTests(unittest.TestCase):
         )
         self.assertEqual(detail.db_assertion_diff["order_status"]["actual"], "pending")
 
+    def test_get_case_detail_resolves_relative_report_trace_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            trace_path = artifact_dir / "traces" / "eval-run-a" / "runs" / "case-a.json"
+            _write_json(
+                artifact_dir / "reports" / "eval-run-a.json",
+                {
+                    "eval_run_id": "eval-run-a",
+                    "created_at": "2026-06-15T01:00:00+00:00",
+                    "eval_backend": "live",
+                    "model": "deepseek-v4-flash",
+                    "baseline_metadata": {"provider": "deepseek", "subset": "live_smoke_core"},
+                    "results": [
+                        {
+                            "case_id": "case-a",
+                            "passed": False,
+                            "trace_artifact_path": str(trace_path.relative_to(artifact_dir)),
+                        }
+                    ],
+                },
+            )
+            _write_json(
+                trace_path,
+                {
+                    "run_id": "case-a",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "metadata": {"llm_responses": []},
+                    "tool_calls": [],
+                    "steps": [],
+                    "final_state": {},
+                },
+            )
+
+            service = AgentOpsService(artifact_dir=artifact_dir)
+            detail = service.get_case("eval-run-a", "case-a")
+
+        self.assertEqual(detail.trace_artifact_path, "traces/eval-run-a/runs/case-a.json")
+        self.assertEqual(detail.user_messages, ["hi"])
+
     def test_get_trace_by_path_returns_timeline_and_redacted_messages(self):
         with tempfile.TemporaryDirectory() as tmp:
             artifact_dir = Path(tmp)
