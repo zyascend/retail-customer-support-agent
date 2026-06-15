@@ -158,3 +158,139 @@ class AgentOpsServiceTests(unittest.TestCase):
 
         self.assertEqual(context.exception.code, "artifact_parse_error")
         self.assertEqual(context.exception.status_code, 500)
+
+    def test_get_case_detail_merges_report_and_trace_signals(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            trace_path = artifact_dir / "traces" / "eval-run-a" / "runs" / "case-a.json"
+            _write_json(
+                artifact_dir / "reports" / "eval-run-a.json",
+                {
+                    "eval_run_id": "eval-run-a",
+                    "created_at": "2026-06-15T01:00:00+00:00",
+                    "eval_backend": "live",
+                    "model": "deepseek-v4-flash",
+                    "baseline_metadata": {"provider": "deepseek", "subset": "live_smoke_core"},
+                    "results": [
+                        {
+                            "case_id": "case-a",
+                            "passed": False,
+                            "failure_label": "wrong_tool",
+                            "failure_category": "prompt_gap",
+                            "trace_artifact_path": str(trace_path),
+                            "expected_actual_diff": {
+                                "order_status": {"expected": "cancelled", "actual": "pending"}
+                            },
+                        }
+                    ],
+                },
+            )
+            _write_json(
+                trace_path,
+                {
+                    "run_id": "case-a",
+                    "messages": [
+                        {"role": "user", "content": "cancel order #W1"},
+                        {"role": "assistant", "content": "I need confirmation."},
+                    ],
+                    "metadata": {
+                        "llm_responses": [
+                            {
+                                "assistant_content": "",
+                                "finish_reason": "tool_calls",
+                                "token_usage": {"total_tokens": 42},
+                                "tool_calls": [
+                                    {
+                                        "tool_name": "cancel_pending_order",
+                                        "arguments": {"order_id": "#W1"},
+                                        "id": "call_1",
+                                        "raw_arguments": "{\"order_id\":\"#W1\"}",
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                    "tool_calls": [
+                        {
+                            "tool_name": "cancel_pending_order",
+                            "arguments": {"order_id": "#W1"},
+                            "tool_kind": "write",
+                            "status": "blocked",
+                            "error": "explicit_confirmation_required",
+                            "block_context": {
+                                "confirmation_required": True,
+                                "summary": "Cancel order #W1.",
+                            },
+                            "observation": {
+                                "block_reason": "explicit_confirmation_required"
+                            },
+                        }
+                    ],
+                    "steps": [
+                        {
+                            "node": "write_action_guard",
+                            "status": "ok",
+                            "detail": {
+                                "tool_name": "cancel_pending_order",
+                                "status": "blocked",
+                                "block_reason": "explicit_confirmation_required",
+                                "block_context": {
+                                    "confirmation_required": True,
+                                    "summary": "Cancel order #W1.",
+                                },
+                            },
+                        }
+                    ],
+                    "final_state": {
+                        "auth_method": "email",
+                        "authenticated_user_id": "user-1",
+                        "compat": {
+                            "current_intent": "unknown",
+                            "slots": {},
+                            "policy_decision": None,
+                        },
+                        "confirmation_status": "required",
+                        "pending_action": {"action_name": "cancel_pending_order"},
+                        "session_id": "case-a",
+                        "task_id": "case-a",
+                        "termination_reason": "awaiting_confirmation",
+                        "write_locks": [],
+                    },
+                },
+            )
+
+            service = AgentOpsService(artifact_dir=artifact_dir)
+            detail = service.get_case("eval-run-a", "case-a")
+
+        self.assertEqual(detail.failure_label, "wrong_tool")
+        self.assertEqual(detail.root_cause, "prompt_gap")
+        self.assertEqual(
+            detail.guard_context,
+            [{"confirmation_required": True, "summary": "Cancel order #W1."}],
+        )
+        self.assertEqual(detail.db_assertion_diff["order_status"]["actual"], "pending")
+
+    def test_get_trace_by_path_returns_timeline_and_redacted_messages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            trace_path = artifact_dir / "traces" / "trace-a.json"
+            _write_json(
+                trace_path,
+                {
+                    "run_id": "trace-a",
+                    "messages": [{"role": "user", "content": "email me at alex@example.com"}],
+                    "metadata": {"llm_responses": []},
+                    "tool_calls": [],
+                    "steps": [],
+                    "final_state": {},
+                },
+            )
+
+            service = AgentOpsService(artifact_dir=artifact_dir)
+            detail = service.get_trace_by_path(str(trace_path))
+
+        self.assertEqual(detail.trace_id, "trace-a")
+        self.assertEqual(detail.timeline[0]["kind"], "message")
+        self.assertEqual(
+            detail.turns[0]["messages"][0]["content"], "email me at [redacted-email]"
+        )

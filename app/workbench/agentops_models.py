@@ -38,3 +38,31 @@ class AgentOpsReportDetail(BaseModel):
     baseline_metadata: dict[str, Any] = Field(default_factory=dict)
     metrics: dict[str, Any] = Field(default_factory=dict)
     cases: list[AgentOpsReportCaseSummary] = Field(default_factory=list)
+
+
+class AgentOpsCaseDetail(BaseModel):
+    case_id: str
+    run_id: str
+    subset: str | None = None
+    passed: bool
+    failure_label: str | None = None
+    root_cause: str | None = None
+    trace_artifact_path: str | None = None
+    user_messages: list[str] = Field(default_factory=list)
+    assistant_messages: list[str] = Field(default_factory=list)
+    guard_context: list[dict[str, Any]] = Field(default_factory=list)
+    db_assertion_diff: dict[str, Any] = Field(default_factory=dict)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    trace_summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentOpsTraceDetail(BaseModel):
+    trace_id: str
+    trace_artifact_path: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    timeline: list[dict[str, Any]] = Field(default_factory=list)
+    turns: list[dict[str, Any]] = Field(default_factory=list)
+    final_state: dict[str, Any] = Field(default_factory=dict)
+    db_hashes: dict[str, Any] = Field(default_factory=dict)
+    llm_responses: list[dict[str, Any]] = Field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)

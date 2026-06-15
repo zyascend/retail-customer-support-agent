@@ -6,12 +6,16 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from app.agent.models import AgentStep, Message, SessionState, ToolCallRecord
 from app.workbench.agentops_models import (
+    AgentOpsCaseDetail,
     AgentOpsReportCaseSummary,
     AgentOpsReportDetail,
     AgentOpsReportSummary,
+    AgentOpsTraceDetail,
 )
 from app.workbench.errors import WorkbenchAPIError
+from app.workbench.snapshot import build_timeline, redact_value
 
 
 class AgentOpsService:
@@ -40,11 +44,145 @@ class AgentOpsService:
             )
         return self._read_report_detail(path)
 
+    def get_case(self, run_id: str, case_id: str) -> AgentOpsCaseDetail:
+        report = self.get_report(run_id)
+        case = next((item for item in report.cases if item.case_id == case_id), None)
+        if case is None:
+            raise WorkbenchAPIError(
+                code="case_not_found",
+                message=f"Case '{case_id}' was not found in report '{run_id}'.",
+                status_code=404,
+                details={"run_id": run_id, "case_id": case_id},
+            )
+        result_payload = self._report_result(run_id, case_id)
+        trace = self.get_trace_by_path(case.trace_artifact_path or "")
+        return AgentOpsCaseDetail(
+            case_id=case.case_id,
+            run_id=run_id,
+            subset=case.subset,
+            passed=case.passed,
+            failure_label=case.failure_label,
+            root_cause=case.root_cause,
+            trace_artifact_path=case.trace_artifact_path,
+            user_messages=[
+                item["content"]
+                for turn in trace.turns
+                for item in turn["messages"]
+                if item["role"] == "user"
+            ],
+            assistant_messages=[
+                item["content"]
+                for turn in trace.turns
+                for item in turn["messages"]
+                if item["role"] == "assistant"
+            ],
+            guard_context=[
+                call.get("block_context", {})
+                for call in trace.tool_calls
+                if call.get("block_context")
+            ],
+            db_assertion_diff=result_payload.get("expected_actual_diff", {}),
+            tool_calls=trace.tool_calls,
+            trace_summary={
+                "message_count": sum(len(turn["messages"]) for turn in trace.turns),
+                "llm_response_count": len(trace.llm_responses),
+                "tool_call_count": len(trace.tool_calls),
+                "guard_block_count": sum(
+                    1 for call in trace.tool_calls if call.get("status") == "blocked"
+                ),
+            },
+        )
+
+    def get_trace_by_path(self, raw_path: str) -> AgentOpsTraceDetail:
+        if not raw_path:
+            raise WorkbenchAPIError(
+                code="invalid_trace_path",
+                message="Trace path is required.",
+                status_code=400,
+            )
+        path = Path(raw_path)
+        if not path.exists():
+            raise WorkbenchAPIError(
+                code="trace_not_found",
+                message=f"Trace '{raw_path}' was not found.",
+                status_code=404,
+                details={"trace_path": raw_path},
+            )
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise WorkbenchAPIError(
+                code="artifact_parse_error",
+                message="Trace artifact could not be parsed.",
+                status_code=500,
+                details={"trace_path": str(path)},
+            ) from exc
+        if not isinstance(payload, dict):
+            raise WorkbenchAPIError(
+                code="artifact_parse_error",
+                message="Trace artifact must be a JSON object.",
+                status_code=500,
+                details={"trace_path": str(path)},
+            )
+
+        messages = redact_value(payload.get("messages", []))
+        llm_responses = redact_value(payload.get("metadata", {}).get("llm_responses", []))
+        tool_calls = redact_value(payload.get("tool_calls", []))
+
+        trace_state = SessionState(session_id=str(payload.get("run_id", path.stem)))
+        for message in payload.get("messages", []):
+            trace_state.messages.append(Message(**message))
+        for step in payload.get("steps", []):
+            trace_state.steps.append(
+                AgentStep(
+                    node=str(step.get("node", "")),
+                    status=step.get("status", "ok"),
+                    detail=step.get("detail", {}),
+                )
+            )
+        for call in payload.get("tool_calls", []):
+            trace_state.tool_results.append(ToolCallRecord(**call))
+        timeline = build_timeline(trace_state)
+
+        return AgentOpsTraceDetail(
+            trace_id=str(payload.get("run_id") or path.stem),
+            trace_artifact_path=str(path),
+            metadata=redact_value(payload.get("metadata", {})),
+            timeline=timeline,
+            turns=[
+                {
+                    "index": 0,
+                    "messages": messages,
+                    "llm_responses": llm_responses,
+                }
+            ],
+            final_state=redact_value(payload.get("final_state", {})),
+            db_hashes={
+                "initial_db_hash": payload.get("metadata", {}).get("initial_db_hash"),
+                "final_db_hash": payload.get("metadata", {}).get("final_db_hash"),
+            },
+            llm_responses=llm_responses,
+            tool_calls=tool_calls,
+        )
+
     def _report_paths(self) -> list[Path]:
         report_dir = self.artifact_dir / "reports"
         if not report_dir.exists():
             return []
         return sorted(report_dir.glob("*.json"))
+
+    def _report_result(self, run_id: str, case_id: str) -> dict[str, Any]:
+        path = self.artifact_dir / "reports" / f"{run_id}.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        for result in payload.get("results", []):
+            if result.get("case_id") == case_id:
+                return result
+        raise WorkbenchAPIError(
+            code="case_not_found",
+            message=f"Case '{case_id}' was not found in report '{run_id}'.",
+            status_code=404,
+            details={"run_id": run_id, "case_id": case_id},
+        )
 
     def _report_path_for_run_id(self, run_id: str) -> Path:
         if not run_id or Path(run_id).name != run_id or "/" in run_id or "\\" in run_id:
