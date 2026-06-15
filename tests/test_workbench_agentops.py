@@ -438,6 +438,65 @@ class AgentOpsServiceTests(unittest.TestCase):
         )
         self.assertEqual(detail.turns[1]["llm_responses"], [])
 
+    def test_get_trace_by_path_keeps_preflight_confirmation_without_llm_response(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            trace_path = artifact_dir / "traces" / "trace-preflight-confirmation.json"
+            _write_json(
+                trace_path,
+                {
+                    "run_id": "trace-preflight-confirmation",
+                    "messages": [
+                        {"role": "user", "content": "cancel order #W9"},
+                        {"role": "assistant", "content": "Can you confirm?"},
+                        {"role": "user", "content": "yes"},
+                        {"role": "assistant", "content": "Done."},
+                    ],
+                    "metadata": {
+                        "llm_responses": [
+                            {"assistant_content": "", "finish_reason": "tool_calls"},
+                            {
+                                "assistant_content": "Let me proceed with the cancellation.",
+                                "finish_reason": "tool_calls",
+                            },
+                        ]
+                    },
+                    "tool_calls": [],
+                    "steps": [
+                        {"node": "receive_message", "status": "ok", "detail": {}},
+                        {
+                            "node": "tool_executor",
+                            "status": "ok",
+                            "detail": {"tool_name": "find_user_id_by_email"},
+                        },
+                        {
+                            "node": "write_action_guard",
+                            "status": "ok",
+                            "detail": {"tool_name": "cancel_pending_order"},
+                        },
+                        {"node": "receive_message", "status": "ok", "detail": {}},
+                        {"node": "preflight_confirmation", "status": "ok", "detail": {}},
+                        {
+                            "node": "tool_executor",
+                            "status": "ok",
+                            "detail": {"tool_name": "cancel_pending_order"},
+                        },
+                    ],
+                    "final_state": {},
+                },
+            )
+
+            service = AgentOpsService(artifact_dir=artifact_dir)
+            detail = service.get_trace_by_path(str(trace_path))
+
+        self.assertEqual(len(detail.turns), 2)
+        self.assertEqual(
+            [item["finish_reason"] for item in detail.turns[0]["llm_responses"]],
+            ["tool_calls", "tool_calls"],
+        )
+        self.assertEqual(detail.turns[1]["messages"][-1]["content"], "Done.")
+        self.assertEqual(detail.turns[1]["llm_responses"], [])
+
     def test_get_trace_by_path_loads_absolute_path_outside_trace_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             artifact_dir = Path(tmp)

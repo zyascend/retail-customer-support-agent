@@ -455,10 +455,18 @@ class AgentOpsService:
             for turn in turns
         ]
         if sum(assistant_message_counts) > 0:
+            llm_free_turn_indexes = self._llm_free_turn_indexes(steps, len(turns))
+            assignable_turn_indexes = [
+                index for index in range(len(turns)) if index not in llm_free_turn_indexes
+            ]
             llm_index = 0
-            for turn_index, turn in enumerate(turns):
+            for offset, turn_index in enumerate(assignable_turn_indexes):
+                turn = turns[turn_index]
                 assistant_message_count = assistant_message_counts[turn_index]
-                remaining_assistant_messages = sum(assistant_message_counts[turn_index + 1 :])
+                remaining_assistant_messages = sum(
+                    assistant_message_counts[index]
+                    for index in assignable_turn_indexes[offset + 1 :]
+                )
                 remaining_responses = len(llm_responses) - llm_index
                 extra_responses_for_this_turn = max(
                     0,
@@ -501,6 +509,24 @@ class AgentOpsService:
             return turns
 
         return turns
+
+    def _llm_free_turn_indexes(
+        self, steps: list[dict[str, Any]], turn_count: int
+    ) -> set[int]:
+        turn_nodes: list[list[str]] = [[] for _ in range(turn_count)]
+        current_turn_index = -1
+        for step in steps:
+            node = step.get("node")
+            if node == "receive_message":
+                current_turn_index += 1
+                continue
+            if 0 <= current_turn_index < turn_count and isinstance(node, str):
+                turn_nodes[current_turn_index].append(node)
+        return {
+            index
+            for index, nodes in enumerate(turn_nodes)
+            if "preflight_confirmation" in nodes
+        }
 
     def _trace_write_audit_logs(
         self, payload: dict[str, Any], path: Path
