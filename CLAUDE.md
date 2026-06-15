@@ -32,8 +32,8 @@ uv run phase1-chat --script examples/chat/cancel_order.json
 # Run scripted/offline eval (no API key required)
 uv run phase2-eval --subset curated_mvp --trials 1
 
-# Dashboard from eval report
-uv run phase3-dashboard artifacts/phase2/reports/<eval_run_id>.json
+# Run eval (requires DEEPSEEK_API_KEY)
+uv run phase2-eval --subset curated_mvp --trials 1
 ```
 
 ## Architecture
