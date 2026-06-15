@@ -130,3 +130,31 @@ class AgentOpsServiceTests(unittest.TestCase):
 
         self.assertEqual(context.exception.code, "artifact_parse_error")
         self.assertEqual(context.exception.status_code, 500)
+
+    def test_get_report_raises_structured_error_for_malformed_nested_case_field(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            _write_json(
+                artifact_dir / "reports" / "bad-case.json",
+                {
+                    "eval_run_id": "bad-case",
+                    "created_at": "2026-06-15T03:00:00+00:00",
+                    "eval_backend": "live",
+                    "model": "deepseek-v4-flash",
+                    "baseline_metadata": {"provider": "deepseek", "subset": "curated_mvp"},
+                    "results": [
+                        {
+                            "case_id": "c1",
+                            "passed": False,
+                            "trace_artifact_path": {"x": 1},
+                        }
+                    ],
+                },
+            )
+            service = AgentOpsService(artifact_dir=artifact_dir)
+
+            with self.assertRaises(WorkbenchAPIError) as context:
+                service.get_report("bad-case")
+
+        self.assertEqual(context.exception.code, "artifact_parse_error")
+        self.assertEqual(context.exception.status_code, 500)

@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.workbench.agentops_models import (
     AgentOpsReportCaseSummary,
     AgentOpsReportDetail,
@@ -96,17 +98,7 @@ class AgentOpsService:
             subset=self._string_from_mapping(baseline, "subset"),
             baseline_metadata=baseline,
             metrics=self._mapping_field(payload, "metrics", path),
-            cases=[
-                AgentOpsReportCaseSummary(
-                    case_id=self._required_result_string(result, "case_id", path),
-                    subset=result.get("subset"),
-                    passed=bool(result.get("passed")),
-                    failure_label=result.get("failure_label"),
-                    root_cause=result.get("failure_category"),
-                    trace_artifact_path=result.get("trace_artifact_path"),
-                )
-                for result in results
-            ],
+            cases=[self._read_case_summary(result, path) for result in results],
         )
 
     def _load_payload(self, path: Path) -> dict[str, Any]:
@@ -171,6 +163,23 @@ class AgentOpsService:
     def _string_from_mapping(self, payload: dict[str, Any], field_name: str) -> str:
         value = payload.get(field_name, "")
         return value if isinstance(value, str) else ""
+
+    def _read_case_summary(
+        self, result: dict[str, Any], path: Path
+    ) -> AgentOpsReportCaseSummary:
+        try:
+            return AgentOpsReportCaseSummary(
+                case_id=self._required_result_string(result, "case_id", path),
+                subset=result.get("subset"),
+                passed=bool(result.get("passed")),
+                failure_label=result.get("failure_label"),
+                root_cause=result.get("failure_category"),
+                trace_artifact_path=result.get("trace_artifact_path"),
+            )
+        except ValidationError as exc:
+            raise self._artifact_parse_error(
+                path, "Report result entry could not be parsed."
+            ) from exc
 
     def _artifact_parse_error(self, path: Path, message: str) -> WorkbenchAPIError:
         return WorkbenchAPIError(
