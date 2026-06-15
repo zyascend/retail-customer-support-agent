@@ -5,11 +5,6 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Dict
 
-from app.agent.action_specs import build_action_catalog_for_prompt
-from app.ops.serialization import stable_json
-
-PROMPT_DIR = Path("prompts")
-
 
 @dataclass(frozen=True)
 class PromptSpec:
@@ -26,6 +21,9 @@ class PromptSpec:
         }
 
 
+PROMPT_DIR = Path("prompts")
+
+
 def _load_prompt(prompt_id: str, filename: str) -> PromptSpec:
     path = PROMPT_DIR / filename
     content = path.read_text(encoding="utf-8").strip()
@@ -38,35 +36,20 @@ def _load_prompt(prompt_id: str, filename: str) -> PromptSpec:
     )
 
 
-INTENT_SLOT_PROMPT = _load_prompt("intent_slot_v001", "intent_slot_v001.md")
-POLICY_PROMPT = _load_prompt("policy_reasoner_v001", "policy_reasoner_v001.md")
-ACTION_PLANNER_PROMPT = _load_prompt("action_planner_v001", "action_planner_v001.md")
-RESPONSE_PROMPT = _load_prompt("response_generator_v001", "response_generator_v001.md")
+# ── Active prompts ──
+# Only the prompts actually used by the runtime are loaded here.
+# See llm_agent.py:_load_system_prompt_template() for assembly.
 
-CORE_CONTRACT_PROMPT = _load_prompt("core_contract_v001", "core_contract_v001.md")
-
-INTENT_SLOT_SYSTEM = CORE_CONTRACT_PROMPT.content + "\n\n" + INTENT_SLOT_PROMPT.content
-POLICY_SYSTEM = CORE_CONTRACT_PROMPT.content + "\n\n" + POLICY_PROMPT.content
-ACTION_PLANNER_SYSTEM = (
-    CORE_CONTRACT_PROMPT.content
-    + "\n\n"
-    + ACTION_PLANNER_PROMPT.content.replace(
-        "{action_catalog}",
-        build_action_catalog_for_prompt(),
-    )
+AGENT_SYSTEM_PROMPT = _load_prompt(
+    "llm_agent_system_v001", "llm_agent_system_v001.md"
 )
-RESPONSE_SYSTEM = CORE_CONTRACT_PROMPT.content + "\n\n" + RESPONSE_PROMPT.content
 
 
 def prompt_metadata() -> Dict[str, Dict[str, str]]:
+    """SHA-256 fingerprint of the active system prompt.
+
+    Recorded in trace artifacts and eval report metadata for version tracking.
+    """
     return {
-        "core_contract": CORE_CONTRACT_PROMPT.as_metadata(),
-        "intent_slot": INTENT_SLOT_PROMPT.as_metadata(),
-        "policy_reasoner": POLICY_PROMPT.as_metadata(),
-        "action_planner": ACTION_PLANNER_PROMPT.as_metadata(),
-        "response_generator": RESPONSE_PROMPT.as_metadata(),
+        "llm_agent_system": AGENT_SYSTEM_PROMPT.as_metadata(),
     }
-
-
-def user_json_prompt(label: str, payload: Dict[str, Any]) -> str:
-    return f"{label} JSON input:\n{stable_json(payload)}"
