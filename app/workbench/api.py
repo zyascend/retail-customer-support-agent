@@ -14,6 +14,8 @@ from app.workbench.cases import build_case_catalog
 from app.workbench.errors import WorkbenchAPIError, error_payload
 from app.workbench.session import WorkbenchSessionManager
 
+DEFAULT_AGENTOPS_ARTIFACT_DIR = Path("artifacts/phase2")
+
 
 class CreateSessionRequest(BaseModel):
     mode: str = "offline_demo"
@@ -36,12 +38,9 @@ class ResetRequest(BaseModel):
 def create_app(config: Optional[AppConfig] = None) -> FastAPI:
     resolved_config = config or resolve_config(artifact_dir="artifacts/phase4")
     manager = WorkbenchSessionManager(resolved_config)
-    artifact_root = getattr(
-        resolved_config,
-        "artifact_dir",
-        resolved_config.run_artifact_dir.parent,
+    agentops = AgentOpsService(
+        artifact_dir=_agentops_artifact_dir(config=config, resolved_config=resolved_config)
     )
-    agentops = AgentOpsService(artifact_dir=Path(artifact_root).expanduser().resolve())
     app = FastAPI(title="Retail Agent Workbench API")
     app.state.config = resolved_config
     app.state.manager = manager
@@ -134,3 +133,11 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
         )
 
     return app
+
+
+def _agentops_artifact_dir(
+    *, config: Optional[AppConfig], resolved_config: AppConfig
+) -> Path:
+    if config is None:
+        return DEFAULT_AGENTOPS_ARTIFACT_DIR.expanduser().resolve()
+    return Path(resolved_config.artifact_dir).expanduser().resolve()

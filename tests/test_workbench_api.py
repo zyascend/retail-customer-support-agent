@@ -1,6 +1,9 @@
 import json
+import os
 import tempfile
 import unittest
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -82,6 +85,16 @@ def _write_agentops_artifacts(artifact_dir: Path) -> Path:
         },
     )
     return trace_path
+
+
+@contextmanager
+def _temporary_cwd(path: Path) -> Iterator[None]:
+    original_cwd = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(original_cwd)
 
 
 class WorkbenchAPITests(unittest.TestCase):
@@ -268,6 +281,25 @@ class WorkbenchAPITests(unittest.TestCase):
         )
         self.assertEqual(payload[0]["failure_case_count"], 1)
         self.assertEqual(payload[0]["subset"], "live_smoke_core")
+
+    def test_default_app_reads_agentops_reports_from_phase2_artifacts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            artifact_dir = cwd / "artifacts" / "phase2"
+            _write_agentops_artifacts(artifact_dir)
+            with _temporary_cwd(cwd):
+                app = create_app()
+                client = TestClient(app)
+
+                response = client.get("/api/agentops/reports")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([report["run_id"] for report in payload], ["eval-run-a"])
+        self.assertEqual(
+            payload[0]["report_path"],
+            str((artifact_dir / "reports" / "eval-run-a.json").resolve()),
+        )
 
     def test_agentops_report_detail_returns_cases(self):
         with tempfile.TemporaryDirectory() as tmp:
