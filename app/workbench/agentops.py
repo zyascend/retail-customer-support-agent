@@ -450,6 +450,34 @@ class AgentOpsService:
         if not turns:
             return [{"index": 0, "messages": [], "llm_responses": llm_responses}]
 
+        assistant_message_counts = [
+            sum(1 for message in turn["messages"] if message.get("role") == "assistant")
+            for turn in turns
+        ]
+        if sum(assistant_message_counts) > 0:
+            llm_index = 0
+            for turn_index, turn in enumerate(turns):
+                assistant_message_count = assistant_message_counts[turn_index]
+                remaining_assistant_messages = sum(assistant_message_counts[turn_index + 1 :])
+                remaining_responses = len(llm_responses) - llm_index
+                extra_responses_for_this_turn = max(
+                    0,
+                    remaining_responses
+                    - assistant_message_count
+                    - remaining_assistant_messages,
+                )
+                next_index = min(
+                    llm_index + assistant_message_count + extra_responses_for_this_turn,
+                    len(llm_responses),
+                )
+                turn["llm_responses"].extend(llm_responses[llm_index:next_index])
+                llm_index = next_index
+                if llm_index >= len(llm_responses):
+                    break
+            if llm_index < len(llm_responses):
+                turns[-1]["llm_responses"].extend(llm_responses[llm_index:])
+            return turns
+
         if receive_message_count > 0:
             llm_index = 0
             for turn_index in range(min(receive_message_count, len(turns))):
@@ -472,18 +500,6 @@ class AgentOpsService:
                 )
             return turns
 
-        llm_index = 0
-        for turn in turns:
-            assistant_message_count = sum(
-                1 for message in turn["messages"] if message.get("role") == "assistant"
-            )
-            next_index = min(llm_index + assistant_message_count, len(llm_responses))
-            turn["llm_responses"].extend(llm_responses[llm_index:next_index])
-            llm_index = next_index
-            if llm_index >= len(llm_responses):
-                break
-        if llm_index < len(llm_responses):
-            turns[-1]["llm_responses"].extend(llm_responses[llm_index:])
         return turns
 
     def _trace_write_audit_logs(

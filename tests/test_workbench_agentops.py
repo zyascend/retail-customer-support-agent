@@ -394,6 +394,50 @@ class AgentOpsServiceTests(unittest.TestCase):
             ["Confirmed."],
         )
 
+    def test_get_trace_by_path_allows_runtime_turn_without_llm_response(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            trace_path = artifact_dir / "traces" / "trace-empty-runtime-turn.json"
+            _write_json(
+                trace_path,
+                {
+                    "run_id": "trace-empty-runtime-turn",
+                    "messages": [
+                        {"role": "user", "content": "cancel order #W9"},
+                        {"role": "assistant", "content": "Let me check that."},
+                        {"role": "assistant", "content": "I need confirmation before canceling."},
+                        {"role": "user", "content": "actually never mind"},
+                    ],
+                    "metadata": {
+                        "llm_responses": [
+                            {"assistant_content": "Let me check that.", "finish_reason": "tool_calls"},
+                            {
+                                "assistant_content": "I need confirmation before canceling.",
+                                "finish_reason": "stop",
+                            },
+                        ]
+                    },
+                    "tool_calls": [],
+                    "steps": [
+                        {"node": "receive_message", "status": "ok", "detail": {}},
+                        {"node": "policy_reasoner", "status": "ok", "detail": {}},
+                        {"node": "write_action_guard", "status": "ok", "detail": {}},
+                        {"node": "receive_message", "status": "ok", "detail": {}},
+                    ],
+                    "final_state": {},
+                },
+            )
+
+            service = AgentOpsService(artifact_dir=artifact_dir)
+            detail = service.get_trace_by_path(str(trace_path))
+
+        self.assertEqual(len(detail.turns), 2)
+        self.assertEqual(
+            [item["assistant_content"] for item in detail.turns[0]["llm_responses"]],
+            ["Let me check that.", "I need confirmation before canceling."],
+        )
+        self.assertEqual(detail.turns[1]["llm_responses"], [])
+
     def test_get_trace_by_path_loads_absolute_path_outside_trace_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             artifact_dir = Path(tmp)
