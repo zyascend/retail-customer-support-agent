@@ -68,6 +68,30 @@ textarea:disabled {
   min-width: 0;
 }
 
+.surface-tabs {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid #c9d2de;
+  border-radius: 999px;
+  background: #f4f6f8;
+  padding: 2px;
+}
+
+.surface-tabs button {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #475467;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.surface-tabs button.active {
+  background: #1f2937;
+  color: #ffffff;
+}
+
 .case-label {
   max-width: 280px;
   overflow: hidden;
@@ -178,6 +202,10 @@ textarea:disabled {
   padding: 10px 12px;
 }
 
+.error-banner.compact {
+  margin: 14px 0 0;
+}
+
 .loading-shell {
   margin: 12px;
   border: 1px solid #d9e1ec;
@@ -185,6 +213,57 @@ textarea:disabled {
   background: #ffffff;
   color: #667085;
   padding: 24px;
+}
+
+.agentops-placeholder {
+  padding: 12px;
+}
+
+.agentops-placeholder-card {
+  max-width: 760px;
+}
+
+.agentops-placeholder-card > p {
+  max-width: 620px;
+}
+
+.agentops-report-list {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agentops-report-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #e4e9f0;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 10px;
+}
+
+.agentops-report-list strong,
+.agentops-report-list span {
+  min-width: 0;
+}
+
+.agentops-report-list strong {
+  overflow: hidden;
+  color: #182230;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentops-report-list span {
+  color: #667085;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: right;
 }
 
 .segmented-control {

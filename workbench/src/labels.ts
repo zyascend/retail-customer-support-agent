@@ -97,6 +97,10 @@ const ERROR_LABELS: Record<string, string> = {
   case_required: "请先选择案例",
   script_complete: "脚本已完成",
   empty_message: "请输入消息内容",
+  report_not_found: "评估报告不存在",
+  trace_not_found: "Trace 不存在",
+  invalid_trace_path: "Trace 路径无效",
+  artifact_parse_error: "Artifact 解析失败",
 };
 
 export function modeLabel(mode: WorkbenchMode | string | null | undefined): string {
