@@ -67,13 +67,13 @@ class AgentOpsService:
             metrics=payload.get("metrics", {}),
             cases=[
                 AgentOpsReportCaseSummary(
-                    case_id=str(result.get("case_id") or f"case-{index}"),
+                    case_id=result["case_id"],
                     subset=result.get("subset"),
                     passed=bool(result.get("passed")),
                     failure_label=result.get("failure_label"),
                     root_cause=result.get("failure_category"),
                     trace_artifact_path=result.get("trace_artifact_path"),
                 )
-                for index, result in enumerate(results)
+                for result in results
             ],
         )

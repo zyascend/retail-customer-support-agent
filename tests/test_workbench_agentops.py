@@ -29,7 +29,10 @@ class AgentOpsServiceTests(unittest.TestCase):
                         "provider": "deepseek",
                         "subset": "live_smoke_core",
                     },
-                    "results": [{"passed": True}, {"passed": False}],
+                    "results": [
+                        {"case_id": "case-a-1", "passed": True},
+                        {"case_id": "case-a-2", "passed": False},
+                    ],
                 },
             )
             _write_json(
@@ -43,7 +46,7 @@ class AgentOpsServiceTests(unittest.TestCase):
                         "provider": "deepseek",
                         "subset": "curated_mvp",
                     },
-                    "results": [{"passed": False}],
+                    "results": [{"case_id": "case-b-1", "passed": False}],
                 },
             )
 
