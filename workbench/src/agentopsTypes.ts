@@ -1,3 +1,5 @@
+import type { TimelineEvent } from "./types";
+
 export interface AgentOpsReportSummary {
   run_id: string;
   report_path: string;
@@ -53,7 +55,7 @@ export interface AgentOpsTraceDetail {
   trace_id: string;
   trace_artifact_path: string;
   metadata: Record<string, unknown>;
-  timeline: Array<Record<string, unknown>>;
+  timeline: TimelineEvent[];
   turns: Array<Record<string, unknown>>;
   final_state: Record<string, unknown>;
   db_hashes: Record<string, unknown>;
