@@ -42,7 +42,7 @@ class AgentOpsServiceTests(unittest.TestCase):
                 {
                     "eval_run_id": "eval-run-b",
                     "created_at": "2026-06-15T02:00:00+00:00",
-                    "eval_backend": "scripted_offline_demo",
+                    "eval_backend": "live",
                     "model": "deepseek-v4-flash",
                     "baseline_metadata": {
                         "provider": "deepseek",

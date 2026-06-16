@@ -8,7 +8,6 @@ from typing import Any, Dict, Optional
 
 from app.agent.models import AgentStep, SessionState
 from app.agent.prompts import prompt_metadata
-from app.agent.providers import DisabledLLMProvider
 from app.agent.runtime import AgentRuntime
 from app.config import AppConfig
 from app.eval.cases import EvalCase
@@ -22,7 +21,7 @@ from app.workbench.snapshot import snapshot_from_state
 class WorkbenchSession:
     config: AppConfig
     session_id: str
-    mode: str = "offline_demo"
+    mode: str = "llm"
     selected_case: Optional[EvalCase] = None
     script_cursor: int = 0
 
@@ -166,7 +165,7 @@ class WorkbenchSession:
         mode: str,
         selected_case: Optional[EvalCase],
     ) -> tuple[AgentRuntime, SessionState, str]:
-        provider = DisabledLLMProvider() if mode == "offline_demo" else None
+        provider = None
 
         # If this is a synthetic case, use SyntheticRetailAdapter
         runtime_kwargs = {}
@@ -184,7 +183,7 @@ class WorkbenchSession:
             self.config,
             provider=provider,
             require_llm=mode == "llm",
-            offline_demo=mode == "offline_demo",
+
             **runtime_kwargs,
         )
         state = SessionState(
@@ -312,7 +311,7 @@ class WorkbenchSession:
             "model": self.config.default_agent_model,
             "mode": mode,
             "runtime_backend": mode,
-            "offline_demo": mode == "offline_demo",
+
             "llm_available": self.llm_available,
             "llm_enabled": runtime.provider is not None,
             "llm_timeout_seconds": self.config.agent_llm_timeout_seconds,
@@ -341,7 +340,7 @@ class WorkbenchSessionManager:
         self._sessions: Dict[str, WorkbenchSession] = {}
 
     def create_session(
-        self, mode: str = "offline_demo", case_id: Optional[str] = None
+        self, mode: str = "llm", case_id: Optional[str] = None
     ) -> WorkbenchSession:
         mode = _validate_mode(mode, self.config)
         selected_case = _get_case_or_raise(case_id) if case_id is not None else None
@@ -382,21 +381,19 @@ def _get_case_or_raise(case_id: str) -> EvalCase:
 
 
 def _validate_mode(mode: str, config: AppConfig) -> str:
-    if mode in {"offline_demo", "deterministic"}:
-        return "offline_demo"
-    if mode == "llm":
-        if config.deepseek_api_key:
-            return "llm"
+    if mode != "llm":
+        raise WorkbenchAPIError(
+            code="invalid_mode",
+            message="Only 'llm' mode is supported.",
+            recoverable=True,
+            details={"mode": mode, "supported_modes": ["llm"]},
+            status_code=400,
+        )
+    if not config.deepseek_api_key:
         raise WorkbenchAPIError(
             code="llm_unavailable",
             message="LLM mode requires DEEPSEEK_API_KEY.",
             recoverable=True,
             status_code=400,
         )
-    raise WorkbenchAPIError(
-        code="invalid_mode",
-        message="Unsupported workbench session mode.",
-        recoverable=True,
-        details={"mode": mode, "supported_modes": ["offline_demo", "llm"]},
-        status_code=400,
-    )
+    return "llm"

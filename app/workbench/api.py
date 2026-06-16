@@ -19,7 +19,7 @@ DEFAULT_WORKBENCH_ARTIFACT_DIR = Path("artifacts/workbench")
 
 
 class CreateSessionRequest(BaseModel):
-    mode: str = "offline_demo"
+    mode: str = "llm"
     case_id: Optional[str] = None
 
 
@@ -73,7 +73,7 @@ def create_app(
     @app.get("/api/workbench/config")
     def get_workbench_config() -> dict[str, Any]:
         return {
-            "default_mode": "offline_demo",
+            "default_mode": "llm",
             "llm_available": bool(resolved_config.deepseek_api_key),
             "model": resolved_config.default_agent_model,
             "case_catalog": build_case_catalog(),

@@ -1,4 +1,4 @@
-export type WorkbenchMode = "offline_demo" | "llm";
+export type WorkbenchMode = "llm";
 
 export interface WorkbenchCase {
   case_id: string;

@@ -10,12 +10,9 @@ from app.agent.confirmation import ConfirmationResolver
 from app.agent.context_builder import ContextBuilder
 from app.agent.llm_agent import AgentLoop
 from app.agent.models import Message, SessionState
-from app.agent.offline_demo import OfflineDemoHarness
 from app.agent.parsers import EMAIL_RE, NAME_ZIP_RE
 from app.agent.prompts import prompt_metadata
 from app.agent.providers import (
-    DeterministicProvider,
-    DisabledLLMProvider,
     LLMProvider,
     build_default_provider,
 )
@@ -88,27 +85,17 @@ class AgentRuntime:
         provider: Optional[LLMProvider] = None,
         require_llm: bool = False,
         runtime: Optional[RetailRuntime] = None,
-        offline_demo: bool = False,
     ) -> None:
         self.config = config
-        self.offline_demo = offline_demo
         if runtime is not None:
             self.retail_runtime = runtime
         else:
             self.retail_runtime = RetailAdapter(config).create_runtime()
         self.registry = ToolRegistry(self.retail_runtime.tools)
         self.gateway = ToolGateway(registry=self.registry, runtime=self.retail_runtime)
-        self._offline_demo_harness = OfflineDemoHarness(
-            gateway=self.gateway,
-            retail_runtime=self.retail_runtime,
-            guard_error_to_user_message=_map_guard_error_to_user_message,
-        )
         self._resolver = ConfirmationResolver()
 
-        if isinstance(provider, DisabledLLMProvider):
-            self.provider = None
-        else:
-            self.provider = provider or build_default_provider(
+        self.provider = provider or build_default_provider(
                 api_key=config.deepseek_api_key,
                 base_url=config.deepseek_base_url,
                 model=config.default_agent_model,
@@ -157,10 +144,7 @@ class AgentRuntime:
             metadata={
                 "runtime_source": self.retail_runtime.source,
                 "model": self.config.default_agent_model,
-                "runtime_backend": (
-                    "offline_demo" if self.offline_demo else "llm_tool_calling"
-                ),
-                "offline_demo": self.offline_demo,
+                "runtime_backend": "llm_tool_calling",
                 "llm_enabled": self.provider is not None,
                 "llm_timeout_seconds": self.config.agent_llm_timeout_seconds,
                 "llm_max_retries": self.config.agent_llm_max_retries,
@@ -201,28 +185,17 @@ class AgentRuntime:
 
         # 3. LLM agent loop
         provider = self.provider
-        if provider is None or isinstance(provider, DeterministicProvider):
-            if not self.offline_demo:
-                msg = (
-                    "I'm unable to process this request without an LLM provider. "
-                    "Let me transfer you to a human agent."
-                )
-                session.add_step("provider_unavailable", offline_demo=False)
-                session.messages.append(Message(role="assistant", content=msg))
-                session.step_durations["handle_user_message"] = round(
-                    (time.perf_counter() - t0) * 1000, 1
-                )
-                return msg
-
-            write_result = self._offline_demo_harness.handle(session, content)
-            if write_result is not None:
-                session.step_durations["handle_user_message"] = round(
-                    (time.perf_counter() - t0) * 1000, 1
-                )
-                return write_result
-
-            provider = DeterministicProvider()
-            session.add_step("offline_demo_harness")
+        if provider is None:
+            msg = (
+                "I'm unable to process this request without an LLM provider. "
+                "Let me transfer you to a human agent."
+            )
+            session.add_step("provider_unavailable")
+            session.messages.append(Message(role="assistant", content=msg))
+            session.step_durations["handle_user_message"] = round(
+                (time.perf_counter() - t0) * 1000, 1
+            )
+            return msg
 
         loop = AgentLoop(
             provider=provider,
@@ -294,7 +267,7 @@ class AgentRuntime:
 
     def _continue_after_confirmed_action(self, session: SessionState) -> Optional[str]:
         provider = self.provider
-        if provider is None or isinstance(provider, DeterministicProvider):
+        if provider is None:
             return None
 
         loop = AgentLoop(

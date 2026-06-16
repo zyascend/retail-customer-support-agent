@@ -31,8 +31,6 @@ def eval_main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--tau2-bench-root", help="Override TAU2_BENCH_ROOT.")
     parser.add_argument("--require-llm", action="store_true")
     parser.add_argument("--live", action="store_true", help="Use real LLM provider for eval.")
-    parser.add_argument("--replay", help="Replay a whole trace directory.")
-    parser.add_argument("--replay-case", help="Replay a single trace JSON file.")
     parser.add_argument("--max-workers", type=int, default=50)
     parser.add_argument(
         "--seed", type=int, default=42, help="Seed for synthetic world generation."
@@ -40,9 +38,6 @@ def eval_main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
     args = parser.parse_args(argv)
-    subset_provided = any(
-        token == "--subset" or token.startswith("--subset=") for token in argv
-    )
 
     if args.compare:
         return _compare(
@@ -53,12 +48,6 @@ def eval_main(argv: Optional[list[str]] = None) -> int:
 
     if args.trials < 1:
         parser.error("--trials must be >= 1")
-    if args.replay and args.replay_case:
-        parser.error("--replay and --replay-case are mutually exclusive")
-    if args.live and (args.replay or args.replay_case):
-        parser.error("replay mode cannot be combined with --live")
-    if args.replay and not subset_provided:
-        parser.error("--replay requires --subset")
 
     subset = args.subset if args.subset is not None else "curated_mvp"
 
@@ -74,12 +63,8 @@ def eval_main(argv: Optional[list[str]] = None) -> int:
             require_llm=args.require_llm,
             live=args.live,
             progress_callback=None if args.no_progress else _print_progress,
-            replay_trace_dir=Path(args.replay).expanduser() if args.replay else None,
-            replay_case_path=(
-                Path(args.replay_case).expanduser() if args.replay_case else None
-            ),
         ).run(
-            subset=None if args.replay_case else subset,
+            subset=subset,
             trials=args.trials,
             max_workers=args.max_workers,
             seed=args.seed,

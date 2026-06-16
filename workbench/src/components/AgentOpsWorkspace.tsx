@@ -216,7 +216,10 @@ export function AgentOpsWorkspace() {
     null;
 
   return (
-    <section className="agentops-grid" aria-label="AgentOps 调试台">
+    <section
+      className="agentops-layout grid grid-cols-[minmax(280px,330px)_minmax(360px,1fr)_minmax(320px,430px)] gap-3 p-3"
+      aria-label="AgentOps 调试台"
+    >
       <AgentOpsBrowser
         busy={reportsLoading || reportLoading || caseLoading || traceLoading}
         error={error}
@@ -233,14 +236,14 @@ export function AgentOpsWorkspace() {
         visibleCases={visibleCases}
       />
 
-      <div className="agentops-timeline-column">
-        <section className="panel agentops-trace-card" aria-label="Trace 摘要">
-          <div className="panel-header">
+      <div className="grid grid-rows-[auto_minmax(280px,1fr)] gap-3">
+        <section className="min-w-0 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 p-3 overflow-hidden" aria-label="Trace 摘要">
+          <div className="flex items-start justify-between gap-3 mb-3">
             <div>
-              <div className="panel-kicker">Trace</div>
-              <h2>{selectedTrace?.trace_id || "尚未打开 Trace"}</h2>
+              <div className="mb-0.5 text-slate-500 dark:text-slate-400 text-xs font-extrabold tracking-normal">Trace</div>
+              <h2 className="m-0 text-base leading-tight text-[#182230] dark:text-white">{selectedTrace?.trace_id || "尚未打开 Trace"}</h2>
             </div>
-            <span className="count-label">
+            <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 text-xs font-extrabold leading-none whitespace-nowrap px-2 py-1.5">
               {traceLoading
                 ? "加载中"
                 : selectedTrace
@@ -248,14 +251,14 @@ export function AgentOpsWorkspace() {
                   : "等待选择"}
             </span>
           </div>
-          <dl className="agentops-trace-facts">
-            <div>
-              <dt>Trace 文件</dt>
-              <dd>{selectedTrace?.trace_artifact_path || "选择案例或输入路径后显示"}</dd>
+          <dl className="grid gap-2 m-0">
+            <div className="min-w-0 border border-slate-200 dark:border-slate-700 rounded-lg bg-[#f8fafc] dark:bg-slate-700/30 p-2">
+              <dt className="text-slate-500 dark:text-slate-400 text-xs font-extrabold tracking-normal">Trace 文件</dt>
+              <dd className="mt-1 break-anywhere text-[#182230] dark:text-white text-sm font-bold">{selectedTrace?.trace_artifact_path || "选择案例或输入路径后显示"}</dd>
             </div>
-            <div>
-              <dt>当前事件</dt>
-              <dd>{activeEvent?.id || "未选择"}</dd>
+            <div className="min-w-0 border border-slate-200 dark:border-slate-700 rounded-lg bg-[#f8fafc] dark:bg-slate-700/30 p-2">
+              <dt className="text-slate-500 dark:text-slate-400 text-xs font-extrabold tracking-normal">当前事件</dt>
+              <dd className="mt-1 break-anywhere text-[#182230] dark:text-white text-sm font-bold">{activeEvent?.id || "未选择"}</dd>
             </div>
           </dl>
         </section>

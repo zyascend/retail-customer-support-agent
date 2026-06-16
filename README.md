@@ -2,7 +2,7 @@
 
 一个面向零售客服场景的 LLM tool-calling Agent，内建 7 层写安全护栏、显式用户确认和全链路 trace。基于 tau2-bench retail 数据构建，定位为 AI Agent 工程作品集项目：展示真实 LLM 工具调用、安全写操作和可审计运行时三项核心能力。
 
-> **演示地址:** 按下方「快速开始」启动后，打开 `http://localhost:5173` 即可体验 Workbench，内含 10 个按用户旅程分组的精选案例。
+> 启动 Workbench（需配置 `DEEPSEEK_API_KEY`，见下方快速开始）后，打开 `http://localhost:5173` 即可交互式体验 14 个按用户旅程分组的精选案例。
 
 ## 解决的问题
 
@@ -21,17 +21,17 @@ user message → pre-flight checks → AgentLoop → ToolGateway / WriteActionGu
 → tool observation → assistant response → trace artifact
 ```
 
-**LLM tool-calling runtime**: `AgentLoop` 使用 provider 的 `chat_with_tools()` 选择工具、读取 observation 并生成回复。运行时保留 pre-flight 层处理待确认写操作和身份 shortcut；生产路径不会在没有 LLM provider 时悄悄降级成规则写操作。
+**LLM tool-calling runtime**: `AgentLoop` 使用 provider 的 `chat_with_tools()` 选择工具、读取 observation 并生成回复。运行时保留 pre-flight 层处理待确认写操作和身份 shortcut。
 
 **7 层写护栏**: 身份认证 → 显式确认 → 所有权校验 → 先读后写 → 策略合规 → 资源锁 → 幂等性。每一次写操作在真正执行前，都必须依次通过全部七层检查。
 
-**显式离线演示**: Workbench 和 `scripted_offline_demo` eval 可以使用 `offline_demo` harness，无需 API key 演示确认流、护栏和审计。但它是演示/CI harness，不代表生产 Agent 的 LLM 能力。
+**Workbench**: 基于 FastAPI 的交互式可视化界面，仅支持 `llm` 模式运行，需配置 `DEEPSEEK_API_KEY`。未配置 provider 时运行时安全转人工。
 
 ## 关键设计决策
 
-- **运行时边界清晰** — 默认 `AgentRuntime` 需要真实 LLM provider；没有 provider 时会安全转人工。离线演示必须显式开启 `offline_demo=True`。
+- **运行时边界清晰** — 默认 `AgentRuntime` 需要真实 LLM provider；没有 provider 时会安全返回转人工消息。无 `offline_demo` 或降级模式。
 - **工具调用受控** — LLM 只能通过 schema 暴露的工具行动；所有写工具都必须经过 `ToolGateway` 和 `WriteActionGuard`。
-- **写操作单一事实来源** — `app/agent/action_specs.py` 定义了全部 7 种写操作。护栏规则、工具注册表、LLM 提示词中的 `{action_catalog}` 模板和写操作参数约束，全部由此派生。新增一种写操作只需改这一个文件。
+- **写操作单一事实来源** — `app/agent/action_specs.py` 定义了全部 7 种写操作。护栏规则、工具注册表、LLM 提示词中的 `{tool_catalog}` 模板和写操作参数约束，全部由此派生。新增一种写操作只需改这一个文件。
 
 ## 快速开始
 
@@ -39,30 +39,38 @@ user message → pre-flight checks → AgentLoop → ToolGateway / WriteActionGu
 # 1. 安装依赖
 uv sync --extra dev
 
-# 2. 启动 Workbench 离线演示（offline_demo，无需 API Key）
+# 2. 配置 LLM provider（Workbench 和 live eval 需要）
+# 在 .env 中设置：
+#   DEEPSEEK_API_KEY=sk-...
+#   DEEPSEEK_BASE_URL=https://api.deepseek.com
+#   DEFAULT_AGENT_MODEL=deepseek-v4-flash
+
+# 3. 启动 Workbench（需 DEEPSEEK_API_KEY）
 uv run workbench &                  # Python API → :8765
 cd workbench && npm install && npm run dev   # React 界面 → :5173
 
-# 3. 运行 scripted eval（`scripted_offline_demo` / offline_demo harness）
-uv run phase2-eval --subset curated_mvp --trials 1
+# 4. 运行 eval（需 DEEPSEEK_API_KEY）
+uv run phase2-eval --subset curated_mvp --trials 1 --live
 
-# 4. 运行测试
+# 5. 运行测试（无需 API key）
 uv run python -m pytest tests/ -q
 ```
 
-如需启用 LLM 模式，在 `.env` 中配置 `DEEPSEEK_API_KEY`，并在 Workbench 中切换到 `LLM 模式`。
+> 未配置 `DEEPSEEK_API_KEY` 时，AgentLoop 会安全转人工。项目不提供离线/降级模式。
 
 ## Demo 导览
 
-打开 `http://localhost:5173`，按用户旅程分组体验 10 个案例：
+打开 `http://localhost:5173`，按用户旅程分组体验 14 个案例：
 
 | 分组 | 包含案例 | 展示内容 |
 |------|---------|----------|
 | 🔐 身份认证 | 姓名+邮编验证查订单 | 用户身份识别流程 |
 | ✅ 成功写操作 | 取消订单、退货、换商品、改支付方式 | 带确认的完整写操作链路 |
 | 🛡️ 写保护阻止 | 越权访问他人订单、跨商品替换、礼品卡余额不足 | 护栏各层拦截未授权写入 |
-| 🔄 用户确认 | 拒绝取消确认 | 用户侧确认/拒绝/修改交互 |
+| 🔄 用户确认流程 | 拒绝取消确认 | 用户侧拒绝交互 |
 | 📞 边界能力 | 转接人工客服 | 不支持操作的升级流转 |
+| 🧪 Synthetic 世界 | 升级配送方式 | 合成数据场景 |
+| 🧬 生成场景 | 取消订单 L1、配送升级 L2、折扣请求 L1 | LLM 生成的多样化变种 |
 
 **Timeline 中的关键证据**: 选中任意案例，点击「运行全部」，然后在 timeline 中查看：
 - pre-flight、AgentLoop、工具调用和 observation
@@ -73,22 +81,27 @@ uv run python -m pytest tests/ -q
 
 | 指标 | curated_mvp（11 case） | generalized_mvp（30+ case） |
 |------|----------------------|----------------------------|
-| `scripted_offline_demo` | 作为 CI smoke 和演示集 | 验证 harness、guard、audit 和无 mutation/tool error |
-| `scripted_tool_loop` | 预留给 scripted provider 直驱 `AgentLoop` | 不与 `offline_demo` harness 混淆 |
-| live LLM | 需配置 API key 后手动运行 | 需配置 API key 后手动运行 |
+| live LLM | 需 `--live` 和 `DEEPSEEK_API_KEY` | 需 `--live` 和 `DEEPSEEK_API_KEY` |
+| 并行执行 | `--max-workers` 支持 | `--max-workers` 支持 |
 | trace | 每次运行输出 JSON artifact | 每次运行输出 JSON artifact |
+| baseline 对比 | `--compare` 双 JSON 对比 | `--compare` 双 JSON 对比 |
 
 失败分类体系包含 14 种有序标签（llm_json_failure → auth_failure → wrong_intent → ...），确保精准定位问题。
 
-Phase 9 之后，live baseline 建议手动跑小集合并生成 triage：
+Live baseline 运行：
 
 ```bash
-uv run python -m app.cli.eval --subset live_smoke_core --trials 1 --max-workers 1 --no-progress --live
-uv run python -m app.cli.eval --subset live_guard_smoke --trials 1 --max-workers 1 --no-progress --live
+uv run phase2-eval --subset curated_mvp --trials 1 --max-workers 1 --live
+uv run phase2-eval --subset generalized_mvp --trials 1 --max-workers 1 --live
+```
+
+查看 triage 报告：
+
+```bash
 uv run python -m app.eval.live_triage artifacts/phase2/reports/<eval-run-id>.json
 ```
 
-Eval report 会记录 `baseline_metadata`（model、provider、prompt/tool/action-spec hash）、`total_token_usage`、`average_llm_loop_iterations`、tool call / guard block 指标、`auto_load_count`、`premature_refusal_corrected_count` 和失败 root cause。
+Eval report 记录 `baseline_metadata`（model、provider、prompt/tool/action-spec hash）、`total_token_usage`、`average_llm_loop_iterations`、tool call / guard block 指标、`auto_load_count`、`premature_refusal_corrected_count` 和失败 root cause。
 
 Phase 10 后，LLM tool schema 的 description 包含 when-to-use / when-not-to-use / required-prior-read / guard-block guidance；参数 schema 也包含更强的 order/item/payment pattern 约束，方便用 `tool_schema_hash` 追踪 prompt/schema 优化影响。
 
@@ -98,10 +111,12 @@ Phase 10 后，LLM tool schema 的 description 包含 when-to-use / when-not-to-
 app/agent/       — AgentLoop、SessionState、提示词、确认流、写护栏
 app/tools/       — retail 适配器、工具注册表、写操作网关
 app/eval/        — curated + generalized eval 案例、运行器、失败分类
-app/workbench/   — Workbench API（FastAPI 后端）
+app/workbench/   — Workbench API（FastAPI 后端）、AgentOps 可视化
+app/ops/         — 序列化、追踪（TraceWriter）
+app/config.py    — AppConfig 配置加载
 workbench/       — Workbench React 前端
-prompts/         — 带 SHA-256 哈希的版本化 LLM 提示词
-docs/            — 设计文档、实施计划、架构参考
+prompts/         — LLM agent 系统提示词（单文件，SHA-256 版本追踪）
+docs/            — 设计文档、实施计划、架构参考、审计报告
 ```
 
 ## 开发指南
@@ -114,10 +129,15 @@ uv run ruff format --check .
 # 运行单个测试
 uv run python -m pytest tests/test_agent_core.py -v
 
-# 交互式对话
-uv run phase1-chat --interactive
+# 运行脚本模式对话（需 DEEPSEEK_API_KEY）
+uv run phase1-chat --script examples/chat/cancel_order.json
+
+# 启动 Workbench
+uv run workbench
 ```
 
 深度架构参考见 [`docs/portfolio-architecture.md`](docs/portfolio-architecture.md)。
 
 完整路线图见 [`docs/long-term-optimization-path.md`](docs/long-term-optimization-path.md)。
+
+设计审计报告见 [`docs/design-audit.md`](docs/design-audit.md)。

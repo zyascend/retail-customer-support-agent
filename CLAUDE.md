@@ -29,11 +29,9 @@ uv run ruff check .
 # without a provider, runtime safely transfers to a human agent)
 uv run phase1-chat --script examples/chat/cancel_order.json
 
-# Run scripted/offline eval (no API key required)
+# Run eval (requires DEEPSEEK_API_KEY for --live mode;
+# without API key, runtime safely transfers to a human agent)
 uv run phase2-eval --subset curated_mvp --trials 1
-
-# Dashboard from eval report
-uv run phase3-dashboard artifacts/phase2/reports/<eval_run_id>.json
 ```
 
 ## Architecture
@@ -53,9 +51,9 @@ Pre-flight logic in `AgentRuntime` handles pending write confirmations and ident
 
 ### Runtime / Harness Boundary
 
-Production/default `AgentRuntime` must not silently fall back to rule-based write execution. If no LLM provider is configured and `offline_demo` is not enabled, the runtime returns a safe human-transfer message.
+Production/default `AgentRuntime` requires an LLM provider. If no provider is configured, the runtime returns a safe human-transfer message.
 
-`offline_demo=True` is an explicit harness for Workbench demos and scripted CI eval. The Workbench API canonicalizes legacy `"deterministic"` mode input to `"offline_demo"` for compatibility, but new UI/API output should use `"offline_demo"`.
+The Workbench API no longer supports `"offline_demo"` mode; only `"llm"` mode is available.
 
 ### Write Safety: 7-Layer Guard
 
@@ -100,7 +98,7 @@ Prompts live as versioned Markdown files in `prompts/` (e.g., `core_contract_v00
 ### Eval Infrastructure
 
 - **Cases**: `app/eval/cases.py` — `curated_mvp` (11 cases) and `generalized_mvp` (30+ cases). Each `EvalCase` specifies expected intents, tool calls, DB state, guard behavior.
-- **Runner**: `app/eval/runner.py` — `CuratedEvalRunner` executes cases sequentially or in parallel (`--max-workers`). Scripted CI uses the explicit `offline_demo` harness unless `--live` / LLM-required mode is selected.
+- **Runner**: `app/eval/runner.py` — `CuratedEvalRunner` executes cases sequentially or in parallel (`--max-workers`). Live eval uses the real LLM provider (requires `DEEPSEEK_API_KEY`). No offline/deterministic harness is supported.
 - **Failure classification**: 14 ordered labels in `classify_failure()` — priority matters (llm_json_failure beats auth_failure beats wrong_intent, etc.).
 - **Metrics**: `pass_1` (per-result), `pass_k` (per-unique-case), `db_accuracy`, `tool_call_success_rate`, `guard_block_rate`, `mutation_error_rate`.
 
