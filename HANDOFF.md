@@ -48,6 +48,7 @@ LLM tool-calling 零售客服 agent — Python FastAPI + React Workbench + 7 层
 - 开发者指南：`CLAUDE.md`
 
 ## Recent
+- **Merged 2026-06-17**: auto: staged all changes
 - **PR opened 2026-06-17** (feat/prompt-optimization-part1): auto: staged all changes
 
 - **Merged 2026-06-16**: fix: Harness Engineering Bug 修复 - 全量 eval pass rate 72.8% -> 79.5%
