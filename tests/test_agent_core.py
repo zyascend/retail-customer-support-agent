@@ -195,6 +195,20 @@ class ConfirmationResolverTests(unittest.TestCase):
     def test_chinese_change_request(self):
         self.assertEqual(self.resolver.resolve("换成另外一个"), "changed")
 
+    def test_confirm_with_change_keyword_prefers_confirm(self):
+        """'yes, change it' should resolve to confirmed, not changed."""
+        self.assertEqual(self.resolver.resolve("yes, change it to #W123"), "confirmed")
+        self.assertEqual(self.resolver.resolve("yes please change the address"), "confirmed")
+
+    def test_weak_confirm_with_change_returns_changed(self):
+        """Weak confirm + strong change should still return changed."""
+        self.assertEqual(self.resolver.resolve("yeah change it please"), "changed")
+
+    def test_pure_change_request_not_confirmed(self):
+        """'change to item 123' should still resolve to changed."""
+        self.assertEqual(self.resolver.resolve("change to item 4567890123"), "changed")
+        self.assertEqual(self.resolver.resolve("use different address"), "changed")
+
 
 class WriteGuardTests(unittest.TestCase):
     def setUp(self):
