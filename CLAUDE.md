@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**On session start, also read `HANDOFF.md`** — it contains the latest session's progress, eval baselines, and next steps. Updated automatically by `/pr` and `/prm`.
+
 ## Conventions
 
 - **文档语言**: 项目文档默认使用中文，包括 README、docs 下的设计文档、路线图、计划、评审说明和阶段总结。只有外部 API 名称、代码标识符、命令、指标名、英文专有术语或需要对齐上游英文材料时保留英文。
