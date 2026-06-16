@@ -1,4 +1,4 @@
-import { ArrowCounterClockwise, PaperPlaneTilt, Play, SkipForward } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, PaperPlaneTilt, Play, SkipForward, SpinnerGap } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { modeLabel } from "../labels";
 import type {
@@ -175,8 +175,18 @@ export function RunControl({
           onClick={onStep}
           type="button"
         >
-          <SkipForward aria-hidden="true" size={16} weight="bold" />
-          <span>单步执行</span>
+          {busy ? (
+            <SpinnerGap aria-hidden="true" size={16} weight="bold" className="animate-spin" />
+          ) : (
+            <SkipForward aria-hidden="true" size={16} weight="bold" />
+          )}
+          <span>
+            {busy
+              ? "执行中…"
+              : snapshot.run_controls.can_step
+                ? `单步执行 ${snapshot.script_cursor + 1}/${snapshot.script_message_count}`
+                : "脚本已结束"}
+          </span>
         </button>
         <button
           className="inline-flex items-center justify-center gap-1.5 min-h-9 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2.5 py-2 text-sm font-bold leading-none whitespace-nowrap cursor-pointer transition-colors duration-150 active:translate-y-px disabled:opacity-62 disabled:cursor-not-allowed"
@@ -184,8 +194,12 @@ export function RunControl({
           onClick={onRunAll}
           type="button"
         >
-          <Play aria-hidden="true" size={16} weight="bold" />
-          <span>运行全部</span>
+          {busy ? (
+            <SpinnerGap aria-hidden="true" size={16} weight="bold" className="animate-spin" />
+          ) : (
+            <Play aria-hidden="true" size={16} weight="bold" />
+          )}
+          <span>{busy ? "运行中…" : "运行全部"}</span>
         </button>
         <button
           className="inline-flex items-center justify-center gap-1.5 min-h-9 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2.5 py-2 text-sm font-bold leading-none whitespace-nowrap cursor-pointer transition-colors duration-150 active:translate-y-px disabled:opacity-62 disabled:cursor-not-allowed"
@@ -216,8 +230,12 @@ export function RunControl({
           onClick={handleSend}
           type="button"
         >
-          <PaperPlaneTilt aria-hidden="true" size={16} weight="bold" />
-          <span>发送</span>
+          {busy ? (
+            <SpinnerGap aria-hidden="true" size={16} weight="bold" className="animate-spin" />
+          ) : (
+            <PaperPlaneTilt aria-hidden="true" size={16} weight="bold" />
+          )}
+          <span>{busy ? "发送中…" : "发送"}</span>
         </button>
       </div>
     </section>

@@ -1,7 +1,7 @@
 import { roleLabel } from "../labels";
 import type { WorkbenchSnapshot } from "../types";
 
-export function Conversation({ snapshot }: { snapshot: WorkbenchSnapshot }) {
+export function Conversation({ busy, snapshot }: { busy: boolean; snapshot: WorkbenchSnapshot }) {
   return (
     <section className="min-w-0 flex flex-col overflow-hidden border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 p-3" aria-label="对话记录">
       <div className="flex items-start justify-between gap-3 mb-3 shrink-0">
@@ -38,6 +38,18 @@ export function Conversation({ snapshot }: { snapshot: WorkbenchSnapshot }) {
         </ol>
       ) : (
         <div className="border border-dashed border-slate-300 dark:border-slate-600 rounded-lg text-slate-500 dark:text-slate-400 p-3.5 text-sm">暂无消息。</div>
+      )}
+
+      {/* Agent thinking indicator */}
+      {busy && (
+        <div className="shrink-0 mt-2 flex items-center gap-2 px-1 py-1.5">
+          <span className="inline-flex gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: "0ms" }} />
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: "150ms" }} />
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: "300ms" }} />
+          </span>
+          <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold">Agent 正在思考…</span>
+        </div>
       )}
     </section>
   );
