@@ -1106,7 +1106,7 @@ class AgentLoop:
         order_id = tool_call.arguments.get("order_id")
         if not isinstance(order_id, str):
             return
-        raw = order_id.strip()
+        raw = order_id.strip().lstrip("#")
         match = re.fullmatch(r"#?(?:W)?(\d{7,})", raw, flags=re.IGNORECASE)
         if match is None:
             return
