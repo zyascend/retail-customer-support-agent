@@ -623,6 +623,38 @@ class ActionSpecsTests(unittest.TestCase):
         result = tool_params_for_llm("get_order_details")
         self.assertEqual(result, "(see function signature)")
 
+    def test_active_prompt_includes_stop_conditions_contract(self):
+        from app.agent.prompts import AGENT_SYSTEM_PROMPT
+
+        content = AGENT_SYSTEM_PROMPT.content
+        self.assertIn("## Stop Conditions", content)
+        self.assertIn("after completing the user-requested task", content)
+        self.assertIn("write-capable tool call", content)
+        self.assertIn("blocked by a guard", content)
+        self.assertIn("reasonable retries", content)
+
+    def test_active_prompt_matches_new_section_structure(self):
+        from app.agent.prompts import AGENT_SYSTEM_PROMPT
+
+        content = AGENT_SYSTEM_PROMPT.content
+
+        self.assertIn("## Core Contract", content)
+        self.assertIn("## Write Requests", content)
+        self.assertIn("## Heuristics", content)
+        self.assertIn("## Stop Conditions", content)
+        self.assertIn("write-capable tool call", content)
+        self.assertIn("blocked by a guard", content)
+        self.assertNotIn("## Workflow", content)
+
+    def test_active_prompt_includes_complex_example_anchors(self):
+        from app.agent.prompts import AGENT_SYSTEM_PROMPT
+
+        content = AGENT_SYSTEM_PROMPT.content.lower()
+
+        self.assertIn("total refund", content)
+        self.assertIn("price difference", content)
+        self.assertIn("continue with the remaining part of the original request", content)
+
 
 class OrderIdNormalizationTests(unittest.TestCase):
     """Tests for AgentLoop._normalize_order_id_argument."""
