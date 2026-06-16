@@ -5,8 +5,8 @@ from typing import Any, Dict
 from app.eval.cases import EvalCase, get_cases
 
 DEMO_CASE_IDS = [
-    "auth_name_zip_lookup_order",
     "cancel_pending_order",
+    "auth_name_zip_lookup_order",
     "return_delivered_order_item",
     "modify_pending_order_items_success",
     "modify_pending_order_payment_success",

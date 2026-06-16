@@ -234,9 +234,9 @@ export function App() {
 
       {surface === "demo" ? (
         <>
-          {error ? (
+          {error || snapshot?.last_error ? (
             <div className="mx-3 mt-3 border border-red-200 dark:border-red-800 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-900 dark:text-red-300 p-2.5 text-sm">
-              {error}
+              {error || snapshot?.last_error?.message || "运行时错误"}
             </div>
           ) : null}
 
@@ -268,7 +268,7 @@ export function App() {
                   snapshot={snapshot}
                 />
                 <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-                  <Conversation snapshot={snapshot} />
+                  <Conversation busy={busy} snapshot={snapshot} />
                 </div>
                 <div className="shrink-0">
                   <Timeline
