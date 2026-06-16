@@ -1,5 +1,15 @@
 # Retail Customer Support Transaction Agent 技术架构设计
 
+> ⚠️ **历史文档通知**
+>
+> 本文档是 v0.1 讨论稿（2026-06-10），**不代表当前实现**。
+> 当前架构参考：
+> - [`CLAUDE.md`](CLAUDE.md) — 项目约定、命令、架构概览
+> - [`docs/portfolio-architecture.md`](docs/portfolio-architecture.md) — 架构设计决策
+> - [`docs/design-audit.md`](docs/design-audit.md) — 架构审计报告
+>
+> 本文保留作为设计演进的历史参考，内容可能已过时。
+
 **版本：** v0.1 讨论稿  
 **日期：** 2026-06-10  
 **定位：** 面向 AI Agent 工程师作品集的可评测交易型客服 Agent 工作台  

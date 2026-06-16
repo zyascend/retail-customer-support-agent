@@ -29,10 +29,8 @@ uv run ruff check .
 # without a provider, runtime safely transfers to a human agent)
 uv run phase1-chat --script examples/chat/cancel_order.json
 
-# Run scripted/offline eval (no API key required)
-uv run phase2-eval --subset curated_mvp --trials 1
-
-# Run eval (requires DEEPSEEK_API_KEY)
+# Run eval (requires DEEPSEEK_API_KEY for --live mode;
+# without API key, runtime safely transfers to a human agent)
 uv run phase2-eval --subset curated_mvp --trials 1
 ```
 
