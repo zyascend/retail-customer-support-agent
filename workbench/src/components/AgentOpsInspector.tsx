@@ -24,29 +24,29 @@ export function AgentOpsInspector({
   const activeLlmResponse = selectLlmResponse(event, trace);
 
   return (
-    <section className="panel inspector-panel agentops-inspector" aria-label="AgentOps 检查器">
-      <div className="panel-header">
+    <section className="min-w-0 border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 p-3 max-h-[calc(100dvh-98px)] overflow-auto" aria-label="AgentOps 检查器">
+      <div className="flex items-start justify-between gap-3 mb-3">
         <div>
-          <div className="panel-kicker">检查器</div>
-          <h2>{event ? eventLabel(event.label) : "调试详情"}</h2>
+          <div className="mb-0.5 text-slate-500 dark:text-slate-400 text-xs font-extrabold tracking-normal">检查器</div>
+          <h2 className="m-0 text-base leading-tight text-[#182230] dark:text-white">{event ? eventLabel(event.label) : "调试详情"}</h2>
         </div>
-        <span className="count-label">
+        <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 text-xs font-extrabold leading-none whitespace-nowrap px-2 py-1.5">
           {caseLoading || traceLoading ? "加载中" : trace ? "已载入" : "空"}
         </span>
       </div>
 
-      <dl className="inspector-facts">
-        <div>
-          <dt>案例</dt>
-          <dd>{selectedCase?.case_id || "未绑定案例"}</dd>
+      <dl className="grid gap-2 m-0 mb-3">
+        <div className="min-w-0 border border-slate-200 dark:border-slate-700 rounded-lg bg-[#f8fafc] dark:bg-slate-700/30 p-2">
+          <dt className="text-slate-500 dark:text-slate-400 text-xs font-extrabold tracking-normal">案例</dt>
+          <dd className="mt-1 break-anywhere text-[#182230] dark:text-white text-sm font-bold">{selectedCase?.case_id || "未绑定案例"}</dd>
         </div>
-        <div>
-          <dt>Trace</dt>
-          <dd>{trace?.trace_id || "未打开"}</dd>
+        <div className="min-w-0 border border-slate-200 dark:border-slate-700 rounded-lg bg-[#f8fafc] dark:bg-slate-700/30 p-2">
+          <dt className="text-slate-500 dark:text-slate-400 text-xs font-extrabold tracking-normal">Trace</dt>
+          <dd className="mt-1 break-anywhere text-[#182230] dark:text-white text-sm font-bold">{trace?.trace_id || "未打开"}</dd>
         </div>
-        <div>
-          <dt>当前事件</dt>
-          <dd>{event?.id || "未选择"}</dd>
+        <div className="min-w-0 border border-slate-200 dark:border-slate-700 rounded-lg bg-[#f8fafc] dark:bg-slate-700/30 p-2">
+          <dt className="text-slate-500 dark:text-slate-400 text-xs font-extrabold tracking-normal">当前事件</dt>
+          <dd className="mt-1 break-anywhere text-[#182230] dark:text-white text-sm font-bold">{event?.id || "未选择"}</dd>
         </div>
       </dl>
 
@@ -105,12 +105,12 @@ function InspectorSection({
   value: unknown;
 }) {
   return (
-    <div className="json-section agentops-inspector-section">
-      <div className="section-label">{label}</div>
+    <div className="grid gap-1.5 mt-3">
+      <div className="text-slate-500 dark:text-slate-400 text-xs font-extrabold tracking-normal">{label}</div>
       {hasValue(value) ? (
-        <pre>{formatJson(value)}</pre>
+        <pre className="max-h-60 m-0 overflow-auto border border-slate-200 dark:border-slate-700 rounded-lg bg-[#0f172a] dark:bg-[#020617] text-[#dbeafe] dark:text-[#e2e8f0] p-2.5 font-mono text-xs leading-relaxed">{formatJson(value)}</pre>
       ) : (
-        <div className="empty-state subtle">{emptyText}</div>
+        <div className="bg-[#fbfcfe] dark:bg-slate-800/50 p-2.5 border border-dashed border-slate-300 dark:border-slate-600 rounded-lg text-slate-500 dark:text-slate-400 text-sm">{emptyText}</div>
       )}
     </div>
   );

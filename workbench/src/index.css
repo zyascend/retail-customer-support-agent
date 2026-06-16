@@ -1,0 +1,101 @@
+@import "tailwindcss";
+@import "@fontsource/geist-sans/500.css";
+@import "@fontsource/geist-sans/600.css";
+@import "@fontsource/geist-sans/700.css";
+@import "@fontsource/geist-sans/800.css";
+@import "@fontsource/geist-mono/500.css";
+@import "@fontsource/geist-mono/600.css";
+@import "@fontsource/geist-mono/700.css";
+
+@theme {
+  --font-sans: "Geist Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+
+  --color-panel-bg: #ffffff;
+  --color-panel-border: #d9e1ec;
+  --color-surface: #f4f6f8;
+  --color-text-primary: #172033;
+  --color-text-secondary: #5c687a;
+  --color-text-muted: #66758a;
+  --color-accent: #2563eb;
+  --color-accent-ring: rgba(37, 99, 235, 0.14);
+  --color-error-bg: #fff0f0;
+  --color-error-border: #f1b7b7;
+  --color-error-text: #8a1f1f;
+  --color-good-bg: #e8f8ef;
+  --color-good-text: #126b3a;
+  --color-warn-bg: #fff4d6;
+  --color-warn-text: #835100;
+  --color-warn-border: #f6c453;
+  --color-bad-bg: #feeceb;
+  --color-bad-text: #9f1f17;
+  --color-neutral-bg: #edf2f7;
+  --color-neutral-text: #475467;
+  --color-pending-bg: #fffdf2;
+  --color-pending-banner: #f59e0b;
+  --color-json-bg: #0f172a;
+  --color-json-text: #dbeafe;
+  --color-code-inline-bg: #f8fafc;
+  --color-primary-btn-bg: #1f2937;
+  --color-primary-btn-text: #ffffff;
+  --color-input-border: #c9d2de;
+  --color-focus-ring: #2563eb;
+
+  --color-selected-border: #2563eb;
+  --color-changing-bg: #fff8db;
+  --color-changing-text: #7a4b00;
+
+  --color-dark-panel-bg: #1e293b;
+  --color-dark-panel-border: #334155;
+  --color-dark-surface: #0f172a;
+  --color-dark-text-primary: #f1f5f9;
+  --color-dark-text-secondary: #94a3b8;
+  --color-dark-text-muted: #64748b;
+  --color-dark-input-border: #475569;
+  --color-dark-json-bg: #020617;
+  --color-dark-json-text: #e2e8f0;
+  --color-dark-code-bg: #1e293b;
+  --color-dark-primary-btn-bg: #e2e8f0;
+  --color-dark-primary-btn-text: #0f172a;
+  --color-dark-error-bg: #2d1b1b;
+  --color-dark-error-border: #7f3a3a;
+  --color-dark-error-text: #fca5a5;
+  --color-dark-pending-bg: #2a2416;
+  --color-dark-good-bg: #132b1e;
+  --color-dark-good-text: #86efac;
+  --color-dark-warn-bg: #2a2416;
+  --color-dark-warn-text: #fde68a;
+  --color-dark-bad-bg: #2d1b1b;
+  --color-dark-bad-text: #fca5a5;
+  --color-dark-neutral-bg: #1e293b;
+  --color-dark-neutral-text: #94a3b8;
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Responsive: stack layout on narrow viewports */
+@media (max-width: 1100px) {
+  .agentops-layout {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 960px) {
+  .demo-layout {
+    flex-direction: column !important;
+  }
+  .demo-layout > aside {
+    width: 100% !important;
+  }
+  .demo-layout > aside:last-child {
+    width: 100% !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .topbar-layout {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
