@@ -48,15 +48,20 @@ Stop and provide a final response when:
 
 **建议**: 从函数 docstring 自动提取描述（fallback 到硬编码字典）；或将描述作为 `__tool_description__` 属性挂在函数上。
 
-### 2.2 缺少 `think` 工具 🔴 高优先级
+### 2.2 `think` 工具可作为实验项 🟡 中优先级
 
-**现状**: LLM 无结构化的「先思考再行动」空间，有时会跳过必要的读操作直接调写工具。
+**现状**: LLM 无结构化的「先思考再行动」空间，有时会跳过必要的读操作直接调写工具。但当前 runtime 已经有 read-before-write guard、auto-load 和 premature refusal safety net 兜底。
 
-**建议**: 添加 `think(reasoning: str) → "ok"` 工具，类型为 `generic`。用于写操作前的显式推理。
+**建议**: 将 `think(reasoning: str) → "ok"` 作为 A/B 实验项，而不是立即进入主线。先用 live eval 比较：
+- 是否降低 premature refusal / wrong tool rate
+- 是否增加平均 loop 次数与 token 成本
+- 是否真的优于继续收紧 tool schema + prompt contract
+
+若无显著收益，不建议引入常驻 `think` 工具。
 
 ### 2.3 参数 schema 约束可更严格 🟡 中优先级
 
-**现状**: 只对 `order_id`、`item_ids`、`payment_method_id` 和极少数 enum 做了约束。
+**现状**: 已对 `order_id`、`item_ids`、`new_item_ids`、`payment_method_id` 以及部分 enum 做了约束，但地址与身份类字段仍较宽松。
 
 **缺失约束**: `state`（美国 50 州 `enum`）、`zip`（`^\d{5}$`）、`country`（`"enum": ["USA"]`）、`email`（`^[^@]+@[^@]+$`）。
 
@@ -70,9 +75,9 @@ Stop and provide a final response when:
 
 **现状**: 5 个 `_maybe_correct_*` 方法通过正则 + 状态检查修正 LLM 计算错误。每个新场景需要新增方法，维护成本线性增长。
 
-**建议（方案 A，推荐）**: 用一个轻量验证 prompt（~200 tokens）做最终检查：「Given the tool results and the response below, does it contain calculation errors? If yes, output corrected response.」
+**建议（方案 A）**: 用一个轻量验证 prompt（~200 tokens）做最终检查：「Given the tool results and the response below, does it contain calculation errors? If yes, output corrected response.」
 
-**备选（方案 B）**: 将计算逻辑完全移出 LLM，在 tool observation 中注入预计算金额字段。
+**建议（方案 B，推荐）**: 将计算逻辑尽量移出 LLM，在 tool observation 中注入预计算金额字段，把金额类输出收敛为 deterministic contract。这样比新增一次 LLM 校验更稳定、可测、也更便宜。
 
 ### 3.2 Premature Refusal 检测覆盖不全 🔴 高优先级
 
@@ -83,17 +88,11 @@ Stop and provide a final response when:
 - 添加 status-based refusal pattern
 - 长期：用小型 LLM 调用做 refusal 分类
 
-### 3.3 Guard Block 不应计入 Consecutive Failure 🔴 高优先级
+### 3.3 Guard Block 不计入 Consecutive Failure ✅ 已实现
 
-**现状** (`llm_agent.py:186-200`): `consecutive_tool_failures` 在 `all_failed=True` 时递增，包含 guard block。连续 3 次正常 guard block 会触发 `max_consecutive_failures` 错误终止。
+**当前实现**: `llm_agent.py` 已将 `blocked` 与技术失败区分，guard block 不再推动 `consecutive_tool_failures` 递增。
 
-**建议**: 区分「预期 block」和「非预期 failure」：
-```python
-if record.status == "blocked":
-    pass  # guard blocks are expected behavior
-elif record.status != "success":
-    all_failed_technical = True
-```
+**建议**: 将此项从优化待办中移出，改为补一条回归测试，锁定该行为不回退。
 
 ### 3.4 缺少 Multi-Provider 支持 🟡 中优先级
 
@@ -105,11 +104,15 @@ elif record.status != "success":
 
 ## 四、上下文管理
 
-### 4.1 固定 6 条消息窗口导致上下文丢失 🔴 高优先级
+### 4.1 固定 6 条消息窗口应升级为 token-aware budget 🔴 高优先级
 
 **现状**: `_build_messages` 只取 `session.messages[-6:]`。复杂换货场景（查订单→查产品→换货→确认→差价计算）可能超 6 轮，首轮用户请求被丢弃。
 
-**建议**: 保留从最近一次成功写入以来的所有消息 + 早期对话摘要。或用 tiktoken 动态调整窗口。
+**建议**: 不要单独做“扩大窗口”，而应和 Provider 层的 token budget 管理合并成同一个工程项：
+- 先按 token 预算而不是固定条数截断消息
+- 优先保留最近一次成功写入以来的消息
+- 超预算时生成早期对话摘要，而不是盲目丢最老消息
+- 在 trace 中记录截断/摘要发生次数，便于 live eval 观察
 
 ### 4.2 ContextBuilder 暴露内部细节 🟡 中优先级
 
@@ -129,9 +132,13 @@ elif record.status != "success":
 
 ### 5.1 确认检查在策略检查之前 🟡 中优先级
 
-**现状**: Guard 检查顺序为 auth → **confirmation** → ownership → read-before-write → **policy**。用户可能被要求确认一个最终会被 policy 拒绝的操作。
+**现状**: Guard 检查顺序实际为 `auth → ownership → read-before-write → confirmation → policy`。因此用户仍可能被要求确认一个最终会被 policy 拒绝的操作。
 
-**建议**: 调整为 `auth → ownership → read-before-write → policy → confirmation → locks → idempotency`。
+**建议**: 不建议简单做全量重排，而是拆成更细的策略：
+- 对可由当前参数 + 已加载事实直接判定的硬性 policy block（如订单状态不符、same shipping method、invalid cancel reason），优先于 confirmation
+- 对本质上是高风险但可执行的写操作，仍保留 confirmation gate
+
+这样可以减少“先确认后拒绝”的糟糕体验，同时避免把 confirmation 语义完全挪成后置副作用。
 
 ### 5.2 Guard 错误消息缺乏替代建议 🟡 中优先级
 
@@ -157,9 +164,9 @@ elif record.status != "success":
 
 ### 6.2 无 Token Budget 管理 🔴 高优先级
 
-**现状**: 无 token 计数，上下文可能悄悄超出模型限制。
+**现状**: `ContextBuilder` 已提供粗粒度 `estimate_tokens()`，但 `_build_messages` 仍未真正按 token budget 裁剪上下文，上下文可能悄悄超出模型限制。
 
-**建议**: 集成 `tiktoken`，在 `_build_messages` 中估算 token 数，超阈值时触发摘要或截断，并在 trace 中记录警告。
+**建议**: 与 4.1 合并实施。优先做 message assembly 阶段的 token-aware budgeting；`tiktoken` 可作为更精确估算器，但不是第一步的唯一前置条件。
 
 ### 6.3 无指数退避重试 🟡 中优先级
 
@@ -171,15 +178,11 @@ elif record.status != "success":
 
 ## 七、确认流程
 
-### 7.1 关键词评分边界不精确 🔴 高优先级
+### 7.1 confirm/change 边界修正 ✅ 已实现
 
-**现状**: `ConfirmationResolver` 用加权评分。`"yes, change it to X"` → confirm=3, change=3 → `change > confirm` → 误判为 `changed`。
+**当前实现**: `ConfirmationResolver` 已将“明确 confirm 且强度不低于 change”归为 `confirmed`，不再存在文档中描述的误判。
 
-**建议**: 当 confirm 和 change 评分接近（差值 ≤ 1）时，优先 confirm。
-```python
-if confirm >= change and confirm >= 2:
-    return "confirmed"
-```
+**建议**: 将此项从高优先级待办移出，改为补一条针对 `yes, change it to X` 类输入的回归测试。
 
 ### 7.2 缺少上下文感知 🟢 低优先级
 
@@ -215,9 +218,12 @@ if confirm >= change and confirm >= 2:
 
 ### 9.1 缺少回归测试基础设施 🟡 中优先级
 
-**现状**: `phase2-eval` 可手动运行，不在 CI 中。修改 prompt 后无法自动检测退化。
+**现状**: 仓库已具备 eval runner、tool schema 测试、baseline metadata 与 comparison artifact 基础。真正的缺口不是“没有回归基础设施”，而是这些能力尚未形成稳定的 CI / golden gate。
 
-**建议**: 建立 Golden Test Set（5–10 个 must-pass case）；添加 pre-commit hook；eval 结果包含与 baseline 的 diff。
+**建议**:
+- 固定一组 must-pass curated/golden cases，作为 prompt/schema 变更后的回归门槛
+- scripted eval 进入常规 CI；live eval 保持 manual/nightly/release smoke
+- baseline comparison 结果在报告中突出 diff，而不是仅作为离线分析能力存在
 
 ### 9.2 Failure Classification 后置 🟢 低优先级
 
@@ -249,16 +255,12 @@ if confirm >= change and confirm >= 2:
 
 | # | 优化项 | 影响面 | 改动量 |
 |---|--------|--------|--------|
-| 3.3 | 区分 Guard Block 和 Failure 计数 | Loop 健壮性 | 小（~5 行） |
-| 7.1 | 确认解析 confirm/change 边界修正 | 用户体验 | 小（~3 行） |
 | 8.1 | JSON Repair 容错 | 容错性 | 小 |
 | 1.1 | 提示词精简压缩 | Token 效率 | 中 |
 | 1.3 | 添加停止条件 | Loop 效率 | 小 |
-| 2.2 | 添加 Think 工具 | 推理质量 | 中 |
-| 3.1 | Response Correction → LLM 验证 | 维护性 | 中 |
+| 3.1 | 金额类输出改为 deterministic observation contract | 维护性/稳定性 | 中 |
 | 3.2 | 扩展 Refusal 检测覆盖 | 安全兜底 | 中 |
-| 4.1 | 自适应消息窗口 | 复杂场景 | 中 |
-| 6.2 | Token Budget 管理 | 稳定性 | 中 |
+| 4.1 / 6.2 | Token-aware context budget | 复杂场景/稳定性 | 中 |
 
 ### 🟡 中优先级
 
@@ -267,6 +269,7 @@ if confirm >= change and confirm >= 2:
 | 1.2 | 复杂场景 few-shot | 准确度 | 中 |
 | 2.1 | 工具描述自动生成 | 维护性 | 中 |
 | 2.3 | 参数 Schema 补全 | 参数质量 | 小 |
+| 2.2 | `think` 工具实验 | 推理质量 | 中 |
 | 3.4 | Multi-Provider 支持 | 可扩展性 | 大 |
 | 4.2 | ContextBuilder 语义化 | 提示词质量 | 小 |
 | 5.1 | 调整 Guard 检查顺序 | 用户体验 | 中 |
@@ -281,7 +284,9 @@ if confirm >= change and confirm >= 2:
 | # | 优化项 | 影响面 | 改动量 |
 |---|--------|--------|--------|
 | 4.3 | LoadedContext 去重 | 代码整洁 | 小 |
+| 3.3 | Guard Block 失败计数回归测试 | 稳定性 | 小 |
 | 5.3 | Policy 声明式配置 | 可维护性 | 大 |
+| 7.1 | confirm/change 边界回归测试 | 稳定性 | 小 |
 | 7.2 | Context-aware 确认 | 精度 | 中 |
 | 7.3 | Pending Action 超时 | 边界情况 | 小 |
 | 9.2 | Trace 集成分类 | 调试体验 | 中 |
