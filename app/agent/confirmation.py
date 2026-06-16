@@ -143,8 +143,8 @@ class ConfirmationResolver:
         if deny > confirm + change and deny >= 2:
             return "denied"
 
-        # 4. User wants to change the request (even if "no" appears)
-        if change > confirm and change >= 2:
+        # 4. User wants to change the request — only when no clear confirm signal
+        if change > confirm and change >= 2 and confirm < 2:
             return "changed"
 
         # 5. Clear confirm signal

@@ -289,18 +289,36 @@ class AgentRuntime:
         return result.assistant_message
 
     def _confirmed_action_continuation_prompt(self, session: SessionState) -> str:
+        """Build a continuation prompt that prevents redoing the completed action."""
         original_request = self._original_user_request_context(session)
+        completed_action = session.tool_results[-1] if session.tool_results else None
+        completed_desc = ""
+        if completed_action and completed_action.status == "success":
+            tool_name = completed_action.tool_name.replace("_", " ")
+            order_id = completed_action.arguments.get("order_id", "")
+            completed_desc = (
+                f"The just-completed action was: {tool_name}"
+                + (f" for {order_id}" if order_id else "")
+                + ". "
+            )
         if original_request:
             return (
-                "The user confirmed and the pending action has now been executed "
-                "successfully. Continue any remaining parts of the original user "
-                f"request:\n\n{original_request}\n\n"
-                "If nothing remains, provide a concise final summary."
+                f"The user confirmed and {completed_action.tool_name if completed_action else 'the pending action'} "
+                "has been successfully executed. "
+                + completed_desc
+                + "Do NOT repeat or re-execute this already-completed action. "
+                "Check if any independent remaining parts of the original request "
+                "still need to be handled. "
+                f"Original request:\n\n{original_request}\n\n"
+                "If all parts are done, provide a concise final summary of what was completed."
             )
         return (
-            "The user confirmed and the pending action has now been executed "
-            "successfully. Continue any remaining parts of the user's original "
-            "request. If nothing remains, provide a concise final summary."
+            f"The user confirmed and {completed_action.tool_name if completed_action else 'the pending action'} "
+            "has been successfully executed. "
+            + completed_desc
+            + "Do NOT repeat or re-execute this already-completed action. "
+            "If nothing else remains from the user's original request, "
+            "provide a concise final summary of what was completed."
         )
 
     def _original_user_request_context(self, session: SessionState) -> str:

@@ -165,7 +165,7 @@ class AgentLoop:
             assistant_msg = self._assistant_message_dict(response)
             messages.append(assistant_msg)
 
-            all_failed = True
+            all_failed_technical = True
             for tc in response.tool_calls:
                 # Track whether any write tool was attempted (for safety net)
                 if tc.tool_name in self._ORDER_WRITE_TOOLS or tc.tool_name == "modify_user_address":
@@ -181,9 +181,12 @@ class AgentLoop:
                     messages.append(obs_msg)
 
                 if record is not None and record.status == "success":
-                    all_failed = False
+                    all_failed_technical = False
+                elif record is not None and record.status == "blocked":
+                    # Guard blocks are expected — don't count as failures
+                    pass
 
-            if all_failed:
+            if all_failed_technical:
                 turn.consecutive_tool_failures += 1
             else:
                 turn.consecutive_tool_failures = 0
@@ -1106,7 +1109,7 @@ class AgentLoop:
         order_id = tool_call.arguments.get("order_id")
         if not isinstance(order_id, str):
             return
-        raw = order_id.strip()
+        raw = order_id.strip().lstrip("#")
         match = re.fullmatch(r"#?(?:W)?(\d{7,})", raw, flags=re.IGNORECASE)
         if match is None:
             return

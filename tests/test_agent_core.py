@@ -7,7 +7,8 @@ from unittest.mock import patch
 
 from app.agent.confirmation import ConfirmationResolver
 from app.agent.guard import WriteActionGuard
-from app.agent.models import SessionState, ToolCall
+from app.agent.llm_agent import AgentLoop
+from app.agent.models import SessionState, ToolCall, ToolCallRequest, TurnContext
 from app.config import resolve_config
 from app.ops.tracing import TraceWriter
 from app.tools.gateway import ToolGateway
@@ -193,6 +194,20 @@ class ConfirmationResolverTests(unittest.TestCase):
 
     def test_chinese_change_request(self):
         self.assertEqual(self.resolver.resolve("换成另外一个"), "changed")
+
+    def test_confirm_with_change_keyword_prefers_confirm(self):
+        """'yes, change it' should resolve to confirmed, not changed."""
+        self.assertEqual(self.resolver.resolve("yes, change it to #W123"), "confirmed")
+        self.assertEqual(self.resolver.resolve("yes please change the address"), "confirmed")
+
+    def test_weak_confirm_with_change_returns_changed(self):
+        """Weak confirm + strong change should still return changed."""
+        self.assertEqual(self.resolver.resolve("yeah change it please"), "changed")
+
+    def test_pure_change_request_not_confirmed(self):
+        """'change to item 123' should still resolve to changed."""
+        self.assertEqual(self.resolver.resolve("change to item 4567890123"), "changed")
+        self.assertEqual(self.resolver.resolve("use different address"), "changed")
 
 
 class WriteGuardTests(unittest.TestCase):
@@ -607,6 +622,58 @@ class ActionSpecsTests(unittest.TestCase):
 
         result = tool_params_for_llm("get_order_details")
         self.assertEqual(result, "(see function signature)")
+
+
+class OrderIdNormalizationTests(unittest.TestCase):
+    """Tests for AgentLoop._normalize_order_id_argument."""
+
+    def setUp(self):
+        self.turn = TurnContext()
+
+    def _normalize(self, order_id: str) -> str:
+        tc = ToolCallRequest(
+            id="call_test",
+            tool_name="get_order_details",
+            arguments={"order_id": order_id},
+        )
+        AgentLoop._normalize_order_id_argument(tc, self.turn)
+        return tc.arguments["order_id"]
+
+    def test_already_canonical(self):
+        self.assertEqual(self._normalize("#W9571698"), "#W9571698")
+
+    def test_bare_w_prefix(self):
+        self.assertEqual(self._normalize("W9571698"), "#W9571698")
+
+    def test_bare_number(self):
+        self.assertEqual(self._normalize("9571698"), "#W9571698")
+
+    def test_hash_only(self):
+        self.assertEqual(self._normalize("#9571698"), "#W9571698")
+
+    def test_double_hash(self):
+        self.assertEqual(self._normalize("##W9571698"), "#W9571698")
+
+    def test_triple_hash(self):
+        self.assertEqual(self._normalize("###W9571698"), "#W9571698")
+
+    def test_double_hash_bare_number(self):
+        self.assertEqual(self._normalize("##9571698"), "#W9571698")
+
+    def test_lowercase_w(self):
+        self.assertEqual(self._normalize("#w9571698"), "#W9571698")
+
+    def test_non_order_id_passes_through(self):
+        self.assertEqual(self._normalize("not_an_id"), "not_an_id")
+
+    def test_non_string_ignored(self):
+        tc = ToolCallRequest(
+            id="call_test",
+            tool_name="get_order_details",
+            arguments={"order_id": 12345},
+        )
+        AgentLoop._normalize_order_id_argument(tc, self.turn)
+        self.assertEqual(tc.arguments["order_id"], 12345)
 
 
 if __name__ == "__main__":
