@@ -19,19 +19,19 @@ def _session() -> SessionState:
         Message(role="user", content="I need help with my order"),
         Message(role="assistant", content="Let me look up your order."),
     ]
-    session.loaded_context.orders["O1"] = {
-        "order_id": "O1", "user_id": "U1", "status": "pending",
+    session.loaded_context.orders["#WO0000001"] = {
+        "order_id": "#WO0000001", "user_id": "U1", "status": "pending",
         "items": [{"item_id": "I1", "name": "Widget"}, {"item_id": "I2", "name": "Gadget"}],
     }
-    session.loaded_context.orders["O2"] = {
-        "order_id": "O2", "user_id": "U1", "status": "delivered",
+    session.loaded_context.orders["#WO0000002"] = {
+        "order_id": "#WO0000002", "user_id": "U1", "status": "delivered",
         "items": [{"item_id": "I3", "name": "Thing"}],
     }
     session.tool_results = [
         ToolCallRecord(
-            tool_name="get_order_details", arguments={"order_id": "O1"},
+            tool_name="get_order_details", arguments={"order_id": "#WO0000001"},
             tool_kind="read", status="success",
-            observation={"order_id": "O1", "status": "pending", "item_count": 2},
+            observation={"order_id": "#WO0000001", "status": "pending", "item_count": 2},
         ),
     ]
     return session
@@ -45,9 +45,9 @@ def test_build_includes_auth_summary() -> None:
 
 def test_build_includes_order_summaries() -> None:
     summary = ContextBuilder(policy_text="dummy").build(_session())
-    assert "O1" in summary
+    assert "#WO0000001" in summary
     assert "pending" in summary
-    assert "O2" in summary
+    assert "#WO0000002" in summary
     assert "delivered" in summary
 
 
@@ -55,8 +55,8 @@ def test_build_includes_pending_action() -> None:
     session = _session()
     session.pending_action = PendingAction(
         action_name="cancel_pending_order",
-        arguments={"order_id": "O1", "reason": "no longer needed"},
-        user_facing_summary="Cancel order O1",
+        arguments={"order_id": "#WO0000001", "reason": "no longer needed"},
+        user_facing_summary="Cancel order #WO0000001",
     )
     summary = ContextBuilder(policy_text="dummy").build(session)
     assert "cancel_pending_order" in summary
@@ -64,9 +64,10 @@ def test_build_includes_pending_action() -> None:
 
 def test_build_includes_write_locks() -> None:
     session = _session()
-    session.write_locks = ["order_O1_write_lock"]
+    session.write_locks = ["order:#W0000001:cancel"]
     summary = ContextBuilder(policy_text="dummy").build(session)
-    assert "order_O1_write_lock" in summary
+    assert "Active safeguards:" in summary
+    assert "cancellation in progress for #W0000001" in summary
 
 
 def test_build_handles_unauthenticated_user() -> None:
@@ -121,7 +122,7 @@ def test_build_includes_recent_tool_error_and_guard_block() -> None:
 
     summary = ContextBuilder(policy_text="dummy").build(session)
 
-    assert "Recent guard block: cancel_pending_order ownership_violation" in summary
+    assert "Recent guard block: cancel_pending_order on #W1 — order belongs to another account" in summary
     assert "Recent tool error: get_order_details order_not_found" in summary
 
 

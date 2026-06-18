@@ -3,12 +3,23 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from app.agent.confirmation import ConfirmationResolver
+from app.agent.context_builder import ContextBuilder
 from app.agent.guard import WriteActionGuard
 from app.agent.llm_agent import AgentLoop
-from app.agent.models import SessionState, ToolCall, ToolCallRequest, TurnContext
+from app.agent.models import (
+    AgentTurnResult,
+    Message,
+    SessionState,
+    ToolCall,
+    ToolCallRecord,
+    ToolCallRequest,
+    ToolCallResponse,
+    TurnContext,
+)
+from app.agent.providers import LLMProvider
 from app.config import resolve_config
 from app.ops.tracing import TraceWriter
 from app.tools.gateway import ToolGateway
@@ -706,6 +717,232 @@ class OrderIdNormalizationTests(unittest.TestCase):
         )
         AgentLoop._normalize_order_id_argument(tc, self.turn)
         self.assertEqual(tc.arguments["order_id"], 12345)
+
+
+class GuardBlockCountingTests(unittest.TestCase):
+    """Regression tests for §3.3: Guard blocks must not increment
+    consecutive_tool_failures (which would cause premature termination)."""
+
+    def setUp(self):
+        runtime = RetailAdapter(resolve_config()).create_runtime()
+        self.registry = ToolRegistry(runtime.tools)
+        self.gateway = ToolGateway(registry=self.registry, runtime=runtime)
+        self.context_builder = ContextBuilder(policy_text="test policy")
+
+    def _make_loop(self, provider: LLMProvider) -> AgentLoop:
+        return AgentLoop(
+            provider=provider,
+            gateway=self.gateway,
+            registry=self.registry,
+            context_builder=self.context_builder,
+            max_consecutive_failures=3,
+        )
+
+    # ── Helpers ──
+
+    @staticmethod
+    def _session(
+        user_id: str,
+        *,
+        order_id: str | None = None,
+        order_user_id: str | None = None,
+    ) -> SessionState:
+        s = SessionState(session_id="test", authenticated_user_id=user_id)
+        if order_id:
+            s.loaded_context.orders[order_id] = {
+                "order_id": order_id,
+                "user_id": order_user_id or user_id,
+            }
+        return s
+
+    @staticmethod
+    def _single_tool_response(
+        tool_name: str, **kwargs: object
+    ) -> ToolCallResponse:
+        return ToolCallResponse(
+            assistant_content=None,
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_1",
+                    tool_name=tool_name,
+                    arguments=kwargs,
+                ),
+            ],
+        )
+
+    @staticmethod
+    def _text_response(text: str) -> ToolCallResponse:
+        return ToolCallResponse(assistant_content=text)
+
+    # ── Tests ──
+
+    def test_guard_block_does_not_increment_consecutive_failures(self):
+        """Ownership-violation guard block → consecutive_tool_failures stays 0."""
+        session = self._session(
+            PENDING_USER,  # owns the order
+            order_id=DELIVERED_ORDER,
+            order_user_id=DELIVERED_USER,  # but order belongs to another user
+        )
+        provider = MagicMock(spec=LLMProvider)
+        provider.chat_with_tools.side_effect = [
+            self._single_tool_response(
+                "cancel_pending_order",
+                order_id=DELIVERED_ORDER,
+                reason="no longer needed",
+            ),
+            self._text_response("I see the order was blocked."),
+        ]
+
+        loop = self._make_loop(provider)
+        result = loop.run_turn(session, "Cancel the order")
+
+        self.assertEqual(
+            result.turn.consecutive_tool_failures,
+            0,
+            "Guard block should not increment consecutive_tool_failures",
+        )
+        self.assertNotEqual(
+            result.turn.termination,
+            "consecutive_failures",
+            "Guard block should not trigger consecutive_failures termination",
+        )
+
+    def test_technical_error_increments_consecutive_failures(self):
+        """An unknown-tool validation error → increments counter."""
+        session = self._session(PENDING_USER)
+        provider = MagicMock(spec=LLMProvider)
+        provider.chat_with_tools.side_effect = [
+            self._single_tool_response(
+                "nonexistent_tool_xyz",
+            ),
+            self._text_response("I made a mistake."),
+        ]
+
+        loop = self._make_loop(provider)
+        result = loop.run_turn(session, "Do something")
+
+        self.assertEqual(
+            result.turn.consecutive_tool_failures,
+            1,
+            "Technical error should increment consecutive_tool_failures",
+        )
+
+    def test_guard_block_then_success_resets_counter(self):
+        """Guard block followed by success → counter resets to 0."""
+        session = self._session(
+            PENDING_USER,
+            order_id=PENDING_ORDER,
+            order_user_id=PENDING_USER,
+        )
+        provider = MagicMock(spec=LLMProvider)
+        provider.chat_with_tools.side_effect = [
+            # First call: guard block (ownership violation — order belongs to other user)
+            self._single_tool_response(
+                "cancel_pending_order",
+                order_id=PENDING_ORDER,
+                reason="no longer needed",
+            ),
+            # Second call: reads order details (success)
+            self._single_tool_response(
+                "get_order_details",
+                order_id=PENDING_ORDER,
+            ),
+            # Third call: no more tools
+            self._text_response("All done."),
+        ]
+
+        loop = self._make_loop(provider)
+        result = loop.run_turn(session, "Cancel the order")
+
+        # The guard block (explicit_confirmation_required) returns immediately
+        # via _step_pending, so we never get to the counting logic.
+        # consecutative_tool_failures should be 0.
+        self.assertEqual(result.turn.consecutive_tool_failures, 0)
+
+    def test_consecutive_non_confirmation_guard_blocks_stay_at_zero(self):
+        """Multiple non-confirmation guard blocks (ownership, policy) all stay at 0."""
+        # DELIVERED_ORDER belongs to DELIVERED_USER; PENDING_USER doesn't own it
+        session = self._session(
+            PENDING_USER,
+            order_id=DELIVERED_ORDER,
+            order_user_id=DELIVERED_USER,
+        )
+        provider = MagicMock(spec=LLMProvider)
+        provider.chat_with_tools.side_effect = [
+            # Try to cancel a delivered order → policy guard block
+            self._single_tool_response(
+                "cancel_pending_order",
+                order_id=DELIVERED_ORDER,
+                reason="no longer needed",
+            ),
+            # Try to return items from a delivered-but-not-owned order → ownership block
+            self._single_tool_response(
+                "return_delivered_order_items",
+                order_id=DELIVERED_ORDER,
+                item_ids=[DELIVERED_ITEM],
+                payment_method_id=DELIVERED_PAYMENT,
+            ),
+            # Finally acknowledge
+            self._text_response("I see, both operations were blocked."),
+        ]
+
+        loop = self._make_loop(provider)
+        result = loop.run_turn(session, "Cancel and return items")
+
+        self.assertEqual(
+            result.turn.consecutive_tool_failures,
+            0,
+            "Multiple guard blocks should not accumulate consecutive failures",
+        )
+
+
+class TokenAwareTruncationTests(unittest.TestCase):
+    """Tests for AgentLoop._truncate_history token-aware message truncation."""
+
+    def setUp(self):
+        self.estimate = lambda text: max(1, int(len(text.split()) / 0.75))
+
+    def _msgs(self, *contents: str) -> list[Message]:
+        return [Message(role="user", content=c) for c in contents]
+
+    def test_no_truncation_when_under_budget(self):
+        msgs = self._msgs("hello", "world")
+        kept, count, summary = AgentLoop._truncate_history(msgs, 1000, self.estimate)
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(count, 0)
+        self.assertEqual(summary, "")
+
+    def test_truncation_when_over_budget(self):
+        long_msg = "word " * 2000  # ~2667 tokens
+        msgs = self._msgs("first user message about order #W123", long_msg, "short")
+        kept, count, summary = AgentLoop._truncate_history(msgs, 100, self.estimate)
+        # Only "short" (~2 tokens) should fit
+        self.assertEqual(len(kept), 1)
+        self.assertGreater(count, 0)
+        self.assertIn("truncated", summary)
+
+    def test_truncation_preserves_chronological_order(self):
+        msgs = [
+            Message(role="user", content="msg1"),
+            Message(role="assistant", content="msg2"),
+            Message(role="user", content="msg3"),
+            Message(role="assistant", content="msg4"),
+        ]
+        kept, count, summary = AgentLoop._truncate_history(msgs, 1000, self.estimate)
+        self.assertEqual(len(kept), 4)
+        self.assertEqual(count, 0)
+        self.assertEqual(kept[0].content, "msg1")
+        self.assertEqual(kept[-1].content, "msg4")
+
+    def test_summary_includes_first_user_message(self):
+        msgs = [
+            Message(role="user", content="I want to cancel my order #W1234567"),
+            Message(role="assistant", content="ok"),
+        ]
+        # Tiny budget so first message is truncated
+        kept, count, summary = AgentLoop._truncate_history(msgs, 1, self.estimate)
+        self.assertGreater(count, 0)
+        self.assertIn("cancel my order", summary)
 
 
 if __name__ == "__main__":

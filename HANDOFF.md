@@ -1,4 +1,4 @@
-# HANDOFF — 2025-06-16
+# HANDOFF — 2026-06-18
 
 ## 项目一句话
 
@@ -6,49 +6,54 @@ LLM tool-calling 零售客服 agent — Python FastAPI + React Workbench + 7 层
 
 ## 本会话做了什么
 
-- 跑完全量 eval：151 cases，baseline pass rate **72.8%**
-- 写了 harness engineering 优化分析报告：`docs/superpowers/specs/2025-06-16-harness-engineering-optimization.md`
-- 修复 4 个 bug → pass rate **79.5%**（+10 cases）
+实现了 Harness Engineering 优化报告 §3（Agent Loop）和 §4（上下文管理）共 6 个优化项：
 
-## 修复的 4 个 bug
+| § | 优化项 | 状态 |
+|---|--------|------|
+| 3.1 | 成功写操作 observation 注入预计算金额字段 | ✅ |
+| 3.2 | 扩展 premature refusal 检测覆盖全部 8 个写工具 | ✅ |
+| 3.3 | Guard block 不计入 consecutive failure | ✅ |
+| 4.1/6.2 | Token-aware 上下文预算（固定 6 条 → 8000 token budget） | ✅ |
+| 4.2 | ContextBuilder 语义化（Locks → Active safeguards） | ✅ |
+| 4.3 | LoadedContext 订单 ID 去重 | ✅ |
 
-| Bug | 文件 | 改动 |
-|-----|------|------|
-| `##W...` 双 hash ID 导致 ValueError | `app/agent/llm_agent.py:1109` | `lstrip("#")` |
-| 确认后 continuation loop 重做已完成操作 | `app/agent/runtime.py:291` | prompt 加 "Do NOT repeat" |
-| 确认解析 change 误判优先于 confirm | `app/agent/confirmation.py:147` | +`confirm < 2` 守卫 |
-| guard block 计入 consecutive failure | `app/agent/llm_agent.py:168` | 区分 block vs error |
+### §4 上下文管理详情
 
-## Eval 基线
+- **4.1 Token 预算**: `_build_messages` 从 `messages[-6:]` 改为 token-aware 截断（`_truncate_history`），超预算时生成启发式摘要 `[Earlier: ...]`。`TurnContext` 新增 `context_truncation_count/summary`。
+- **4.2 语义化**: `Locks:` → `Active safeguards:`（`cancellation in progress for #W123`）；guard block 错误码 → 可读描述；`_guard_block_observation` 不再泄漏原始 `block_context`。
+- **4.3 ID 去重**: 提取共享 `_canonical_order_id()`（guard.py），订单 ID 统一 `#W\d+` 单 key 存储，非标准 ID 自动 fallback。
+
+## 当前 Eval 基线
 
 | 子集 | Pass |
 |------|------|
+| curated_mvp (11) | **100%** |
 | generalized_mvp (30) | **100%** |
-| tau_retail_supported (69) | 72.5% |
-| generalization (45) | 80.0% |
-| synthetic_seeded_v1 (7) | 57.1% |
+| synthetic_seeded_v1 (7) | **57%**（4/7，baseline 一致，无回归） |
 
 命令：`uv run phase2-eval --subset <name> --live --max-workers 50`
 
 ## 下一步
 
-1. **最高 ROI**：分析报告 §2.2 — 添加 `think` 工具，预期解决 remaining wrong_tool/confirmation 失败
-2. 分析报告 §3.2 — 扩展 premature refusal 检测覆盖全部 8 个写工具
-3. 分析报告 §4.1 — 自适应消息窗口
+按 Harness Engineering 优化报告优先级：
+
+1. **§1.1** — 提示词精简压缩（18 条规则 → 8-10 条，CRITICAL 段 35 行 → 5 行）
+2. **§1.3** — 添加显式停止条件
+3. **§8.1** — JSON Repair 容错
+4. **§2.3** — 参数 Schema 补全（state enum、zip regex、email regex）
+5. **§5.1** — Guard 检查顺序调整（硬性 policy block 优先于 confirmation）
 
 ## 关键文件速查
 
-- 入口：`app/agent/runtime.py` — `AgentRuntime.handle_user_message()`
-- Agent loop：`app/agent/llm_agent.py` — `AgentLoop.run_turn()`
-- Guard：`app/agent/guard.py` — `WriteActionGuard.check()`
-- 工具注册：`app/tools/registry.py`
-- Prompt：`prompts/llm_agent_system_v001.md`
+- 入口：`app/agent/runtime.py`
+- Agent loop：`app/agent/llm_agent.py`（`_build_messages`、`_truncate_history`、`_canonical_order_id`）
+- Guard：`app/agent/guard.py`（`_canonical_order_id`、`_validate_read_before_write`）
+- Context builder：`app/agent/context_builder.py`（`_describe_lock`、语义描述）
+- 工具网关：`app/tools/gateway.py`（`_guard_block_observation`、`_update_loaded_context`）
 - 分析报告：`docs/superpowers/specs/2025-06-16-harness-engineering-optimization.md`
-- 实施计划：`docs/superpowers/plans/2025-06-16-harness-bug-fixes.md`
-- 开发者指南：`CLAUDE.md`
 
 ## Recent
-- **Merged 2026-06-17**: auto: staged all changes
-- **PR opened 2026-06-17** (feat/prompt-optimization-part1): auto: staged all changes
-
-- **Merged 2026-06-16**: fix: Harness Engineering Bug 修复 - 全量 eval pass rate 72.8% -> 79.5%
+- **Merged 2026-06-18**: feat: 上下文管理三项优化 — token 预算截断、Guard 语义化、订单 ID 去重 (#44)
+- **Merged 2026-06-18**: feat: Agent Loop 设计优化 — §3.1~3.3 (#43)
+- **Merged 2026-06-17**: auto: staged all changes (#41)
+- **Merged 2026-06-16**: fix: Harness Engineering Bug 修复 — 全量 eval 72.8% → 79.5%

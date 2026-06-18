@@ -5,7 +5,7 @@ import re
 import time
 import uuid
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any
+from typing import Any, Callable
 
 from app.agent.context_builder import ContextBuilder
 from app.agent.models import (
@@ -20,6 +20,7 @@ from app.agent.models import (
 )
 from app.agent.providers import LLMProvider
 from app.agent.tool_observations import format_tool_observation
+from app.agent.guard import _canonical_order_id
 from app.tools.gateway import ToolGateway
 from app.tools.registry import ToolRegistry
 
@@ -36,9 +37,13 @@ class AgentLoop:
         "exchange_delivered_order_items",
     }
 
+    # ── Token budget for conversation history (excludes system prompt) ──
+    _MESSAGE_TOKEN_BUDGET: int = 8000
+
     # ── Premature refusal safety net ──
 
-    # Maps write intents to regex patterns for extracting from user messages
+    # Maps write intents to regex patterns for extracting from user messages.
+    # Covers all 8 write tools (section 3.2 compliance).
     _WRITE_INTENT_MAP: list[tuple[str, re.Pattern]] = [
         (
             "cancel_pending_order",
@@ -59,10 +64,40 @@ class AgentLoop:
                 re.IGNORECASE,
             ),
         ),
+        (
+            "modify_pending_order_items",
+            re.compile(
+                r"\b(?:modify|change|update|replace|switch)\b.*?\bitems?\b.*?(?P<order_id>#W\d+)",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "modify_pending_order_payment",
+            re.compile(
+                r"\b(?:modify|change|update)\b.*?\bpayment\b.*?(?P<order_id>#W\d+)",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "modify_pending_order_shipping_method",
+            re.compile(
+                r"\b(?:modify|change|update)\b.*?\bshipping\b.*?(?P<order_id>#W\d+)",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "modify_user_address",
+            re.compile(
+                r"\b(?:modify|change|update)\b.*?\b(?:my\s+)?address\b(?!.*?(?P<order_id>#W\d+))",
+                re.IGNORECASE,
+            ),
+        ),
     ]
 
-    # Patterns that indicate the LLM refused without calling a write tool
+    # Patterns that indicate the LLM refused without calling a write tool.
+    # Covers ownership-based and status-based refusals (section 3.2).
     _REFUSAL_PATTERNS: list[re.Pattern] = [
+        # Ownership-based refusal patterns
         re.compile(
             r"\b(?:belongs?\s+to|another\s+account|different\s+(?:account|user)"
             r"|not\s+your|own(?:ed)?\s+by\s+another"
@@ -71,6 +106,20 @@ class AgentLoop:
         ),
         re.compile(
             r"\b(?:do\s+not\s+own|cannot\s+be\s+(?:cancell|modifi|return|exchang))",
+            re.IGNORECASE,
+        ),
+        # Status-based refusal patterns
+        re.compile(
+            r"\b(?:this\s+order\s+(?:is|has\s+been)\s+(?:already\s+)?"
+            r"(?:processed|shipped|delivered|completed|cancelled|canceled|fulfilled)"
+            r"|(?:the\s+)?order\s+(?:status\s+)?(?:is|shows|indicates)\s+"
+            r"(?:already\s+)?(?:processed|shipped|delivered|completed|cancelled|canceled|fulfilled))",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\bcannot\s+(?:be\s+)?(?:cancel(?:led)?|modif(?:y|ied)|return(?:ed)?"
+            r"|exchange?(?:d)?|change?(?:d)?)"
+            r"\s+(?:an?\s+)?order\s+(?:that\s+(?:is|has|was)|which\s+(?:is|has|was)|already)",
             re.IGNORECASE,
         ),
     ]
@@ -99,7 +148,7 @@ class AgentLoop:
         self, session: SessionState, user_content: str
     ) -> AgentTurnResult:
         turn = TurnContext()
-        messages = self._build_messages(session, user_content)
+        messages = self._build_messages(session, user_content, turn)
         tool_schemas = self._registry.tool_schemas_for_llm()
         _forced_write_injected = False
         _any_write_attempted = False
@@ -183,8 +232,10 @@ class AgentLoop:
                 if record is not None and record.status == "success":
                     all_failed_technical = False
                 elif record is not None and record.status == "blocked":
-                    # Guard blocks are expected — don't count as failures
-                    pass
+                    # Guard blocks are expected — don't count as failures.
+                    # Reset the consecutive-failure counter so the agent
+                    # doesn't terminate after N guard-blocked write attempts.
+                    all_failed_technical = False
 
             if all_failed_technical:
                 turn.consecutive_tool_failures += 1
@@ -210,6 +261,133 @@ class AgentLoop:
             ),
             turn=turn,
         )
+
+    # ── Observation enrichment (方案B for §3.1) ──
+
+    def _enrich_success_observation(
+        self,
+        session: SessionState,
+        tool_call: ToolCallRequest,
+        record: ToolCallRecord,
+    ) -> dict[str, Any]:
+        """Inject pre-computed financial fields into a successful write observation.
+
+        This allows the LLM to read pre-computed values directly rather than
+        calculating them, reducing calculation errors and eliminating fragile
+        post-hoc corrections.
+        """
+        obs = record.observation
+        if not isinstance(obs, dict):
+            return obs
+
+        tool_name = tool_call.tool_name
+
+        if tool_name == "cancel_pending_order":
+            items = [
+                item for item in obs.get("items", []) or []
+                if isinstance(item, dict)
+            ]
+            if items:
+                most_expensive = max(
+                    items,
+                    key=lambda item: Decimal(str(item.get("price", 0))),
+                )
+                obs["_precomputed"] = {
+                    "most_expensive_item_name": most_expensive.get("name"),
+                    "most_expensive_item_price": self._format_money(
+                        Decimal(str(most_expensive.get("price", 0)))
+                    ),
+                }
+
+        elif tool_name == "modify_pending_order_items":
+            item_ids = self._string_list_arg(tool_call.arguments.get("item_ids"))
+            new_item_ids = self._string_list_arg(
+                tool_call.arguments.get("new_item_ids")
+            )
+            pre: dict[str, str] = {}
+            old_total = self._item_price_total(session, item_ids) if item_ids else None
+            new_total = self._item_price_total(session, new_item_ids) if new_item_ids else None
+            if old_total is not None and new_total is not None:
+                pre["old_total"] = self._format_money(old_total)
+                pre["new_total"] = self._format_money(new_total)
+                diff = new_total - old_total
+                pre["price_difference"] = self._format_money(diff)
+                pre["credit_amount"] = self._format_money(
+                    old_total - new_total if old_total > new_total else Decimal("0")
+                )
+            if item_ids:
+                first_price = self._item_price(session, item_ids[0])
+                if first_price is not None:
+                    pre["old_item_price"] = self._format_money(first_price)
+            if new_item_ids:
+                first_new_price = self._item_price(session, new_item_ids[0])
+                if first_new_price is not None:
+                    pre["new_item_price"] = self._format_money(first_new_price)
+            gift_card_balance = self._known_gift_card_balance(session)
+            if gift_card_balance is not None:
+                pre["gift_card_balance"] = self._format_money(gift_card_balance)
+                if old_total is not None and new_total is not None:
+                    extra_charge = new_total - old_total
+                    remaining = gift_card_balance - max(extra_charge, Decimal("0"))
+                    pre["gift_card_balance_remaining"] = self._format_money(remaining)
+            if pre:
+                obs["_precomputed"] = pre
+
+        elif tool_name == "return_delivered_order_items":
+            item_ids = self._string_list_arg(tool_call.arguments.get("item_ids"))
+            pre = {}
+            if item_ids:
+                refund_total = self._item_price_total(session, item_ids)
+                if refund_total is not None:
+                    pre["refund_total"] = self._format_money(refund_total)
+                    order = self._loaded_order(
+                        session, tool_call.arguments.get("order_id")
+                    )
+                    if order:
+                        all_items = [
+                            item for item in order.get("items", []) or []
+                            if isinstance(item, dict)
+                        ]
+                        remaining_ids = [
+                            str(item["item_id"]) for item in all_items
+                            if str(item.get("item_id", "")) not in item_ids
+                        ]
+                        if remaining_ids:
+                            remaining_total = self._item_price_total(
+                                session, remaining_ids
+                            )
+                            if remaining_total is not None:
+                                pre["remaining_total"] = self._format_money(remaining_total)
+            if pre:
+                obs["_precomputed"] = pre
+
+        elif tool_name == "exchange_delivered_order_items":
+            item_ids = self._string_list_arg(tool_call.arguments.get("item_ids"))
+            new_item_ids = self._string_list_arg(
+                tool_call.arguments.get("new_item_ids")
+            )
+            pre = {}
+            if item_ids and new_item_ids:
+                old_total = self._item_price_total(session, item_ids)
+                new_total = self._item_price_total(session, new_item_ids)
+                if old_total is not None and new_total is not None:
+                    pre["old_total"] = self._format_money(old_total)
+                    pre["new_total"] = self._format_money(new_total)
+                    diff = new_total - old_total
+                    pre["price_difference"] = self._format_money(diff)
+                    pre["credit_amount"] = self._format_money(
+                        old_total - new_total if old_total > new_total else Decimal("0")
+                    )
+                gift_card_balance = self._known_gift_card_balance(session)
+                if gift_card_balance is not None:
+                    pre["gift_card_balance"] = self._format_money(gift_card_balance)
+                    extra_charge = new_total - old_total if (old_total is not None and new_total is not None) else Decimal("0")
+                    remaining = gift_card_balance - max(extra_charge, Decimal("0"))
+                    pre["gift_card_balance_remaining"] = self._format_money(remaining)
+            if pre:
+                obs["_precomputed"] = pre
+
+        return obs
 
     # ── Step methods ──
 
@@ -323,10 +501,13 @@ class AgentLoop:
 
         # Build tool observation message
         if record.status == "success":
+            enriched = self._enrich_success_observation(
+                session, tool_call, record
+            )
             return record, {
                 "role": "tool",
                 "tool_call_id": tool_call.id,
-                "content": format_tool_observation(record.observation),
+                "content": format_tool_observation(enriched),
             }
         elif record.status == "blocked":
             if record.error == "explicit_confirmation_required":
@@ -393,14 +574,16 @@ class AgentLoop:
         # Auto-load order context for order-scoped write tools
         order_id = args.get("order_id")
         if order_id and tool_call.tool_name in self._ORDER_WRITE_TOOLS:
-            clean_id = str(order_id).lstrip("#")
-            if clean_id not in session.loaded_context.orders:
+            canonical = AgentLoop._canonical_order_id(order_id)
+            storage_key = canonical or str(order_id)
+            if storage_key not in session.loaded_context.orders:
                 t0 = time.perf_counter()
-                # Try the canonical #-prefixed form first, then the bare ID
+                # Try the canonical form first, then the original argument as fallback
+                lookup_id = canonical if canonical else str(order_id)
                 load_record = self._gateway.execute(
                     state=session,
                     tool_name="get_order_details",
-                    arguments={"order_id": f"#{clean_id}"},
+                    arguments={"order_id": lookup_id},
                 )
                 if load_record.status != "success":
                     load_record = self._gateway.execute(
@@ -413,18 +596,11 @@ class AgentLoop:
                 )
                 turn.add_step(
                     "auto_load_order",
-                    order_id=clean_id,
+                    order_id=storage_key,
                     status=load_record.status,
                 )
                 if load_record.status == "success" and isinstance(load_record.observation, dict):
-                    session.loaded_context.orders[clean_id] = load_record.observation
-                    # Also store with # prefix (DB canonical form) for guard consistency
-                    prefixed = f"#{clean_id}"
-                    session.loaded_context.orders[prefixed] = load_record.observation
-                    # Also store the raw argument form as passed by LLM
-                    raw_str = str(order_id)
-                    if raw_str not in (clean_id, prefixed):
-                        session.loaded_context.orders[raw_str] = load_record.observation
+                    session.loaded_context.orders[storage_key] = load_record.observation
                     turn.auto_load_count += 1
                     loaded = True
 
@@ -685,15 +861,10 @@ class AgentLoop:
 
     @staticmethod
     def _loaded_order(session: SessionState, order_id: Any) -> dict[str, Any] | None:
-        if not order_id:
-            return None
-        raw = str(order_id)
-        clean = raw.lstrip("#")
-        for key in (raw, clean, f"#{clean}"):
-            order = session.loaded_context.orders.get(key)
-            if isinstance(order, dict):
-                return order
-        return None
+        canonical = AgentLoop._canonical_order_id(order_id)
+        lookup_key = canonical if canonical else str(order_id)
+        order = session.loaded_context.orders.get(lookup_key)
+        return order if isinstance(order, dict) else None
 
     @staticmethod
     def _user_request_text(session: SessionState, user_content: str) -> str:
@@ -1083,7 +1254,9 @@ class AgentLoop:
     ) -> Decimal | None:
         totals: list[Decimal] = []
         for order_id, returned_ids in returned_by_order.items():
-            order = session.loaded_context.orders.get(order_id)
+            canonical = AgentLoop._canonical_order_id(order_id)
+            lookup_key = canonical if canonical else str(order_id)
+            order = session.loaded_context.orders.get(lookup_key)
             if not isinstance(order, dict):
                 continue
             total = Decimal("0")
@@ -1102,26 +1275,28 @@ class AgentLoop:
         return totals[0]
 
     @staticmethod
+    def _canonical_order_id(order_id: Any) -> str | None:
+        """Normalize an order ID to canonical ``#W\\d+`` form.
+
+        Returns ``None`` for non-string or non-matching values.
+        """
+        return _canonical_order_id(order_id)
+
+    @staticmethod
     def _normalize_order_id_argument(
         tool_call: ToolCallRequest,
         turn: TurnContext,
     ) -> None:
         order_id = tool_call.arguments.get("order_id")
-        if not isinstance(order_id, str):
+        canonical = AgentLoop._canonical_order_id(order_id)
+        if canonical is None or canonical == str(order_id):
             return
-        raw = order_id.strip().lstrip("#")
-        match = re.fullmatch(r"#?(?:W)?(\d{7,})", raw, flags=re.IGNORECASE)
-        if match is None:
-            return
-        normalized = f"#W{match.group(1)}"
-        if normalized == raw:
-            return
-        tool_call.arguments["order_id"] = normalized
+        tool_call.arguments["order_id"] = canonical
         turn.add_step(
             "order_id_argument_normalized",
             tool_name=tool_call.tool_name,
             original=order_id,
-            normalized=normalized,
+            normalized=canonical,
         )
 
     @staticmethod
@@ -1219,17 +1394,77 @@ class AgentLoop:
         )
     # Note: {state_summary} is replaced dynamically in _build_messages
 
+    @staticmethod
+    def _truncate_history(
+        messages: list[Message],
+        token_budget: int,
+        estimate_tokens: Callable[[str], int],
+    ) -> tuple[list[Message], int, str]:
+        """Return (kept_messages, truncated_count, summary).
+
+        Keeps the most recent *contiguous* messages that fit within *token_budget*.
+        Generates a brief heuristic summary for older truncated messages
+        so the LLM retains continuity.
+        """
+        kept: list[Message] = []
+        tokens_used = 0
+        truncated_count = 0
+        budget_exhausted = False
+
+        for msg in reversed(messages):
+            if budget_exhausted:
+                truncated_count += 1
+                continue
+            msg_tokens = estimate_tokens(msg.content)
+            if tokens_used + msg_tokens <= token_budget:
+                kept.append(msg)
+                tokens_used += msg_tokens
+            else:
+                budget_exhausted = True
+                truncated_count += 1
+
+        kept.reverse()  # restore chronological order
+
+        summary = ""
+        if truncated_count > 0:
+            user_msgs = [m for m in messages if m.role == "user"]
+            first_user = user_msgs[0].content[:120].replace("\n", " ") if user_msgs else ""
+            summary = (
+                f"[Earlier conversation ({truncated_count} messages truncated): "
+                f"{first_user}...]" if first_user
+                else f"[Earlier conversation: {truncated_count} messages truncated.]"
+            )
+
+        return kept, truncated_count, summary
+
     def _build_messages(
-        self, session: SessionState, user_content: str
+        self,
+        session: SessionState,
+        user_content: str,
+        turn: TurnContext | None = None,
     ) -> list[dict[str, Any]]:
         state_summary = self._context_builder.build(session)
+
+        # ── Token-aware history truncation ──
+        estimate_tokens = self._context_builder.estimate_tokens
+        kept_msgs, truncated_count, truncation_summary = self._truncate_history(
+            session.messages, self._MESSAGE_TOKEN_BUDGET, estimate_tokens
+        )
+        if turn is not None:
+            turn.context_truncation_count = truncated_count
+            if truncation_summary:
+                turn.context_truncation_summary = truncation_summary
+
+        if truncation_summary:
+            state_summary = truncation_summary + "\n" + state_summary
+
         system_prompt = self._system_prompt_template.replace(
             "{state_summary}", state_summary
         )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
         ]
-        for msg in session.messages[-6:]:
+        for msg in kept_msgs:
             messages.append({"role": msg.role, "content": msg.content})
         messages.append({"role": "user", "content": user_content})
         return messages
@@ -1262,6 +1497,9 @@ class AgentLoop:
         Detects the pattern where the LLM read order/user data, saw an
         ownership/status/policy issue, and responded with a text refusal
         instead of calling the write tool to let the guard decide.
+
+        Now supports both ownership-based and status-based refusal detection
+        (section 3.2 of the optimization spec).
         """
         if not session.loaded_context.orders or not session.authenticated_user_id:
             return None
@@ -1269,15 +1507,23 @@ class AgentLoop:
             return None
         if not any(p.search(assistant_content) for p in self._REFUSAL_PATTERNS):
             return None
-        # Verify the refusal is about the loaded order (ownership mismatch)
+
+        # Verify the refusal is plausible given the loaded order data.
+        # We check: ownership mismatch OR order has a terminal/non-writable status.
         orders = session.loaded_context.orders
         user_id = session.authenticated_user_id
-        has_ownership_mismatch = any(
-            isinstance(o, dict) and o.get("user_id") != user_id
+        plausible_refusal = any(
+            isinstance(o, dict) and (
+                # Ownership mismatch
+                o.get("user_id") != user_id
+                # Status-based: order is in a terminal state (not pending/delivered)
+                or o.get("status", "") not in ("pending", "delivered", "")
+            )
             for o in orders.values()
         )
-        if not has_ownership_mismatch:
+        if not plausible_refusal:
             return None
+
         for tool_name, pattern in self._WRITE_INTENT_MAP:
             if pattern.search(user_content):
                 return tool_name
@@ -1355,6 +1601,43 @@ class AgentLoop:
             args["state"] = "XX"
             args["country"] = "USA"
             args["zip"] = "00000"
+        elif tool_name == "modify_pending_order_items":
+            item_ids = re.findall(r"\b(\d{8,10})\b", user_content)
+            if item_ids:
+                args["item_ids"] = item_ids
+            else:
+                args["item_ids"] = ["0"]
+            if len(item_ids) >= 2:
+                args["new_item_ids"] = item_ids[1:]
+            else:
+                args["new_item_ids"] = ["0"]
+        elif tool_name == "modify_pending_order_payment":
+            pm_m = re.search(
+                r"\b(gift_card_\d+|credit_card_\d+|paypal_\d+)\b", user_content
+            )
+            if pm_m:
+                args["payment_method_id"] = pm_m.group(1)
+            else:
+                args["payment_method_id"] = "gift_card_unknown"
+        elif tool_name == "modify_pending_order_shipping_method":
+            shipping_m = re.search(
+                r"\b(standard|express|overnight)\b", user_content, re.IGNORECASE
+            )
+            if shipping_m:
+                args["shipping_method"] = shipping_m.group(1).lower()
+            else:
+                args["shipping_method"] = "standard"
+        elif tool_name == "modify_user_address":
+            if session.authenticated_user_id:
+                args["user_id"] = session.authenticated_user_id
+            else:
+                return None
+            args["address1"] = "unknown"
+            args["address2"] = ""
+            args["city"] = "unknown"
+            args["state"] = "XX"
+            args["country"] = "USA"
+            args["zip"] = "00000"
         else:
             return None
 
@@ -1424,17 +1707,18 @@ class AgentLoop:
         observation = record.observation if isinstance(record.observation, dict) else {}
         message_for_llm = observation.get("message_for_llm")
         if not message_for_llm:
+            # Fallback: should rarely trigger now that gateway provides
+            # a clean message_for_llm, but keep as safety net.
             message_for_llm = (
-                f"Tool {tool_name} was blocked by the write guard. "
-                f"Reason: {record.error}. "
-                f"Context: {record.block_context}. "
-                "Explain the safe next step to the user without exposing sensitive data."
+                f"Tool {tool_name} was blocked: {record.error or 'unknown reason'}. "
+                "Inform the user of the reason and suggest next steps."
             )
+        # block_context is for tracing only — never expose to LLM
         return ToolExecutionError(
             error_type="guard_blocked",
             message_for_llm=str(message_for_llm),
             retryable=False,
-            block_context=record.block_context,
+            block_context={},  # excluded from LLM-visible serialization
         )
 
     @staticmethod

@@ -145,6 +145,8 @@ class TurnContext(BaseModel):
     termination: Optional[str] = None
     auto_load_count: int = 0
     premature_refusal_corrected_count: int = 0
+    context_truncation_count: int = 0
+    context_truncation_summary: Optional[str] = None
 
     # ── Phase 6: replay harness ──
     llm_responses: list[dict] = Field(default_factory=list)
