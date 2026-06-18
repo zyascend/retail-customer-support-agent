@@ -11,6 +11,7 @@ PRIORITY_OBSERVATION_KEYS = (
     "user_id",
     "email",
     "name",
+    "_precomputed",
     "pending_confirmation",
     "guard_decision",
     "block_reason",
