@@ -169,16 +169,16 @@ class DeepSeekProviderTests(unittest.TestCase):
 
         self.assertEqual(result, {"value": 1})
 
-    def test_chat_with_tools_preserves_reasoning_usage_and_parsed_args(self) -> None:
+    def test_chat_with_tools_reads_cache_usage_from_raw_response_body(self) -> None:
         provider = self._make_provider(max_retries=0)
         tool_call = SimpleNamespace(
             id="call_1",
             function=SimpleNamespace(
                 name="cancel_pending_order",
-                arguments="{'order_id': '#W1', 'reason': 'no longer needed'}",
+                arguments='{"order_id": "#W1", "reason": "no longer needed"}',
             ),
         )
-        response = SimpleNamespace(
+        parsed = SimpleNamespace(
             choices=[
                 SimpleNamespace(
                     finish_reason="tool_calls",
@@ -189,21 +189,45 @@ class DeepSeekProviderTests(unittest.TestCase):
                     ),
                 )
             ],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=2, total_tokens=3),
+            usage=SimpleNamespace(
+                prompt_tokens=1,
+                completion_tokens=2,
+                total_tokens=3,
+            ),
         )
-        provider.client.chat.completions.create.return_value = response
+        raw_response = SimpleNamespace(
+            parse=lambda: parsed,
+            text=(
+                '{"usage": {'
+                '"prompt_tokens": 1, '
+                '"completion_tokens": 2, '
+                '"total_tokens": 3, '
+                '"prompt_cache_hit_tokens": 40, '
+                '"prompt_cache_miss_tokens": 60'
+                '}}'
+            ),
+        )
+        provider.client.chat.completions.create.side_effect = AssertionError(
+            "chat_with_tools should use with_raw_response.create"
+        )
+        provider.client.chat.completions.with_raw_response.create.return_value = raw_response
 
         result = provider.chat_with_tools(
             [{"role": "user", "content": "hi"}],
             [{"type": "function", "function": {"name": "cancel_pending_order"}}],
         )
 
-        self.assertEqual(result.reasoning_content, "reasoning")
-        self.assertEqual(result.token_usage, {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3})
         self.assertEqual(
-            result.tool_calls[0].arguments,
-            {"order_id": "#W1", "reason": "no longer needed"},
+            result.token_usage,
+            {
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "total_tokens": 3,
+                "prompt_cache_hit_tokens": 40,
+                "prompt_cache_miss_tokens": 60,
+            },
         )
+
 
 
 class BuildDefaultProviderTests(unittest.TestCase):

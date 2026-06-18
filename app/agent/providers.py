@@ -174,6 +174,31 @@ def normalize_tool_calling_message(
     )
 
 
+def _extract_token_usage(
+    response: Any, raw_text: str | None = None
+) -> dict[str, int] | None:
+    token_usage: dict[str, int] = {}
+
+    if raw_text:
+        try:
+            parsed = json.loads(raw_text)
+        except json.JSONDecodeError:
+            parsed = None
+        raw_usage = parsed.get("usage") if isinstance(parsed, dict) else None
+        if isinstance(raw_usage, dict):
+            for key, value in raw_usage.items():
+                if isinstance(value, int):
+                    token_usage[key] = value
+
+    usage = getattr(response, "usage", None)
+    if usage is not None:
+        for key, value in vars(usage).items():
+            if isinstance(value, int) and key not in token_usage:
+                token_usage[key] = value
+
+    return token_usage or None
+
+
 class LLMProvider(Protocol):
     def json(
         self, messages: List[Dict[str, str]], schema: Dict[str, Any]
@@ -285,13 +310,14 @@ class DeepSeekProvider:
     def chat_with_tools(
         self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]
     ) -> ToolCallResponse:
-        response = self._with_transient_retries(
-            lambda: self.client.chat.completions.create(
+        raw_response = self._with_transient_retries(
+            lambda: self.client.chat.completions.with_raw_response.create(
                 model=self.model,
                 messages=messages,
                 tools=tools,
             )
         )
+        response = raw_response.parse()
         choice = response.choices[0]
         message = choice.message
         message_dict = {
@@ -310,14 +336,7 @@ class DeepSeekProvider:
                 }
             )
         reasoning_content = getattr(message, "reasoning_content", None) or None
-        usage = getattr(response, "usage", None)
-        token_usage = None
-        if usage is not None:
-            token_usage = {
-                "prompt_tokens": getattr(usage, "prompt_tokens", 0),
-                "completion_tokens": getattr(usage, "completion_tokens", 0),
-                "total_tokens": getattr(usage, "total_tokens", 0),
-            }
+        token_usage = _extract_token_usage(response, getattr(raw_response, "text", None))
         return normalize_tool_calling_message(
             message=message_dict,
             finish_reason=getattr(choice, "finish_reason", None),

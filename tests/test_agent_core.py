@@ -776,6 +776,21 @@ class GuardBlockCountingTests(unittest.TestCase):
 
     # ── Tests ──
 
+    def test_build_messages_keeps_system_prompt_stable_and_moves_state_to_tail(self):
+        session = self._session(PENDING_USER, order_id=PENDING_ORDER)
+        session.messages.append(Message(role="assistant", content="Earlier reply"))
+        loop = self._make_loop(MagicMock(spec=LLMProvider))
+
+        messages = loop._build_messages(session, "Where is my order?")
+
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertIn("See the separate session-state message below.", messages[0]["content"])
+        self.assertNotIn("Orders:", messages[0]["content"])
+        self.assertEqual(messages[1]["role"], "assistant")
+        self.assertIn("Current Session State", messages[1]["content"])
+        self.assertIn("Orders:", messages[1]["content"])
+        self.assertEqual(messages[-1], {"role": "user", "content": "Where is my order?"})
+
     def test_guard_block_does_not_increment_consecutive_failures(self):
         """Ownership-violation guard block → consecutive_tool_failures stays 0."""
         session = self._session(
