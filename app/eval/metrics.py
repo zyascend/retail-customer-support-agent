@@ -97,6 +97,12 @@ def compute_metrics(results: Iterable[MetricResult]) -> Dict[str, Any]:
         for key, value in (result.llm_token_usage or {}).items():
             if isinstance(value, int):
                 token_totals[key] = token_totals.get(key, 0) + value
+    prompt_cache_hit_ratio = 0.0
+    cache_hit_tokens = token_totals.get("prompt_cache_hit_tokens", 0)
+    cache_miss_tokens = token_totals.get("prompt_cache_miss_tokens", 0)
+    cache_total = cache_hit_tokens + cache_miss_tokens
+    if cache_total:
+        prompt_cache_hit_ratio = round(cache_hit_tokens / cache_total, 4)
     loop_iterations = [result.llm_loop_iterations for result in result_list]
     auto_load_count = sum(result.auto_load_count for result in result_list)
     premature_refusal_corrected_count = sum(
@@ -128,6 +134,7 @@ def compute_metrics(results: Iterable[MetricResult]) -> Dict[str, Any]:
         "failed_tool_calls": failed_tool_calls,
         "blocked_tool_calls": blocked_tool_calls,
         "total_token_usage": dict(sorted(token_totals.items())),
+        "prompt_cache_hit_ratio": prompt_cache_hit_ratio,
         "average_llm_loop_iterations": (
             round(sum(loop_iterations) / total, 3) if total else 0.0
         ),

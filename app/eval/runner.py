@@ -384,8 +384,9 @@ class CuratedEvalRunner:
                 if total_tokens is None:
                     total_tokens = dict(turn_ctx.llm_token_usage)
                 else:
-                    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-                        total_tokens[key] = total_tokens.get(key, 0) + turn_ctx.llm_token_usage.get(key, 0)
+                    for key, value in turn_ctx.llm_token_usage.items():
+                        if isinstance(value, int):
+                            total_tokens[key] = total_tokens.get(key, 0) + value
 
         state = run_result.state
         actual_order_status = self._order_status(runtime, case)

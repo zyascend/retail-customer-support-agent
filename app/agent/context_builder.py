@@ -117,22 +117,22 @@ class ContextBuilder:
                 f"Pending: {session.pending_action.action_name} "
                 f"— waiting for user confirmation"
             )
+        else:
+            if session.write_locks:
+                lock_descriptions = [_describe_lock(lock) for lock in session.write_locks]
+                parts.append("Active safeguards: " + ", ".join(lock_descriptions))
 
-        if session.write_locks:
-            lock_descriptions = [_describe_lock(lock) for lock in session.write_locks]
-            parts.append("Active safeguards: " + ", ".join(lock_descriptions))
-
-        recent_successful_writes = [
-            record
-            for record in reversed(session.tool_results)
-            if record.tool_kind == "write" and record.status == "success"
-        ][:3]
-        if recent_successful_writes:
-            summaries = [
-                self._format_successful_write(record)
-                for record in reversed(recent_successful_writes)
-            ]
-            parts.append("Recent successful writes: " + "; ".join(summaries))
+            recent_successful_writes = [
+                record
+                for record in reversed(session.tool_results)
+                if record.tool_kind == "write" and record.status == "success"
+            ][:3]
+            if recent_successful_writes:
+                summaries = [
+                    self._format_successful_write(record)
+                    for record in reversed(recent_successful_writes)
+                ]
+                parts.append("Recent successful writes: " + "; ".join(summaries))
 
         recent_guard_block = next(
             (

@@ -209,6 +209,8 @@ class CuratedEvalTests(unittest.TestCase):
                     "prompt_tokens": 100,
                     "completion_tokens": 20,
                     "total_tokens": 120,
+                    "prompt_cache_hit_tokens": 70,
+                    "prompt_cache_miss_tokens": 30,
                 },
                 llm_loop_iterations=2,
             ),
@@ -219,6 +221,8 @@ class CuratedEvalTests(unittest.TestCase):
                     "prompt_tokens": 50,
                     "completion_tokens": 10,
                     "total_tokens": 60,
+                    "prompt_cache_hit_tokens": 20,
+                    "prompt_cache_miss_tokens": 30,
                 },
                 llm_loop_iterations=4,
             ),
@@ -230,11 +234,14 @@ class CuratedEvalTests(unittest.TestCase):
             metrics["total_token_usage"],
             {
                 "completion_tokens": 30,
+                "prompt_cache_hit_tokens": 90,
+                "prompt_cache_miss_tokens": 60,
                 "prompt_tokens": 150,
                 "total_tokens": 180,
             },
         )
         self.assertEqual(metrics["average_llm_loop_iterations"], 3.0)
+        self.assertEqual(metrics["prompt_cache_hit_ratio"], 0.6)
 
     def test_metrics_aggregate_runtime_fallback_counters(self):
         metrics = compute_metrics(

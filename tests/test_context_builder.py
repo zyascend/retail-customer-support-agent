@@ -203,30 +203,29 @@ def test_successful_return_write_includes_target_item_total() -> None:
     assert "target_item_total=394.18" in summary
 
 
-def test_successful_modify_write_includes_replacement_ids() -> None:
-    session = SessionState(session_id="ctx-7", authenticated_user_id="U1")
+def test_pending_action_hides_write_lock_and_recent_successful_write_context() -> None:
+    session = SessionState(session_id="ctx-8", authenticated_user_id="U1")
+    session.pending_action = PendingAction(
+        action_name="modify_pending_order_payment",
+        arguments={"order_id": "#W1", "payment_method_id": "credit_card_2"},
+        user_facing_summary="Modify payment for order #W1",
+    )
+    session.write_locks = ["order:#W1:modify_payment"]
     session.tool_results.append(
         ToolCallRecord(
-            tool_name="modify_pending_order_items",
-            arguments={
-                "order_id": "#W3",
-                "item_ids": ["old1"],
-                "new_item_ids": ["new1"],
-                "payment_method_id": "gift_card_1",
-            },
+            tool_name="modify_pending_order_payment",
+            arguments={"order_id": "#W1", "payment_method_id": "credit_card_2"},
             tool_kind="write",
             status="success",
-            resource_lock="order:#W3:modify_items",
-            observation={
-                "order_id": "#W3",
-                "status": "pending (item modified)",
-                "items": [
-                    {"item_id": "new1", "name": "Desk Lamp", "price": 135.24},
-                ],
-            },
+            resource_lock="order:#W1:modify_payment",
+            observation={"order_id": "#W1", "status": "pending"},
         )
     )
 
     summary = ContextBuilder(policy_text="dummy").build(session)
 
-    assert "replacements=[old1->new1]" in summary
+    assert "Pending: modify_pending_order_payment" in summary
+    assert "Active safeguards:" not in summary
+    assert "Recent successful writes:" not in summary
+
+

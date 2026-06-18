@@ -1455,15 +1455,26 @@ class AgentLoop:
             if truncation_summary:
                 turn.context_truncation_summary = truncation_summary
 
-        if truncation_summary:
-            state_summary = truncation_summary + "\n" + state_summary
-
         system_prompt = self._system_prompt_template.replace(
-            "{state_summary}", state_summary
+            "{state_summary}", "See the separate session-state message below."
         )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
         ]
+
+        context_parts: list[str] = []
+        if truncation_summary:
+            context_parts.append(truncation_summary)
+        if state_summary:
+            context_parts.append("Current Session State\n\n" + state_summary)
+        if context_parts:
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": "\n\n".join(context_parts),
+                }
+            )
+
         for msg in kept_msgs:
             messages.append({"role": msg.role, "content": msg.content})
         messages.append({"role": "user", "content": user_content})
