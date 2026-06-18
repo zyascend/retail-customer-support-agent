@@ -1,16 +1,29 @@
 from __future__ import annotations
 
+import ast
 import json
+import random
 import re as _re
+import time
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional, Protocol
 
 from app.agent.models import ToolCallRequest, ToolCallResponse
 
 try:
-    from openai import OpenAI
+    from openai import APITimeoutError, OpenAI, RateLimitError
 except ModuleNotFoundError:
+    APITimeoutError = None
     OpenAI = None
+    RateLimitError = None
+
+
+_TRANSIENT_NETWORK_ERROR_NAMES = {
+    "APIConnectionError",
+    "APITimeoutError",
+    "InternalServerError",
+}
 
 
 def _extract_json_block(text: str) -> str:
@@ -19,6 +32,106 @@ def _extract_json_block(text: str) -> str:
     if match:
         return match.group(1).strip()
     return text.strip()
+
+
+def _strip_trailing_commas(text: str) -> str:
+    return _re.sub(r",\s*([}\]])", r"\1", text)
+
+
+def _normalize_python_literals(text: str) -> str:
+    text = _re.sub(r"\bTrue\b", "true", text)
+    text = _re.sub(r"\bFalse\b", "false", text)
+    text = _re.sub(r"\bNone\b", "null", text)
+    return text
+
+
+def _looks_like_python_literal_container(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if stripped[0] not in "[{" or stripped[-1] not in "]}":
+        return False
+    return '"' not in stripped and "'" in stripped
+
+
+def _parse_json_maybe_repaired(raw_text: str) -> Any:
+    text = _extract_json_block(raw_text)
+    if not text:
+        raise json.JSONDecodeError("Empty JSON payload", raw_text, 0)
+
+    candidates = [text]
+
+    normalized = _normalize_python_literals(text)
+    if normalized != text:
+        candidates.append(normalized)
+
+    for candidate in list(candidates):
+        trimmed = _strip_trailing_commas(candidate)
+        if trimmed != candidate:
+            candidates.append(trimmed)
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+
+    literal_candidate = _strip_trailing_commas(text)
+    if _looks_like_python_literal_container(literal_candidate):
+        try:
+            return ast.literal_eval(literal_candidate)
+        except (ValueError, SyntaxError):
+            pass
+
+    raise json.JSONDecodeError("Unable to parse JSON payload", raw_text, 0)
+
+
+def _coerce_retry_after_seconds(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return max(0.0, float(value))
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return max(0.0, float(stripped))
+        except ValueError:
+            try:
+                retry_at = parsedate_to_datetime(stripped)
+            except (TypeError, ValueError, IndexError):
+                return None
+            delta = retry_at.timestamp() - time.time()
+            return max(0.0, delta)
+    return None
+
+
+def _retry_after_from_exception(exc: Exception) -> float | None:
+    response = getattr(exc, "response", None)
+    if response is None:
+        return None
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return None
+    if isinstance(headers, dict):
+        for key, value in headers.items():
+            if str(key).lower() == "retry-after":
+                return _coerce_retry_after_seconds(value)
+        return None
+    for key in ("retry-after", "Retry-After"):
+        try:
+            value = headers.get(key)
+        except AttributeError:
+            value = None
+        seconds = _coerce_retry_after_seconds(value)
+        if seconds is not None:
+            return seconds
+    return None
 
 
 def normalize_tool_calling_message(
@@ -36,7 +149,7 @@ def normalize_tool_calling_message(
         arguments: Dict[str, Any] = {}
         if isinstance(raw_arguments, str) and raw_arguments.strip():
             try:
-                parsed = json.loads(raw_arguments)
+                parsed = _parse_json_maybe_repaired(raw_arguments)
                 if isinstance(parsed, dict):
                     arguments = parsed
             except json.JSONDecodeError:
@@ -93,40 +206,91 @@ class DeepSeekProvider:
             max_retries=self.max_retries,
         )
 
+    def _is_rate_limit_error(self, exc: Exception) -> bool:
+        return RateLimitError is not None and isinstance(exc, RateLimitError)
+
+    def _is_timeout_error(self, exc: Exception) -> bool:
+        return APITimeoutError is not None and isinstance(exc, APITimeoutError)
+
+    def _is_transient_provider_error(self, exc: Exception) -> bool:
+        return exc.__class__.__name__ in _TRANSIENT_NETWORK_ERROR_NAMES
+
+    def _compute_backoff_seconds(self, attempt: int) -> float:
+        base_delay = 0.5
+        cap = 8.0
+        jitter = random.uniform(0.0, 0.25)
+        return min(cap, base_delay * (2 ** attempt)) + jitter
+
+    def _sleep_for_retry(self, seconds: float) -> None:
+        time.sleep(max(0.0, seconds))
+
+    def _with_transient_retries(self, operation: Any) -> Any:
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                return operation()
+            except Exception as exc:
+                last_error = exc
+                is_retryable = (
+                    self._is_rate_limit_error(exc)
+                    or self._is_timeout_error(exc)
+                    or self._is_transient_provider_error(exc)
+                )
+                if not is_retryable or attempt >= self.max_retries:
+                    raise
+                retry_after = _retry_after_from_exception(exc)
+                delay = (
+                    retry_after
+                    if retry_after is not None and self._is_rate_limit_error(exc)
+                    else self._compute_backoff_seconds(attempt)
+                )
+                self._sleep_for_retry(delay)
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("retry wrapper exited unexpectedly")
+
     def json(
         self, messages: List[Dict[str, str]], schema: Dict[str, Any]
     ) -> Dict[str, Any]:
         last_error: Optional[Exception] = None
         for attempt in range(self.max_retries + 1):
             try:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    response_format={"type": "json_object"},
+                response = self._with_transient_retries(
+                    lambda: self.client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        response_format={"type": "json_object"},
+                    )
                 )
                 content = response.choices[0].message.content or "{}"
-                content = _extract_json_block(content)
-                return json.loads(content)
-            except (json.JSONDecodeError, KeyError) as exc:
+                parsed = _parse_json_maybe_repaired(content)
+                if isinstance(parsed, dict):
+                    return parsed
+                raise json.JSONDecodeError("JSON response was not an object", content, 0)
+            except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
                 last_error = exc
                 if attempt == self.max_retries:
                     raise
         raise last_error  # type: ignore[misc]
 
     def chat(self, messages: List[Dict[str, str]]) -> str:
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
+        response = self._with_transient_retries(
+            lambda: self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+            )
         )
         return response.choices[0].message.content or ""
 
     def chat_with_tools(
         self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]
     ) -> ToolCallResponse:
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            tools=tools,
+        response = self._with_transient_retries(
+            lambda: self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=tools,
+            )
         )
         choice = response.choices[0]
         message = choice.message
@@ -145,7 +309,6 @@ class DeepSeekProvider:
                     },
                 }
             )
-        # DeepSeek reasoning_content must be passed back to the API
         reasoning_content = getattr(message, "reasoning_content", None) or None
         usage = getattr(response, "usage", None)
         token_usage = None
