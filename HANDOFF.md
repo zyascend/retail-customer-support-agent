@@ -68,6 +68,7 @@ ENABLE_THINK_TOOL=false uv run phase2-eval --subset generalized_mvp --live --max
 - 分析报告：`docs/superpowers/specs/2025-06-16-harness-engineering-optimization.md`
 
 ## Recent
+- **PR opened 2026-06-18** (feat/tool-definition-design): feat: 工具定义设计三项优化 (§2.1~2.3)
 - **Merged 2026-06-18**: feat: 上下文管理三项优化 — token 预算截断、Guard 语义化、订单 ID 去重 (#44)
 - **Merged 2026-06-18**: feat: Agent Loop 设计优化 — §3.1~3.3 (#43)
 - **Merged 2026-06-17**: auto: staged all changes (#41)
