@@ -11,6 +11,7 @@ from app.agent.guard import WriteActionGuard
 from app.agent.llm_agent import AgentLoop
 from app.agent.models import (
     AgentTurnResult,
+    Message,
     SessionState,
     ToolCall,
     ToolCallRecord,
@@ -893,6 +894,55 @@ class GuardBlockCountingTests(unittest.TestCase):
             0,
             "Multiple guard blocks should not accumulate consecutive failures",
         )
+
+
+class TokenAwareTruncationTests(unittest.TestCase):
+    """Tests for AgentLoop._truncate_history token-aware message truncation."""
+
+    def setUp(self):
+        self.estimate = lambda text: max(1, int(len(text.split()) / 0.75))
+
+    def _msgs(self, *contents: str) -> list[Message]:
+        return [Message(role="user", content=c) for c in contents]
+
+    def test_no_truncation_when_under_budget(self):
+        msgs = self._msgs("hello", "world")
+        kept, count, summary = AgentLoop._truncate_history(msgs, 1000, self.estimate)
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(count, 0)
+        self.assertEqual(summary, "")
+
+    def test_truncation_when_over_budget(self):
+        long_msg = "word " * 2000  # ~2667 tokens
+        msgs = self._msgs("first user message about order #W123", long_msg, "short")
+        kept, count, summary = AgentLoop._truncate_history(msgs, 100, self.estimate)
+        # Only "short" (~2 tokens) should fit
+        self.assertEqual(len(kept), 1)
+        self.assertGreater(count, 0)
+        self.assertIn("truncated", summary)
+
+    def test_truncation_preserves_chronological_order(self):
+        msgs = [
+            Message(role="user", content="msg1"),
+            Message(role="assistant", content="msg2"),
+            Message(role="user", content="msg3"),
+            Message(role="assistant", content="msg4"),
+        ]
+        kept, count, summary = AgentLoop._truncate_history(msgs, 1000, self.estimate)
+        self.assertEqual(len(kept), 4)
+        self.assertEqual(count, 0)
+        self.assertEqual(kept[0].content, "msg1")
+        self.assertEqual(kept[-1].content, "msg4")
+
+    def test_summary_includes_first_user_message(self):
+        msgs = [
+            Message(role="user", content="I want to cancel my order #W1234567"),
+            Message(role="assistant", content="ok"),
+        ]
+        # Tiny budget so first message is truncated
+        kept, count, summary = AgentLoop._truncate_history(msgs, 1, self.estimate)
+        self.assertGreater(count, 0)
+        self.assertIn("cancel my order", summary)
 
 
 if __name__ == "__main__":
