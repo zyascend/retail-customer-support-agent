@@ -9,6 +9,39 @@ from app.agent.action_specs import tool_constraints_for_llm as _spec_constraints
 from app.agent.action_specs import tool_params_for_llm as _spec_params
 from app.agent.models import ToolKind
 
+# Experimental `think` tool — a no-side-effect reasoning slot the model can call
+# before a write to decide which tool/params to use. Gated behind
+# ``enable_think_tool`` (default OFF) pending a live-eval A/B; see spec §2.2.
+THINK_TOOL_NAME = "think"
+_THINK_TOOL_DESCRIPTION = (
+    "Reason step-by-step about which tool to call, whether enough facts are "
+    "loaded, or whether the request needs clarification — BEFORE issuing a write "
+    "tool. No side effects; returns {\"status\": \"ok\"}. Do NOT use as a "
+    "substitute for loading facts with read tools."
+)
+
+
+def _think(reasoning: str) -> dict[str, str]:
+    """No-op reasoning slot. Always succeeds; the value is the act of thinking."""
+    return {"status": "ok"}
+
+
+# Attach the description via the Task B attribute contract so it is the single
+# source of truth (highest-priority in _raw_description), rather than relying on
+# a separate dict entry that could drift from the implementation.
+_think.__tool_description__ = _THINK_TOOL_DESCRIPTION
+
+
+# US 50 states + DC excluded — domain only ships to 50 states per policy.
+# Kept sorted so the generated JSON-schema `enum` is stable across runs.
+_US_STATES: tuple[str, ...] = (
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+    "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+    "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+    "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+    "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+)
+
 
 @dataclass(frozen=True)
 class ToolSpec:
@@ -61,9 +94,16 @@ class ToolRegistry:
         "expression": "Mathematical expression to evaluate",
     }
 
-    def __init__(self, toolkit: Any) -> None:
+    def __init__(self, toolkit: Any, enable_think_tool: bool = False) -> None:
         self.toolkit = toolkit
         self._tools = self._discover(toolkit)
+        if enable_think_tool:
+            # Inject the experimental think tool as a pure registry-level
+            # function (not part of any toolkit/db), so it never contaminates
+            # test data or the tau/synthetic adapters.
+            self._tools[THINK_TOOL_NAME] = ToolSpec(
+                name=THINK_TOOL_NAME, kind="think", func=_think
+            )
 
     @property
     def tools(self) -> Dict[str, ToolSpec]:
@@ -131,6 +171,7 @@ class ToolRegistry:
             "list_all_product_types": "(none)",
             "calculate": "expression (string)",
             "transfer_to_human_agents": "summary (string)",
+            THINK_TOOL_NAME: "reasoning (string)",
         }
         if name in params_map:
             return params_map[name]
@@ -141,6 +182,8 @@ class ToolRegistry:
             return "read-only, no confirmation needed"
         if name == "transfer_to_human_agents" or name == "calculate":
             return "no special constraints"
+        if name == THINK_TOOL_NAME:
+            return "no side effects, no confirmation needed"
         if name in WRITE_TOOL_NAMES:
             return _spec_constraints(name)
         return "requires user confirmation"
@@ -160,8 +203,31 @@ class ToolRegistry:
             )
         return schemas
 
+    def _raw_description(self, name: str) -> str:
+        """Authoritative tool description with single-source-of-truth fallback.
+
+        Resolution order (first non-empty wins), so a function's own metadata
+        always overrides the legacy hardcoded dict — preventing the two from
+        silently drifting when a signature changes:
+        1. ``func.__tool_description__`` — explicit attribute on the function
+        2. ``func.__doc__`` (first-sentence, stripped) — auto-extracted docstring
+        3. ``_TOOL_DESCRIPTIONS`` legacy dict
+        4. the tool name itself
+        """
+        if name in self._tools:
+            func = self._tools[name].func
+            attr = getattr(func, "__tool_description__", None)
+            if attr:
+                return attr
+            doc = getattr(func, "__doc__", None)
+            if doc:
+                first_line = doc.strip().split("\n")[0].strip()
+                if first_line:
+                    return first_line
+        return self._TOOL_DESCRIPTIONS.get(name) or name
+
     def _tool_description_for_llm(self, name: str) -> str:
-        desc = self._TOOL_DESCRIPTIONS.get(name) or name
+        desc = self._raw_description(name)
         kind = self.kind(name)
         if kind == "read":
             return (
@@ -185,6 +251,9 @@ class ToolRegistry:
             )
         if name == "calculate":
             return f"{desc} When to use: arithmetic only. Do not use for policy decisions."
+        if name == THINK_TOOL_NAME:
+            # desc already carries the full usage contract; no suffix needed.
+            return desc
         return desc
 
     def _required_prior_reads_for_tool(self, name: str) -> str:
@@ -215,6 +284,7 @@ class ToolRegistry:
             "get_item_details": ["item_id"],
             "calculate": ["expression"],
             "transfer_to_human_agents": ["summary"],
+            THINK_TOOL_NAME: ["reasoning"],
         }
         if name in explicit:
             return explicit[name]
@@ -268,7 +338,38 @@ class ToolRegistry:
                 "enum": ["standard", "express", "overnight"],
                 "description": desc,
             }
-        result: dict[str, Any] = {"type": "string"}
+        if arg_name == "state":
+            result: dict[str, Any] = {
+                "type": "string",
+                "enum": list(_US_STATES),
+            }
+            if desc:
+                result["description"] = desc
+            return result
+        if arg_name == "zip":
+            result = {"type": "string", "pattern": "^\\d{5}$"}
+            if desc:
+                result["description"] = desc
+            return result
+        if arg_name == "country":
+            result = {"type": "string", "enum": ["USA"]}
+            if desc:
+                result["description"] = desc
+            return result
+        if arg_name == "email":
+            result = {"type": "string", "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"}
+            if desc:
+                result["description"] = desc
+            return result
+        if arg_name == "reasoning":
+            return {
+                "type": "string",
+                "description": (
+                    "Step-by-step reasoning: which tool/params to use, whether "
+                    "enough facts are loaded, or whether clarification is needed."
+                ),
+            }
+        result = {"type": "string"}
         if desc:
             result["description"] = desc
         return result

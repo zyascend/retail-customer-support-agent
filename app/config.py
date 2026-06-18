@@ -19,6 +19,8 @@ DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEFAULT_AGENT_MODEL = "deepseek-v4-flash"
 DEFAULT_AGENT_LLM_TIMEOUT_SECONDS = 30.0
 DEFAULT_AGENT_LLM_MAX_RETRIES = 2
+# Experimental tools stay OFF until a live-eval A/B proves they help.
+DEFAULT_ENABLE_THINK_TOOL = False
 
 
 @dataclass(frozen=True)
@@ -31,6 +33,7 @@ class AppConfig:
     default_agent_model: str
     agent_llm_timeout_seconds: float
     agent_llm_max_retries: int
+    enable_think_tool: bool = False
 
     @property
     def retail_domain_dir(self) -> Path:
@@ -89,6 +92,9 @@ def resolve_config(
         ),
         agent_llm_max_retries=_int_env(
             "AGENT_LLM_MAX_RETRIES", DEFAULT_AGENT_LLM_MAX_RETRIES
+        ),
+        enable_think_tool=_bool_env(
+            "ENABLE_THINK_TOOL", DEFAULT_ENABLE_THINK_TOOL
         ),
     )
     return config
@@ -164,3 +170,18 @@ def _int_env(name: str, default: int) -> int:
     if value < 0:
         raise ValueError(f"{name} must be >= 0")
     return value
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None or raw_value == "":
+        return default
+    normalized = raw_value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(
+        f"{name} must be a boolean (1/0, true/false, yes/no, on/off), "
+        f"got: {raw_value!r}"
+    )

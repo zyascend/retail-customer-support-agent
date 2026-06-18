@@ -37,11 +37,26 @@ LLM tool-calling 零售客服 agent — Python FastAPI + React Workbench + 7 层
 
 按 Harness Engineering 优化报告优先级：
 
-1. **§1.1** — 提示词精简压缩（18 条规则 → 8-10 条，CRITICAL 段 35 行 → 5 行）
-2. **§1.3** — 添加显式停止条件
-3. **§8.1** — JSON Repair 容错
-4. **§2.3** — 参数 Schema 补全（state enum、zip regex、email regex）
+1. **§2.2 think 实验** — `ENABLE_THINK_TOOL=true` 开启，跑 live eval A/B 对比
+2. **§1.1** — 提示词精简压缩（18 条规则 → 8-10 条，CRITICAL 段 35 行 → 5 行）
+3. **§1.3** — 添加显式停止条件
+4. **§8.1** — JSON Repair 容错
 5. **§5.1** — Guard 检查顺序调整（硬性 policy block 优先于 confirmation）
+
+## 本分支完成 (feat/tool-definition-design)
+
+| § | 改动 | 文件 |
+|---|------|------|
+| 2.3 | 参数 schema 补全: state 枚举(50州)/zip `^\d{5}$`/country `["USA"]`/email regex | `registry.py` `_property_schema` |
+| 2.1 | 工具描述单一事实源: `__tool_description__` → docstring → dict → name 四层 fallback | `registry.py` `_raw_description` |
+| 2.2 | `think(reasoning)` 实验工具: config flag `ENABLE_THINK_TOOL` (默认 OFF), registry 层注入, kind=think | `config.py` + `registry.py` + `runtime.py` |
+
+**Think 工具 A/B 命令**:
+```bash
+ENABLE_THINK_TOOL=true uv run phase2-eval --subset generalized_mvp --live --max-workers 50
+ENABLE_THINK_TOOL=false uv run phase2-eval --subset generalized_mvp --live --max-workers 50
+# 对比 pass rate / wrong_tool rate / avg loop iterations / token cost
+```
 
 ## 关键文件速查
 
@@ -53,6 +68,7 @@ LLM tool-calling 零售客服 agent — Python FastAPI + React Workbench + 7 层
 - 分析报告：`docs/superpowers/specs/2025-06-16-harness-engineering-optimization.md`
 
 ## Recent
+- **PR opened 2026-06-18** (feat/tool-definition-design): feat: 工具定义设计三项优化 (§2.1~2.3)
 - **Merged 2026-06-18**: feat: 上下文管理三项优化 — token 预算截断、Guard 语义化、订单 ID 去重 (#44)
 - **Merged 2026-06-18**: feat: Agent Loop 设计优化 — §3.1~3.3 (#43)
 - **Merged 2026-06-17**: auto: staged all changes (#41)
