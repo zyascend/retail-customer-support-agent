@@ -33,7 +33,7 @@ class AppConfig:
     default_agent_model: str
     agent_llm_timeout_seconds: float
     agent_llm_max_retries: int
-    enable_think_tool: bool
+    enable_think_tool: bool = False
 
     @property
     def retail_domain_dir(self) -> Path:

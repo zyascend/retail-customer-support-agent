@@ -295,6 +295,27 @@ def test_tool_description_falls_back_to_name_when_no_dict_no_attr() -> None:
     assert "get_widget" in widget_schema["function"]["description"]
 
 
+def test_tool_description_extracts_docstring_fallback() -> None:
+    """func.__doc__ is checked after __tool_description__ but before the dict."""
+
+    def get_gadget(gadget_id: str) -> dict[str, Any]:
+        """Fetch a gadget by id from the catalog."""
+        return {"gadget_id": gadget_id}
+
+    toolkit = _StubToolkit({"get_gadget": get_gadget})
+    registry = ToolRegistry(toolkit)
+
+    schema = next(
+        item
+        for item in registry.tool_schemas_for_llm()
+        if item["function"]["name"] == "get_gadget"
+    )
+    # Docstring first sentence wins (no __tool_description__ attr, no dict entry).
+    assert "Fetch a gadget" in schema["function"]["description"]
+    # Read-tool suffix still appended.
+    assert "Read-only" in schema["function"]["description"]
+
+
 def test_think_tool_absent_by_default() -> None:
     toolkit = _StubToolkit(
         {"get_order_details": lambda order_id: {"order_id": order_id}}

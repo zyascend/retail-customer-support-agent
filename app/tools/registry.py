@@ -209,14 +209,21 @@ class ToolRegistry:
         Resolution order (first non-empty wins), so a function's own metadata
         always overrides the legacy hardcoded dict — preventing the two from
         silently drifting when a signature changes:
-        1. ``func.__tool_description__`` — attribute on the discovered function
-        2. ``_TOOL_DESCRIPTIONS`` legacy dict
-        3. the tool name itself
+        1. ``func.__tool_description__`` — explicit attribute on the function
+        2. ``func.__doc__`` (first-sentence, stripped) — auto-extracted docstring
+        3. ``_TOOL_DESCRIPTIONS`` legacy dict
+        4. the tool name itself
         """
         if name in self._tools:
-            attr = getattr(self._tools[name].func, "__tool_description__", None)
+            func = self._tools[name].func
+            attr = getattr(func, "__tool_description__", None)
             if attr:
                 return attr
+            doc = getattr(func, "__doc__", None)
+            if doc:
+                first_line = doc.strip().split("\n")[0].strip()
+                if first_line:
+                    return first_line
         return self._TOOL_DESCRIPTIONS.get(name) or name
 
     def _tool_description_for_llm(self, name: str) -> str:
