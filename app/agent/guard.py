@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -12,6 +13,17 @@ from app.tools.retail_adapter import (
     get_order_from_db,
     get_user_from_db,
 )
+
+_ORDER_ID_RE = re.compile(r"#?(?:W)?(\d{7,})", re.IGNORECASE)
+
+
+def _canonical_order_id(order_id: object) -> str | None:
+    """Normalize an order ID to canonical ``#W\\d+`` form."""
+    if not isinstance(order_id, str):
+        return None
+    raw = order_id.strip().lstrip("#")
+    m = _ORDER_ID_RE.fullmatch(raw)
+    return f"#W{m.group(1)}" if m else None
 
 WRITE_ACTIONS = WRITE_ACTION_NAMES
 DEFERRED_WRITE_ACTIONS: set[str] = set()
@@ -167,8 +179,11 @@ class WriteActionGuard:
         self, state: SessionState, action: ToolCall
     ) -> Optional[str]:
         order_id = action.arguments.get("order_id")
-        if order_id and order_id not in state.loaded_context.orders:
-            return "read_before_write_required"
+        if order_id:
+            canonical = _canonical_order_id(order_id)
+            lookup_key = canonical if canonical else str(order_id)
+            if lookup_key not in state.loaded_context.orders:
+                return "read_before_write_required"
         user_id = action.arguments.get("user_id")
         if action.tool_name == "modify_user_address" and user_id:
             if user_id not in state.loaded_context.users:

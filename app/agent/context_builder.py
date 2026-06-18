@@ -1,6 +1,62 @@
 from __future__ import annotations
 
+import re
+
 from app.agent.models import SessionState, ToolCallRecord
+
+# ── Semantic lock labels: map lock strings (e.g. "order:#W123:cancel") → human-readable ──
+_LOCK_LABEL_PATTERNS: list[tuple[str, str]] = [
+    (r"^order:#W\d+:cancel$", "cancellation in progress"),
+    (r"^order:#W\d+:modify_address$", "address change in progress"),
+    (r"^order:#W\d+:modify_items$", "item change in progress"),
+    (r"^order:#W\d+:modify_payment$", "payment change in progress"),
+    (r"^order:#W\d+:modify_shipping_method$", "shipping change in progress"),
+    (r"^item:[^:]+:return$", "return in progress"),
+    (r"^item:[^:]+:exchange$", "exchange in progress"),
+    (r"^user:[^:]+:modify_address$", "address change in progress"),
+]
+
+# ── Semantic block-reason labels ──
+_BLOCK_REASON_LABELS: dict[str, str] = {
+    "ownership_violation": "order belongs to another account",
+    "order_not_found": "order not found",
+    "non_pending_order_cannot_be_cancelled": "order is not pending",
+    "non_pending_order_cannot_be_modified": "order is not pending",
+    "non_delivered_order_cannot_be_returned": "order is not delivered",
+    "non_delivered_order_cannot_be_exchanged": "order is not delivered",
+    "invalid_cancel_reason": "invalid cancel reason",
+    "duplicate_write_lock": "conflicting operation in progress",
+    "order_already_cancelled_or_locked": "order already locked",
+    "payment_method_not_owned": "payment method not yours",
+    "same_payment_method": "same payment method",
+    "gift_card_balance_insufficient": "insufficient gift card balance",
+    "exchange_item_count_mismatch": "item count mismatch",
+    "unknown_shipping_method": "unknown shipping method",
+    "read_before_write_required": "needs order lookup first",
+    "authentication_required": "login required",
+}
+
+_ORDER_ID_FROM_LOCK_RE = re.compile(r"^(?:order|item|user):(#W\d+)(?::|$)")
+
+
+def _describe_lock(lock_str: str) -> str:
+    """Convert a technical lock string to a human-readable label.
+
+    ``order:#W123:cancel`` → ``cancellation in progress for #W123``
+    """
+    match = _ORDER_ID_FROM_LOCK_RE.match(lock_str)
+    resource = match.group(1) if match else ""
+    for pattern, label in _LOCK_LABEL_PATTERNS:
+        if re.fullmatch(pattern, lock_str):
+            return f"{label} for {resource}" if resource else label
+    return lock_str  # fallback: raw string
+
+
+def _describe_block_reason(reason: str | None) -> str:
+    """Map an internal block-reason code to a user-facing description."""
+    if not reason:
+        return "unknown reason"
+    return _BLOCK_REASON_LABELS.get(reason, reason)
 
 
 class ContextBuilder:
@@ -33,7 +89,7 @@ class ContextBuilder:
                 status = order.get("status", "?")
                 items = order.get("items", [])
                 item_count = len(items) if isinstance(items, list) else 0
-                order_parts.append(f"#{oid}={status} ({item_count} items)")
+                order_parts.append(f"{oid}={status} ({item_count} items)")
             parts.append("Orders: " + ", ".join(order_parts))
 
         payment_parts = []
@@ -63,7 +119,8 @@ class ContextBuilder:
             )
 
         if session.write_locks:
-            parts.append(f"Locks: {', '.join(session.write_locks)}")
+            lock_descriptions = [_describe_lock(lock) for lock in session.write_locks]
+            parts.append("Active safeguards: " + ", ".join(lock_descriptions))
 
         recent_successful_writes = [
             record
@@ -87,9 +144,12 @@ class ContextBuilder:
             None,
         )
         if recent_guard_block and recent_guard_block.error:
+            order_id = recent_guard_block.arguments.get("order_id")
+            resource_ref = f" on {order_id}" if order_id else ""
+            description = _describe_block_reason(recent_guard_block.error)
             parts.append(
                 "Recent guard block: "
-                f"{recent_guard_block.tool_name} {recent_guard_block.error}"
+                f"{recent_guard_block.tool_name}{resource_ref} — {description}"
             )
 
         recent_tool_error = next(

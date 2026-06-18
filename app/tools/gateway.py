@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from app.agent.guard import WriteActionGuard
+from app.agent.guard import WriteActionGuard, _canonical_order_id
 from app.agent.models import SessionState, ToolCall, ToolCallRecord
 from app.ops.serialization import to_plain_data
 from app.tools.registry import ToolRegistry
@@ -145,11 +145,8 @@ class ToolGateway:
         """
         if tool_name == "get_order_details" and isinstance(result, dict):
             order_id = str(args.get("order_id", ""))
-            clean_id = order_id.lstrip("#")
-            state.loaded_context.orders[clean_id] = result
-            state.loaded_context.orders[f"#{clean_id}"] = result
-            if order_id not in (clean_id, f"#{clean_id}"):
-                state.loaded_context.orders[order_id] = result
+            canonical = _canonical_order_id(order_id)
+            state.loaded_context.orders[canonical or order_id] = result
         elif tool_name == "get_user_details" and isinstance(result, dict):
             user_id = str(args.get("user_id", ""))
             state.loaded_context.users.setdefault(user_id, result)
@@ -161,12 +158,42 @@ class ToolGateway:
             state.loaded_context.items[item_id] = result
 
 
+def _describe_block_reason(reason: str | None) -> str:
+    """Map a guard block-reason code to a concise human-readable phrase."""
+    if not reason:
+        return "unknown reason"
+    return {
+        "ownership_violation": "the order belongs to a different account",
+        "order_not_found": "the order was not found",
+        "non_pending_order_cannot_be_cancelled": "the order is not in pending status",
+        "non_pending_order_cannot_be_modified": "the order is not in pending status",
+        "non_delivered_order_cannot_be_returned": "the order has not been delivered",
+        "non_delivered_order_cannot_be_exchanged": "the order has not been delivered",
+        "invalid_cancel_reason": "the cancel reason is not valid",
+        "duplicate_write_lock": "a conflicting operation is already in progress",
+        "order_already_cancelled_or_locked": "the order is already cancelled or locked",
+        "payment_method_not_owned": "the payment method does not belong to you",
+        "same_payment_method": "the new payment method is the same as the current one",
+        "gift_card_balance_insufficient": "the gift card balance is insufficient",
+        "exchange_item_count_mismatch": "the number of old and new items must match",
+        "unknown_shipping_method": "the shipping method is not recognized",
+        "read_before_write_required": "the order must be looked up first",
+        "authentication_required": "you must be logged in",
+        "explicit_confirmation_required": "the operation requires your confirmation",
+        "unsupported_in_mvp": "this action is not yet supported",
+        "unknown_write_action": "this action is not recognized",
+    }.get(reason, reason)
+
+
 def _guard_block_observation(
     *,
     tool_name: str,
     block_reason: str | None,
     block_context: Dict[str, Any],
 ) -> Dict[str, Any]:
+    resource_id = block_context.get("resource_id") or block_context.get("order_id") or ""
+    resource_ref = f" for {resource_id}" if resource_id else ""
+    description = _describe_block_reason(block_reason)
     return {
         "status": "blocked",
         "error_type": "guard_blocked",
@@ -174,10 +201,8 @@ def _guard_block_observation(
         "block_reason": block_reason,
         "block_context": block_context,
         "message_for_llm": (
-            f"Tool {tool_name} was blocked by the write guard. "
-            f"Reason: {block_reason}. "
-            f"Context: {to_plain_data(block_context)}. "
-            "Explain the safe next step to the user without exposing sensitive data."
+            f"Tool {tool_name}{resource_ref} was blocked: {description}. "
+            "Inform the user of the reason and suggest next steps."
         ),
         "retryable": False,
     }
