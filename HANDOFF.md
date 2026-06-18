@@ -54,6 +54,7 @@ LLM tool-calling 零售客服 agent — Python FastAPI + React Workbench + 7 层
 - 开发者指南：`CLAUDE.md`
 
 ## Recent
+- **PR opened 2026-06-18** (feat/agent-loop-optimization): docs: update HANDOFF.md with §3 Agent Loop design outcomes
 - **Merged 2026-06-18**: feat/agent-loop-optimization — §3 Agent Loop 设计优化
 - **Merged 2026-06-17**: auto: staged all changes
 - **Merged 2026-06-16**: fix: Harness Engineering Bug 修复 - 全量 eval pass rate 72.8% -> 79.5%
