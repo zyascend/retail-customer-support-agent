@@ -91,7 +91,10 @@ class AgentRuntime:
             self.retail_runtime = runtime
         else:
             self.retail_runtime = RetailAdapter(config).create_runtime()
-        self.registry = ToolRegistry(self.retail_runtime.tools)
+        self.registry = ToolRegistry(
+            self.retail_runtime.tools,
+            enable_think_tool=config.enable_think_tool,
+        )
         self.gateway = ToolGateway(registry=self.registry, runtime=self.retail_runtime)
         self._resolver = ConfirmationResolver()
 
