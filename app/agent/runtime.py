@@ -273,6 +273,7 @@ class AgentRuntime:
         if provider is None:
             return None
 
+        completed_action = session.tool_results[-1] if session.tool_results else None
         loop = AgentLoop(
             provider=provider,
             gateway=self.gateway,
@@ -284,12 +285,35 @@ class AgentRuntime:
             self._confirmed_action_continuation_prompt(session),
         )
         self._turn_contexts.append(result.turn)
+        repeated_pending = self._is_repeated_confirmed_action(
+            session=session,
+            completed_action=completed_action,
+        )
+        if repeated_pending:
+            session.pending_action = None
+            session.confirmation_status = "confirmed"
+            return "Done. I have completed the requested update."
         session.messages.append(Message(role="assistant", content=result.assistant_message))
         if result.pending_action_set:
             session.confirmation_status = "required"
         elif not session.pending_action:
             session.confirmation_status = "confirmed"
         return result.assistant_message
+
+    def _is_repeated_confirmed_action(
+        self,
+        *,
+        session: SessionState,
+        completed_action: ToolCallRecord | None,
+    ) -> bool:
+        pending = session.pending_action
+        if completed_action is None or pending is None:
+            return False
+        if completed_action.status != "success":
+            return False
+        if pending.action_name != completed_action.tool_name:
+            return False
+        return dict(pending.arguments) == dict(completed_action.arguments)
 
     def _confirmed_action_continuation_prompt(self, session: SessionState) -> str:
         """Build a continuation prompt that prevents redoing the completed action."""

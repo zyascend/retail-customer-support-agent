@@ -1539,6 +1539,162 @@ class CuratedEvalTests(unittest.TestCase):
         self.assertEqual(summary.results[0].tool_call_count, 3)
         self.assertEqual(summary.results[0].write_locks, ["order:#W1:cancel"])
 
+    def test_replay_case_confirmed_action_does_not_repeat_pending_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config = resolve_config(artifact_dir=tmp)
+            artifact_dir = Path(tmp)
+            case = EvalCase(
+                case_id="replay_confirm_payment_no_repeat_case",
+                category="modify_payment",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            "My email is test@example.com. Change payment for order "
+                            "#W1 to credit_card_2."
+                        ),
+                    },
+                    {"role": "user", "content": "yes"},
+                ],
+                expected_user_id="user_1",
+                expected_intent="modify_order_payment",
+                order_id="#W1",
+                expected_write_lock="order:#W1:modify_payment",
+                expected_order_status="pending",
+                expected_confirmation_status="confirmed",
+                expected_tool_names=[
+                    "find_user_id_by_email",
+                    "get_order_details",
+                    "modify_pending_order_payment",
+                ],
+                subset="generalized_mvp",
+            )
+            trace_path = _trace_fixture_for_case(
+                artifact_dir,
+                case,
+                llm_responses=[
+                    {
+                        "assistant_content": "Let me verify your account.",
+                        "tool_calls": [
+                            {
+                                "id": "call_auth",
+                                "tool_name": "find_user_id_by_email",
+                                "arguments": {"email": "test@example.com"},
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                    {
+                        "assistant_content": "Let me check your order.",
+                        "tool_calls": [
+                            {
+                                "id": "call_order",
+                                "tool_name": "get_order_details",
+                                "arguments": {"order_id": "#W1"},
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                    {
+                        "assistant_content": "I can change that payment method for you.",
+                        "tool_calls": [
+                            {
+                                "id": "call_payment_1",
+                                "tool_name": "modify_pending_order_payment",
+                                "arguments": {
+                                    "order_id": "#W1",
+                                    "payment_method_id": "credit_card_2",
+                                },
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                    {
+                        "assistant_content": "Let me process the payment change.",
+                        "tool_calls": [
+                            {
+                                "id": "call_payment_2",
+                                "tool_name": "modify_pending_order_payment",
+                                "arguments": {
+                                    "order_id": "#W1",
+                                    "payment_method_id": "credit_card_2",
+                                },
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                ],
+                tool_calls=[
+                    {
+                        "tool_name": "find_user_id_by_email",
+                        "arguments": {"email": "test@example.com"},
+                        "tool_kind": "read",
+                        "status": "success",
+                        "observation": "user_1",
+                    },
+                    {
+                        "tool_name": "get_order_details",
+                        "arguments": {"order_id": "#W1"},
+                        "tool_kind": "read",
+                        "status": "success",
+                        "observation": {
+                            "order_id": "#W1",
+                            "status": "pending",
+                            "user_id": "user_1",
+                            "payment_history": [
+                                {"payment_method_id": "credit_card_1"}
+                            ],
+                        },
+                    },
+                    {
+                        "tool_name": "modify_pending_order_payment",
+                        "arguments": {
+                            "order_id": "#W1",
+                            "payment_method_id": "credit_card_2",
+                        },
+                        "tool_kind": "write",
+                        "status": "blocked",
+                        "error": "explicit_confirmation_required",
+                    },
+                    {
+                        "tool_name": "modify_pending_order_payment",
+                        "arguments": {
+                            "order_id": "#W1",
+                            "payment_method_id": "credit_card_2",
+                        },
+                        "tool_kind": "write",
+                        "status": "success",
+                        "observation": {
+                            "order_id": "#W1",
+                            "payment_method_id": "credit_card_2",
+                            "status": "pending",
+                        },
+                        "resource_lock": "order:#W1:modify_payment",
+                    },
+                    {
+                        "tool_name": "modify_pending_order_payment",
+                        "arguments": {
+                            "order_id": "#W1",
+                            "payment_method_id": "credit_card_2",
+                        },
+                        "tool_kind": "write",
+                        "status": "blocked",
+                        "error": "explicit_confirmation_required",
+                    },
+                ],
+            )
+
+            with patch("app.eval.runner.get_cases", return_value=[case]):
+                summary = CuratedEvalRunner(
+                    config=config,
+                    artifact_dir=artifact_dir,
+                    replay_case_path=trace_path,
+                ).run()
+
+        self.assertTrue(summary.results[0].passed)
+        self.assertEqual(summary.results[0].actual_confirmation_status, "confirmed")
+        self.assertEqual(summary.results[0].write_locks, ["order:#W1:modify_payment"])
+
     def test_replay_case_unknown_confirmation_falls_back_to_agent_loop(self):
         with tempfile.TemporaryDirectory() as tmp:
             config = resolve_config(artifact_dir=tmp)
