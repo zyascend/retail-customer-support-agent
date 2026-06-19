@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional
 
 
@@ -983,6 +984,11 @@ SYNTHETIC_SEEDED_V1_CASES: List[EvalCase] = [
 def get_cases(subset: str) -> List[EvalCase]:
     if subset == "curated_mvp":
         return list(CURATED_MVP_CASES)
+    if subset == "golden":
+        from app.eval.golden_set import GoldenSet
+
+        golden_path = Path(__file__).resolve().parents[2] / "cases" / "golden.yaml"
+        return list(GoldenSet.load(golden_path).cases)
     if subset == "live_smoke_core":
         return _curated_cases_by_id(LIVE_SMOKE_CORE_CASE_IDS, subset=subset)
     if subset == "live_guard_smoke":

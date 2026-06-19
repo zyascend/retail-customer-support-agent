@@ -1,0 +1,69 @@
+bad_cases:
+- recorded_on: '2026-06-19'
+  promoted: true
+  case:
+    case_id: modify_pending_order_address
+    category: modify_address
+    messages:
+    - role: user
+      content: 'My email is sofia.rossi2645@example.com. Change address for order
+        #W5918442 address to 1 Main St, Apt 2, Boston, MA, USA, 02108.'
+    - role: user
+      content: confirm
+    expected_user_id: sofia_rossi_8776
+    expected_intent: modify_order_address
+    order_id: '#W5918442'
+    expected_write_lock: order:#W5918442:modify_address
+    expected_order_status: pending
+    expected_confirmation_status: confirmed
+    expected_no_write: false
+    expected_tool_names:
+    - modify_pending_order_address
+    max_turns: 8
+    subset: generalized_mvp
+  triage:
+    bucket: guard_behavior
+    root_cause: guard_policy_gap
+    failure_label: confirmation_status_mismatch
+    failure_category: confirmation_error
+    failure_summary: confirmation_error
+    suggested_next_action: Review guard block reasons and policy expectations; patch
+      guard behavior only if policy handling is inconsistent.
+    actual_guard_block_reasons:
+    - explicit_confirmation_required
+    - explicit_confirmation_required
+- recorded_on: '2026-06-19'
+  promoted: true
+  case:
+    case_id: modify_pending_order_payment_success
+    category: modify_payment
+    messages:
+    - role: user
+      content: 'My email is sofia.li7352@example.com. Change payment for order #W8855135
+        to credit_card_8105988.'
+    - role: user
+      content: 'yes'
+    expected_user_id: sofia_li_9219
+    expected_intent: modify_order_payment
+    order_id: '#W8855135'
+    expected_write_lock: order:#W8855135:modify_payment
+    expected_order_status: pending
+    expected_confirmation_status: confirmed
+    expected_no_write: false
+    expected_tool_names:
+    - modify_pending_order_payment
+    max_turns: 8
+    subset: generalized_mvp
+    capability: modify_payment
+    policy_area: payment_method
+  triage:
+    bucket: guard_behavior
+    root_cause: guard_policy_gap
+    failure_label: confirmation_status_mismatch
+    failure_category: confirmation_error
+    failure_summary: confirmation_error
+    suggested_next_action: Review guard block reasons and policy expectations; patch
+      guard behavior only if policy handling is inconsistent.
+    actual_guard_block_reasons:
+    - explicit_confirmation_required
+    - explicit_confirmation_required

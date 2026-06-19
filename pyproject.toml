@@ -13,6 +13,7 @@ dependencies = [
     "langgraph>=0.2.70",
     "openai>=1.60.0",
     "pydantic>=2.10.0",
+    "pyyaml>=6.0.0",
     "python-dotenv>=1.0.0",
     "uvicorn>=0.34.0",
 ]
@@ -20,6 +21,7 @@ dependencies = [
 [project.scripts]
 phase1-chat = "app.cli.chat:chat_main"
 phase2-eval = "app.cli.eval:eval_main"
+flywheel = "app.cli.flywheel:flywheel_main"
 workbench = "app.workbench.cli:workbench_main"
 
 [project.optional-dependencies]
