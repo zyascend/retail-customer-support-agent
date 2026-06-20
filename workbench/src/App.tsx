@@ -171,8 +171,8 @@ export function App() {
   }
 
   return (
-    <main className="min-h-dvh flex flex-col bg-[#f4f6f8] dark:bg-slate-950 text-[#172033] dark:text-slate-100">
-      <header className="topbar-layout flex items-center justify-between gap-4 px-5 py-4 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+    <main className="h-dvh flex flex-col overflow-hidden bg-[#f4f6f8] dark:bg-slate-950 text-[#172033] dark:text-slate-100">
+      <header className="topbar-layout shrink-0 flex items-center justify-between gap-4 px-5 py-4 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
         <div>
           <h1 className="m-0 text-xl font-bold leading-tight text-[#182230] dark:text-white">
             零售客服工作台
