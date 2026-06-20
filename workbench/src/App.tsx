@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Moon, Sun } from "@phosphor-icons/react";
+import { ArrowCounterClockwise, Moon, PaperPlaneTilt, Play, SkipForward, SpinnerGap, Sun } from "@phosphor-icons/react";
 import {
   createSession,
   fetchConfig,
@@ -12,8 +12,9 @@ import {
 import { BusinessState } from "./components/BusinessState";
 import { Conversation } from "./components/Conversation";
 import { AgentOpsWorkspace } from "./components/AgentOpsWorkspace";
-import { Inspector } from "./components/Inspector";
-import { RunControl } from "./components/RunControl";
+import { CaseTree } from "./components/CaseTree";
+import { CollapseButton } from "./components/CollapseButton";
+import { EventDetailPanel } from "./components/EventDetailPanel";
 import { Timeline } from "./components/Timeline";
 import { modeLabel } from "./labels";
 import type {
@@ -33,6 +34,8 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [dark, setDark] = useState(() => document.documentElement.classList.contains("dark"));
   const busyRef = useRef(false);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
 
   function toggleDark() {
     const next = !dark;
@@ -241,25 +244,80 @@ export function App() {
           ) : null}
 
           {config && snapshot ? (
-            <div className="demo-layout flex flex-1 overflow-hidden p-3 pt-3 gap-3">
-              {/* Left: RunControl */}
-              <aside className="w-64 shrink-0 overflow-y-auto">
-                <RunControl
-                  busy={busy}
-                  catalog={config.case_catalog}
-                  llmAvailable={config.llm_available}
-                  onModeChange={handleModeChange}
-                  onReset={handleReset}
-                  onRunAll={handleRunAll}
-                  onSelectCase={handleSelectCase}
-                  onSendMessage={handleSendMessage}
-                  onStep={handleStep}
-                  snapshot={snapshot}
-                />
+            <div className="demo-layout flex flex-1 overflow-hidden p-3 pt-3 gap-0 relative">
+              {/* Left panel: CaseTree */}
+              <aside
+                className={
+                  "shrink-0 overflow-hidden transition-all duration-200 ease-in-out " +
+                  (leftCollapsed ? "w-0" : "w-[272px]")
+                }
+              >
+                <div className="w-[272px] h-full overflow-hidden p-0">
+                  <CaseTree
+                    catalog={config.case_catalog}
+                    selectedCaseId={snapshot.selected_case_id}
+                    onSelectCase={handleSelectCase}
+                  />
+                </div>
               </aside>
 
-              {/* Middle: BusinessState + Conversation + Timeline */}
-              <main className="flex-1 flex flex-col overflow-hidden gap-3 min-w-0">
+              {/* Collapse button for left panel */}
+              <div className="relative shrink-0 w-0">
+                <CollapseButton
+                  collapsed={leftCollapsed}
+                  side="left"
+                  onToggle={() => setLeftCollapsed(!leftCollapsed)}
+                  ariaLabel={leftCollapsed ? "展开案例列表" : "收起案例列表"}
+                />
+              </div>
+
+              {/* Middle: main content */}
+              <main className="flex-1 flex flex-col overflow-hidden gap-3 min-w-0 mx-3">
+                {/* Step/Run/Reset controls */}
+                <div className="flex flex-wrap gap-2 shrink-0" aria-label="运行控制">
+                  <button
+                    className="inline-flex items-center justify-center gap-1.5 min-h-9 border border-slate-800 dark:border-slate-200 rounded-lg bg-slate-800 dark:bg-white text-white dark:text-slate-900 px-2.5 py-2 text-sm font-bold leading-none whitespace-nowrap cursor-pointer transition-colors duration-150 active:translate-y-px disabled:opacity-62 disabled:cursor-not-allowed"
+                    disabled={busy || !snapshot.run_controls.can_step}
+                    onClick={handleStep}
+                    type="button"
+                  >
+                    {busy ? (
+                      <SpinnerGap aria-hidden="true" size={16} weight="bold" className="animate-spin" />
+                    ) : (
+                      <SkipForward aria-hidden="true" size={16} weight="bold" />
+                    )}
+                    <span>
+                      {busy
+                        ? "执行中…"
+                        : snapshot.run_controls.can_step
+                          ? `单步执行 ${snapshot.script_cursor + 1}/${snapshot.script_message_count}`
+                          : "脚本已结束"}
+                    </span>
+                  </button>
+                  <button
+                    className="inline-flex items-center justify-center gap-1.5 min-h-9 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2.5 py-2 text-sm font-bold leading-none whitespace-nowrap cursor-pointer transition-colors duration-150 active:translate-y-px disabled:opacity-62 disabled:cursor-not-allowed"
+                    disabled={busy || !snapshot.run_controls.can_run_all}
+                    onClick={handleRunAll}
+                    type="button"
+                  >
+                    {busy ? (
+                      <SpinnerGap aria-hidden="true" size={16} weight="bold" className="animate-spin" />
+                    ) : (
+                      <Play aria-hidden="true" size={16} weight="bold" />
+                    )}
+                    <span>{busy ? "运行中…" : "运行全部"}</span>
+                  </button>
+                  <button
+                    className="inline-flex items-center justify-center gap-1.5 min-h-9 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2.5 py-2 text-sm font-bold leading-none whitespace-nowrap cursor-pointer transition-colors duration-150 active:translate-y-px disabled:opacity-62 disabled:cursor-not-allowed"
+                    disabled={busy || !snapshot.run_controls.can_reset}
+                    onClick={handleReset}
+                    type="button"
+                  >
+                    <ArrowCounterClockwise aria-hidden="true" size={16} weight="bold" />
+                    <span>重置</span>
+                  </button>
+                </div>
+
                 <BusinessState
                   busy={busy}
                   onChange={() => handleSendMessage("change")}
@@ -267,9 +325,17 @@ export function App() {
                   onDeny={() => handleSendMessage("no")}
                   snapshot={snapshot}
                 />
+
                 <div className="flex-1 flex flex-col overflow-hidden min-h-0">
                   <Conversation busy={busy} snapshot={snapshot} />
                 </div>
+
+                {/* Manual message input */}
+                <ManualMessageInput
+                  busy={busy}
+                  onSend={handleSendMessage}
+                />
+
                 <div className="shrink-0">
                   <Timeline
                     events={snapshot.timeline}
@@ -279,19 +345,13 @@ export function App() {
                 </div>
               </main>
 
-              {/* Right: Inspector (可折叠) */}
-              <aside
-                className={
-                  "shrink-0 overflow-hidden transition-all duration-200 ease-in-out " +
-                  (activeEvent && snapshot.timeline.length > 0
-                    ? "w-72 opacity-100"
-                    : "w-0 opacity-0")
-                }
-              >
-                <div className="w-72">
-                  <Inspector event={activeEvent} snapshot={snapshot} />
-                </div>
-              </aside>
+              {/* Right panel: EventDetailPanel */}
+              <EventDetailPanel
+                event={activeEvent}
+                snapshot={snapshot}
+                collapsed={rightCollapsed}
+                onToggleCollapse={() => setRightCollapsed(!rightCollapsed)}
+              />
             </div>
           ) : (
             <section
@@ -308,3 +368,38 @@ export function App() {
     </main>
   );
 }
+
+function ManualMessageInput({ busy, onSend }: { busy: boolean; onSend: (msg: string) => boolean | Promise<boolean> }) {
+  const [message, setMessage] = useState("");
+  const canSend = message.trim().length > 0 && !busy;
+
+  async function handleSend() {
+    const next = message.trim();
+    if (!next) return;
+    const sent = await onSend(next);
+    if (sent !== false) setMessage("");
+  }
+
+  return (
+    <div className="shrink-0 flex gap-2 items-end">
+      <textarea
+        className="flex-1 min-w-0 min-h-[44px] max-h-24 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-[#182230] dark:text-white px-2.5 py-2 text-sm resize-y focus:outline-2 focus:outline-blue-500 focus:outline-offset-2 disabled:opacity-62 disabled:cursor-not-allowed"
+        disabled={busy}
+        onChange={(e) => setMessage(e.target.value)}
+        placeholder="输入客户回复..."
+        rows={1}
+        value={message}
+      />
+      <button
+        className="shrink-0 inline-flex items-center justify-center gap-1.5 min-h-9 border border-slate-800 dark:border-slate-200 rounded-lg bg-slate-800 dark:bg-white text-white dark:text-slate-900 px-3 py-2 text-sm font-bold leading-none cursor-pointer transition-colors duration-150 active:translate-y-px disabled:opacity-62 disabled:cursor-not-allowed"
+        disabled={!canSend}
+        onClick={handleSend}
+        type="button"
+      >
+        <PaperPlaneTilt size={16} weight="bold" />
+        <span>发送</span>
+      </button>
+    </div>
+  );
+}
+
