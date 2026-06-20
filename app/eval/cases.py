@@ -33,6 +33,8 @@ class EvalCase:
     # ── Phase 5: tool-calling 语义断言 ──
     required_tools: set = field(default_factory=set)
     forbidden_tools: set = field(default_factory=set)
+    # ── Skill tagging: links this case to a SkillSpec for per-skill eval metrics ──
+    skill_id: Optional[str] = None
 
 
 CURATED_MVP_CASES: List[EvalCase] = [
@@ -74,6 +76,7 @@ CURATED_MVP_CASES: List[EvalCase] = [
         expected_order_status="cancelled",
         expected_confirmation_status="confirmed",
         expected_tool_names=["cancel_pending_order"],
+        skill_id="cancel_order",
     ),
     EvalCase(
         case_id="modify_pending_order_address",
@@ -96,6 +99,7 @@ CURATED_MVP_CASES: List[EvalCase] = [
         expected_order_status="pending",
         expected_confirmation_status="confirmed",
         expected_tool_names=["modify_pending_order_address"],
+        skill_id="modify_address",
     ),
     EvalCase(
         case_id="return_delivered_order_item",
@@ -117,6 +121,7 @@ CURATED_MVP_CASES: List[EvalCase] = [
         expected_order_status="return requested",
         expected_confirmation_status="confirmed",
         expected_tool_names=["return_delivered_order_items"],
+        skill_id="return_items",
     ),
     EvalCase(
         case_id="exchange_delivered_order_item",
@@ -139,6 +144,7 @@ CURATED_MVP_CASES: List[EvalCase] = [
         expected_order_status="exchange requested",
         expected_confirmation_status="confirmed",
         expected_tool_names=["exchange_delivered_order_items"],
+        skill_id="exchange_items",
     ),
     EvalCase(
         case_id="transfer_to_human",
@@ -178,6 +184,7 @@ CURATED_MVP_CASES: List[EvalCase] = [
         expected_confirmation_status="denied",
         expected_no_write=True,
         expected_assistant_contains="No changes were made",
+        skill_id="cancel_order",
     ),
     EvalCase(
         case_id="changed_confirmation_discards_pending_action",
@@ -199,6 +206,7 @@ CURATED_MVP_CASES: List[EvalCase] = [
         expected_confirmation_status="changed",
         expected_no_write=True,
         expected_assistant_contains="discarded",
+        skill_id="cancel_order",
     ),
     EvalCase(
         case_id="block_cancel_processed_order",
@@ -221,6 +229,7 @@ CURATED_MVP_CASES: List[EvalCase] = [
         expected_guard_block_reason="non_pending_order_cannot_be_cancelled",
         expected_no_write=True,
         expected_tool_names=["cancel_pending_order"],
+        skill_id="cancel_order",
     ),
     EvalCase(
         case_id="block_return_pending_order",
@@ -243,6 +252,7 @@ CURATED_MVP_CASES: List[EvalCase] = [
         expected_guard_block_reason="non_delivered_order_cannot_be_returned",
         expected_no_write=True,
         expected_tool_names=["return_delivered_order_items"],
+        skill_id="return_items",
     ),
     EvalCase(
         case_id="block_wrong_user_order_access",
@@ -263,6 +273,7 @@ CURATED_MVP_CASES: List[EvalCase] = [
         expected_no_write=True,
         expected_guard_block_reason="ownership_violation",
         expected_tool_names=["cancel_pending_order"],
+        skill_id="cancel_order",
     ),
 ]
 
@@ -325,6 +336,7 @@ def _case_for_subset(case: EvalCase, subset: str) -> EvalCase:
         seed=case.seed,
         required_tools=set(case.required_tools),
         forbidden_tools=set(case.forbidden_tools),
+        skill_id=case.skill_id,
     )
 
 
@@ -373,6 +385,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="modify_items",
         policy_area="inventory",
+        skill_id="modify_items",
     ),
     EvalCase(
         case_id="modify_pending_order_payment_success",
@@ -397,6 +410,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="modify_payment",
         policy_area="payment_method",
+        skill_id="modify_payment",
     ),
     EvalCase(
         case_id="modify_user_default_address_success",
@@ -419,6 +433,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="modify_user_address",
         policy_area="user_profile",
+        skill_id="modify_user_address",
         expected_db_assertions={
             "user_id": "sofia_rossi_8776",
             "address": {
@@ -455,6 +470,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="multi_item_return",
         policy_area="return_items",
+        skill_id="return_items",
     ),
     EvalCase(
         case_id="multi_item_exchange_success",
@@ -480,6 +496,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="multi_item_exchange",
         policy_area="exchange_items",
+        skill_id="exchange_items",
     ),
     EvalCase(
         case_id="deny_modify_payment_confirmation",
@@ -504,6 +521,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="modify_payment",
         policy_area="confirmation",
+        skill_id="modify_payment",
     ),
     EvalCase(
         case_id="changed_modify_items_confirmation",
@@ -527,6 +545,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="modify_items",
         policy_area="confirmation",
+        skill_id="modify_items",
     ),
     EvalCase(
         case_id="block_item_product_mismatch",
@@ -552,6 +571,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="modify_items",
         policy_area="inventory",
+        skill_id="modify_items",
     ),
     EvalCase(
         case_id="block_item_unavailable",
@@ -577,6 +597,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="modify_items",
         policy_area="inventory",
+        skill_id="modify_items",
     ),
     EvalCase(
         case_id="block_payment_not_owned",
@@ -602,6 +623,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="modify_payment",
         policy_area="payment_method",
+        skill_id="modify_payment",
     ),
     EvalCase(
         case_id="block_payment_insufficient_gift_card",
@@ -627,6 +649,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="modify_payment",
         policy_area="payment_method",
+        skill_id="modify_payment",
     ),
     EvalCase(
         case_id="block_same_payment_method",
@@ -652,6 +675,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="modify_payment",
         policy_area="payment_method",
+        skill_id="modify_payment",
     ),
     EvalCase(
         case_id="block_modify_items_non_pending_order",
@@ -677,6 +701,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="modify_items",
         policy_area="order_status",
+        skill_id="modify_items",
     ),
     EvalCase(
         case_id="block_modify_payment_processed_order",
@@ -702,6 +727,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="modify_payment",
         policy_area="order_status",
+        skill_id="modify_payment",
     ),
     EvalCase(
         case_id="block_exchange_product_mismatch",
@@ -728,6 +754,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="exchange_items",
         policy_area="inventory",
+        skill_id="exchange_items",
     ),
     EvalCase(
         case_id="block_exchange_unavailable_replacement",
@@ -754,6 +781,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="exchange_items",
         policy_area="inventory",
+        skill_id="exchange_items",
     ),
     EvalCase(
         case_id="transfer_unsupported_discount_request",
@@ -796,6 +824,7 @@ PHASE5_NEW_CASES: List[EvalCase] = [
         subset="generalized_mvp",
         capability="modify_user_address",
         policy_area="confirmation",
+        skill_id="modify_user_address",
     ),
 ]
 
@@ -829,6 +858,7 @@ SYNTHETIC_SEEDED_V1_CASES: List[EvalCase] = [
         subset="synthetic_seeded_v1",
         capability="modify_shipping_method",
         policy_area="shipping",
+        skill_id="modify_shipping",
     ),
     EvalCase(
         case_id="synthetic_shipping_overnight_gift_card_insufficient",
@@ -853,6 +883,7 @@ SYNTHETIC_SEEDED_V1_CASES: List[EvalCase] = [
         subset="synthetic_seeded_v1",
         capability="modify_shipping_method",
         policy_area="shipping",
+        skill_id="modify_shipping",
     ),
     EvalCase(
         case_id="synthetic_shipping_processed_order_block",
@@ -876,6 +907,7 @@ SYNTHETIC_SEEDED_V1_CASES: List[EvalCase] = [
         subset="synthetic_seeded_v1",
         capability="modify_shipping_method",
         policy_area="shipping",
+        skill_id="modify_shipping",
     ),
     EvalCase(
         case_id="synthetic_shipping_same_method_block",
@@ -899,6 +931,7 @@ SYNTHETIC_SEEDED_V1_CASES: List[EvalCase] = [
         subset="synthetic_seeded_v1",
         capability="modify_shipping_method",
         policy_area="shipping",
+        skill_id="modify_shipping",
     ),
     EvalCase(
         case_id="synthetic_shipping_unknown_method_block",
@@ -922,6 +955,7 @@ SYNTHETIC_SEEDED_V1_CASES: List[EvalCase] = [
         subset="synthetic_seeded_v1",
         capability="modify_shipping_method",
         policy_area="shipping",
+        skill_id="modify_shipping",
     ),
     EvalCase(
         case_id="synthetic_coupon_refusal_no_write",
@@ -976,6 +1010,7 @@ SYNTHETIC_SEEDED_V1_CASES: List[EvalCase] = [
         subset="synthetic_seeded_v1",
         capability="modify_shipping_method",
         policy_area="shipping",
+        skill_id="modify_shipping",
         max_turns=12,
     ),
 ]

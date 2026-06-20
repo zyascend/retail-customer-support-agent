@@ -12,6 +12,7 @@ EVAL_COMPARISON_SCHEMA_VERSION = "phase2.eval_comparison.v1"
 class MetricResult(Protocol):
     case_id: str
     category: str
+    skill_id: Optional[str]
     trial: int
     passed: bool
     failure_label: Optional[str]
@@ -77,6 +78,31 @@ def db_accuracy_for_case(
     return None, None
 
 
+def compute_skill_metrics(results: Iterable[MetricResult]) -> Dict[str, Any]:
+    grouped: Dict[str, List[MetricResult]] = defaultdict(list)
+    for result in results:
+        if result.skill_id:
+            grouped[result.skill_id].append(result)
+
+    summary: Dict[str, Any] = {}
+    for skill_id, skill_results in sorted(grouped.items()):
+        total = len(skill_results)
+        passed = sum(1 for result in skill_results if result.passed)
+        summary[skill_id] = {
+            "pass_rate": _rate(passed, total),
+            "passed_count": passed,
+            "result_count": total,
+            "failure_labels": dict(
+                sorted(
+                    Counter(
+                        result.failure_label or "passed" for result in skill_results
+                    ).items()
+                )
+            ),
+        }
+    return summary
+
+
 def compute_metrics(results: Iterable[MetricResult]) -> Dict[str, Any]:
     result_list = list(results)
     total = len(result_list)
@@ -135,6 +161,7 @@ def compute_metrics(results: Iterable[MetricResult]) -> Dict[str, Any]:
         "blocked_tool_calls": blocked_tool_calls,
         "total_token_usage": dict(sorted(token_totals.items())),
         "prompt_cache_hit_ratio": prompt_cache_hit_ratio,
+        "skill_metrics": compute_skill_metrics(result_list),
         "average_llm_loop_iterations": (
             round(sum(loop_iterations) / total, 3) if total else 0.0
         ),

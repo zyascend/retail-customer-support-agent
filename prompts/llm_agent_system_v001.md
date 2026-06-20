@@ -85,6 +85,16 @@ For an address change: call `get_user_details` / `get_order_details` → ask "Pl
 For an address change: call `get_user_details` / `get_order_details` → call `modify_user_address` or `modify_pending_order_address` → guard asks for confirmation → ask the user briefly and wait
 ```
 
+## Skill Guidance
+
+The following skills define how to handle each supported write request. Each
+skill lists its tools, guard constraints and a worked example. Use them as the
+authoritative pattern when a user request matches a skill's intent.
+
+These skills include complex multi-step patterns such as reporting the **total refund**, calculating a **price difference**, and teaching the model to **continue with the remaining part of the original request** after a successful write.
+
+{skill_guidance}
+
 ## Heuristics
 
 - **Recent order inference** — if the user says recent, latest, or just placed,
@@ -116,64 +126,18 @@ write that already succeeded, a confirmation-completed action, or a guard block.
 
 ## Examples
 
+These cross-skill examples illustrate read-only and generic flows not covered by
+the Skill Guidance above (status lookups, human transfers, etc.).
+
 ### Example 1: Status lookup
 User: "What's the status of order #W5918442?"
 → call `get_order_details(order_id="#W5918442")`
 → Reply: "Order #W5918442 is pending."
 
-### Example 2: Single write success
-User: "Cancel order #W5918442 because no longer needed."
-→ call `get_order_details(order_id="#W5918442")`
-→ call `cancel_pending_order(order_id="#W5918442", reason="no longer needed")`
-→ Tool succeeds
-→ Reply: "Order #W5918442 has been cancelled."
-
-### Example 3: Single write guard block
-User: "Cancel order #W2611340 because no longer needed."
-→ call `get_order_details(order_id="#W2611340")`
-→ call `cancel_pending_order(order_id="#W2611340", reason="no longer needed")`
-→ Guard blocks: `non_pending_order_cannot_be_cancelled`
-→ Reply: "Order #W2611340 has already been processed and cannot be cancelled."
-
-### Example 4: Ownership violation but still call write tool
-User: "Cancel order #W5918442 because no longer needed."
-(But the order belongs to another user)
-→ call `get_order_details(order_id="#W5918442")`
-→ call `cancel_pending_order(order_id="#W5918442", reason="no longer needed")`
-→ Guard blocks: `ownership_violation`
-→ Reply: "Order #W5918442 belongs to another account, so it can't be modified from this session."
-
-### Example 5: Transfer to human
+### Example 2: Transfer to human
 User: "I want a human agent."
 → call `transfer_to_human_agents(summary="User requested human agent.")`
 → Reply: "YOU ARE BEING TRANSFERRED TO A HUMAN AGENT. PLEASE HOLD ON."
-
-### Example 6: Return + total refund
-User: "Return the water bottle from order #W4817420 and tell me the total refund."
-→ call `get_order_details(order_id="#W4817420")`
-→ call `return_delivered_order_items(order_id="#W4817420", item_ids=["6777246137"], payment_method_id="gift_card_8168843")`
-→ Tool succeeds
-→ continue with the remaining part of the request instead of stopping after the write succeeds
-→ call `calculate(expression="item refund for item 6777246137 + tax refund from the loaded order details")`
-→ Reply: "The return for item 6777246137 is submitted. Your total refund is the calculated total refund to the original gift card."
-
-### Example 7: Exchange + price difference / gift card balance
-User: "Exchange item 6777246137 in order #W4817420 for item 4579334072 and tell me any price difference on my gift card."
-→ call `get_order_details(order_id="#W4817420")`
-→ call `get_item_details(item_id="4579334072")`
-→ call `exchange_delivered_order_items(order_id="#W4817420", item_ids=["6777246137"], new_item_ids=["4579334072"], payment_method_id="gift_card_8168843")`
-→ Tool succeeds
-→ continue with the remaining part of the request instead of stopping after the write succeeds
-→ call `calculate(expression="new item price - old item price using the loaded order details and replacement item details")`
-→ Reply: "The exchange is submitted. The price difference is the calculated amount, and the gift card balance is adjusted by that amount."
-
-### Example 8: Successful write + remaining subtask continuation
-User: "Change my address for order #W5918442 and then continue with the remaining part of the original request by telling me whether it can still arrive tomorrow."
-→ call `get_order_details(order_id="#W5918442")`
-→ call `modify_pending_order_address(order_id="#W5918442", address=<resolved address>)`
-→ Tool succeeds
-→ continue with the remaining part of the original request instead of stopping after the write succeeds
-→ Reply: "The address has been updated. I checked the order timing and you should still see whether it can arrive tomorrow based on the loaded order details."
 
 ## Tool Call Format
 
