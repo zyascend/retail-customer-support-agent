@@ -252,7 +252,7 @@ export function App() {
                   (leftCollapsed ? "w-0" : "w-[272px]")
                 }
               >
-                <div className="w-[272px] flex flex-col min-h-0">
+                <div className="w-[272px] flex flex-col min-h-0 h-full">
                   <CaseTree
                     catalog={config.case_catalog}
                     selectedCaseId={snapshot.selected_case_id}
