@@ -16,7 +16,7 @@ export function EventDetailPanel({ event, snapshot, collapsed, onToggleCollapse 
   return (
     <section
       className={
-        "shrink-0 overflow-hidden transition-all duration-200 ease-in-out relative " +
+        "shrink-0 flex flex-col min-h-0 overflow-hidden transition-all duration-200 ease-in-out relative " +
         (collapsed ? "w-0 opacity-0" : "w-80 opacity-100")
       }
       aria-label="事件详情"
@@ -29,7 +29,7 @@ export function EventDetailPanel({ event, snapshot, collapsed, onToggleCollapse 
         ariaLabel={collapsed ? "展开详情面板" : "收起详情面板"}
       />
 
-      <div className="w-80 h-full overflow-y-auto p-3 pl-5">
+      <div className="w-80 flex-1 min-h-0 overflow-y-auto p-3 pl-5">
         {snapshot.last_error ? (
           <div className="mb-3 border border-red-200 dark:border-red-800 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-900 dark:text-red-300 p-2.5 text-sm" role="alert">
             <strong>{errorLabel(snapshot.last_error.code)}</strong>
