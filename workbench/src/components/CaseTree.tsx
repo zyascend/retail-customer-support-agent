@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { buildCaseTree } from "../caseTreeUtils";
+import { intentLabel } from "../labels";
 import type { CaseCatalog, CaseTreeCategory, CaseTreeNode, WorkbenchCase } from "../types";
 
 interface CaseTreeProps {
@@ -64,6 +65,7 @@ function CaseTreeGroup({ node, selectedCaseId, onSelectCase }: CaseTreeGroupProp
   return (
     <div className="mb-1">
       <button
+        aria-expanded={expanded}
         className="flex items-center gap-1.5 w-full px-2 py-1.5 text-sm font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded-md cursor-pointer border-0 bg-transparent text-left transition-colors duration-100"
         onClick={() => setExpanded(!expanded)}
         type="button"
@@ -106,6 +108,7 @@ function CaseTreeCategoryGroup({ category, selectedCaseId, onSelectCase }: CaseT
   return (
     <div className="mb-0.5">
       <button
+        aria-expanded={expanded}
         className="flex items-center gap-1 w-full px-2 py-1 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700/30 rounded-md cursor-pointer border-0 bg-transparent text-left transition-colors duration-100"
         onClick={() => setExpanded(!expanded)}
         type="button"
@@ -140,33 +143,33 @@ interface CaseTreeItemProps {
   onSelect: (caseId: string) => void;
 }
 
-function CaseTreeItem({ caseData: c, isSelected, onSelect }: CaseTreeItemProps) {
+function CaseTreeItem({ caseData, isSelected, onSelect }: CaseTreeItemProps) {
   return (
     <button
       className={
-        "w-full text-left border-0 bg-transparent px-2 py-1.5 rounded-md cursor-pointer transition-colors duration-100 " +
+        "w-full text-left border-0 bg-transparent px-2 py-1.5 pl-[11px] rounded-md cursor-pointer transition-colors duration-100 " +
         (isSelected
-          ? "bg-blue-50 dark:bg-blue-900/20 shadow-[inset_3px_0_0_0] shadow-blue-500"
+          ? "bg-blue-50 dark:bg-blue-900/20 border-l-[3px] border-l-blue-500"
           : "hover:bg-slate-50 dark:hover:bg-slate-700/20")
       }
-      onClick={() => onSelect(c.case_id)}
+      onClick={() => onSelect(caseData.case_id)}
       type="button"
     >
       <div className="text-sm font-semibold text-[#182230] dark:text-white leading-tight truncate">
-        {c.title}
+        {caseData.title}
       </div>
       <div className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight mt-0.5 truncate">
-        {intentLabel(c.expected_intent)}
-        {c.expected_tool_names.length > 0 && ` · ${c.expected_tool_names[0]}`}
+        {intentLabel(caseData.expected_intent)}
+        {caseData.expected_tool_names.length > 0 && ` · ${caseData.expected_tool_names[0]}`}
       </div>
       <div className="text-[11px] text-slate-400 dark:text-slate-500 leading-tight mt-px truncate">
-        {c.message_count}条消息
-        {c.policy_area && ` · ${policyAreaLabel(c.policy_area)}`}
-        {c.expected_guard_block_reason && ` · 阻止: ${c.expected_guard_block_reason}`}
+        {caseData.message_count}条消息
+        {caseData.policy_area && ` · ${policyAreaLabel(caseData.policy_area)}`}
+        {caseData.expected_guard_block_reason && ` · 阻止: ${caseData.expected_guard_block_reason}`}
       </div>
-      {c.subset && c.scenario_family && (
+      {caseData.subset && caseData.scenario_family && (
         <div className="text-[11px] text-slate-400 dark:text-slate-500 leading-tight mt-px truncate">
-          {c.subset} · {c.scenario_family || c.capability || ""}
+          {caseData.subset} · {caseData.scenario_family || caseData.capability || ""}
         </div>
       )}
     </button>
@@ -174,20 +177,6 @@ function CaseTreeItem({ caseData: c, isSelected, onSelect }: CaseTreeItemProps) 
 }
 
 // ── Label helpers ──
-
-function intentLabel(intent: string): string {
-  const map: Record<string, string> = {
-    lookup: "查询订单",
-    cancel_order: "取消订单",
-    modify_order_address: "修改地址",
-    return_items: "退货",
-    exchange_items: "换货",
-    transfer: "转人工",
-    unknown: "未知",
-  };
-  return map[intent] || intent;
-}
-
 function policyAreaLabel(area: string): string {
   const map: Record<string, string> = {
     shipping: "配送",
