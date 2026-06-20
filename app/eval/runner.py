@@ -51,6 +51,7 @@ class EvalCaseResult:
     final_intent: str
     termination_reason: Optional[str]
     expected_write_lock: Optional[str]
+    skill_id: Optional[str] = None
     write_locks: List[str] = field(default_factory=list)
     expected_order_status: Optional[str] = None
     actual_order_status: Optional[str] = None
@@ -433,6 +434,7 @@ class CuratedEvalRunner:
             session_id=state.session_id,
             case_id=case.case_id,
             category=case.category,
+            skill_id=case.skill_id,
             trial=trial,
             scenario_family=case.scenario_family or case.capability,
             variant_type=case.variant_type or case.case_id,
@@ -491,6 +493,7 @@ class CuratedEvalRunner:
             session_id="",
             case_id=case.case_id,
             category=case.category,
+            skill_id=case.skill_id,
             trial=trial,
             passed=False,
             failure_label=None,

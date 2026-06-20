@@ -7,6 +7,7 @@ from app.agent.action_specs import WRITE_ACTION_REGISTRY
 from app.agent.prompts import prompt_metadata
 from app.config import AppConfig
 from app.ops.serialization import stable_hash
+from app.skills.registry import skill_hashes
 from app.tools.registry import ToolRegistry
 from app.tools.retail_adapter import RetailAdapter
 
@@ -32,4 +33,5 @@ def build_baseline_metadata(
         "action_specs_hash": stable_hash(
             [asdict(spec) for spec in WRITE_ACTION_REGISTRY]
         ),
+        "skill_hashes": skill_hashes(),
     }

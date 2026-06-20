@@ -1384,13 +1384,18 @@ class AgentLoop:
 
     def _load_system_prompt_template(self) -> str:
         from pathlib import Path
+
+        from app.skills.registry import build_skill_guidance_for_prompt
+
         prompt_path = Path("prompts/llm_agent_system_v001.md")
         template = prompt_path.read_text(encoding="utf-8")
         tool_catalog = self._registry.tool_catalog_for_llm()
         policy_text = self._context_builder.policy_text
+        skill_guidance = build_skill_guidance_for_prompt()
         return (
             template.replace("{tool_catalog}", tool_catalog)
             .replace("{policy}", policy_text)
+            .replace("{skill_guidance}", skill_guidance)
         )
     # Note: {state_summary} is replaced dynamically in _build_messages
 

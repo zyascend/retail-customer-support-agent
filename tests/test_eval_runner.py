@@ -1992,6 +1992,7 @@ def _result(
         session_id=f"{case_id}-{trial}",
         case_id=case_id,
         category="test",
+        skill_id=None,
         trial=trial,
         passed=passed,
         failure_label=failure_label,
