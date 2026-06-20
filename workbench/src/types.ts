@@ -39,6 +39,22 @@ export interface CaseCatalog {
   groups: CaseGroup[];
 }
 
+// ── Case Tree ──
+
+export interface CaseTreeCategory {
+  key: string;
+  label: string;
+  emoji: string;
+  cases: WorkbenchCase[];
+}
+
+export interface CaseTreeNode {
+  key: string;
+  label: string;
+  emoji: string;
+  categories: CaseTreeCategory[];
+}
+
 export interface WorkbenchConfig {
   default_mode: WorkbenchMode;
   llm_available: boolean;
