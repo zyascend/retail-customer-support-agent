@@ -21,7 +21,7 @@ export function CaseTree({ catalog, selectedCaseId, onSelectCase }: CaseTreeProp
         </h2>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-1 py-1">
+      <div className="flex-1 overflow-y-auto min-h-0 px-1 py-1">
         {tree.map((node) => (
           <CaseTreeGroup
             key={node.key}
