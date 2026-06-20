@@ -248,11 +248,11 @@ export function App() {
               {/* Left panel: CaseTree */}
               <aside
                 className={
-                  "shrink-0 overflow-hidden transition-all duration-200 ease-in-out " +
+                  "shrink-0 flex flex-col min-h-0 transition-all duration-200 ease-in-out " +
                   (leftCollapsed ? "w-0" : "w-[272px]")
                 }
               >
-                <div className="w-[272px] h-full overflow-hidden p-0">
+                <div className="w-[272px] flex flex-col min-h-0">
                   <CaseTree
                     catalog={config.case_catalog}
                     selectedCaseId={snapshot.selected_case_id}
