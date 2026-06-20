@@ -1,6 +1,6 @@
 import React from "react";
 import { StatusBadge } from "./StatusBadge";
-import { CardHeader, InfoRow, statusLabel, statusTone, formatValue, SectionBlock } from "./EventCardHelpers";
+import { CardHeader, EventWeightBadge, InfoRow, statusLabel, statusTone, formatValue, SectionBlock } from "./EventCardHelpers";
 import type { TimelineEvent } from "../types";
 
 interface WriteAuditCardProps {
@@ -33,9 +33,7 @@ export function WriteAuditCard({ event }: WriteAuditCardProps) {
           <span className="shrink-0">📝</span>
           <h3 className="m-0 text-sm font-bold text-[#182230] dark:text-white truncate">写入审计</h3>
         </div>
-        <span className="shrink-0 inline-flex items-center rounded-full text-[10px] font-extrabold leading-none whitespace-nowrap px-1.5 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-          ● 关键
-        </span>
+        <EventWeightBadge weight={event.weight} />
       </div>
 
       <div className="grid gap-2">

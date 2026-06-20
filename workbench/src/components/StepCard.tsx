@@ -1,6 +1,6 @@
 import React from "react";
 import { StatusBadge } from "./StatusBadge";
-import { CardHeader, statusLabel, statusTone, SectionBlock, KeyValueRows } from "./EventCardHelpers";
+import { CardHeader, InfoRow, statusLabel, statusTone, SectionBlock, KeyValueRows } from "./EventCardHelpers";
 import type { TimelineEvent } from "../types";
 
 interface StepCardProps {
@@ -55,15 +55,6 @@ export function StepCard({ event }: StepCardProps) {
 
         {detail && renderFallbackKeys(detail, sections)}
       </div>
-    </div>
-  );
-}
-
-function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 min-w-0">
-      <span className="text-xs font-extrabold tracking-normal text-slate-500 dark:text-slate-400 shrink-0 w-12">{label}</span>
-      <div className="text-sm text-[#182230] dark:text-white min-w-0 truncate">{value}</div>
     </div>
   );
 }

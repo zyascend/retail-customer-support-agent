@@ -3,6 +3,7 @@ import { ToolCallCard } from "./ToolCallCard";
 import { StepCard } from "./StepCard";
 import { MessageCard } from "./MessageCard";
 import { WriteAuditCard } from "./WriteAuditCard";
+import { CollapseButton } from "./CollapseButton";
 
 interface EventDetailPanelProps {
   event: TimelineEvent | null;
@@ -21,27 +22,12 @@ export function EventDetailPanel({ event, snapshot, collapsed, onToggleCollapse 
       aria-label="事件详情"
     >
       {/* Collapse button on left edge */}
-      <button
-        aria-label={collapsed ? "展开详情面板" : "收起详情面板"}
-        className={
-          "absolute top-1/2 -translate-y-1/2 z-10 " +
-          (collapsed ? "-right-4" : "left-0 -translate-x-1/2") + " " +
-          "inline-flex items-center justify-center w-5 h-10 border border-slate-300 dark:border-slate-600 " +
-          "rounded-full bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 " +
-          "hover:bg-slate-100 dark:hover:bg-slate-700 hover:text-slate-700 dark:hover:text-slate-200 " +
-          "cursor-pointer transition-colors duration-150 shadow-sm"
-        }
-        onClick={onToggleCollapse}
-        type="button"
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          {collapsed ? (
-            <polyline points="5,3 9,7 5,11" />
-          ) : (
-            <polyline points="7,3 3,7 7,11" />
-          )}
-        </svg>
-      </button>
+      <CollapseButton
+        collapsed={collapsed}
+        side="right"
+        onToggle={onToggleCollapse}
+        ariaLabel={collapsed ? "展开详情面板" : "收起详情面板"}
+      />
 
       <div className="w-80 h-full overflow-y-auto p-3 pl-5">
         {snapshot.last_error ? (

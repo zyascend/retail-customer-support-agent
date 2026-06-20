@@ -1,4 +1,5 @@
 import React from "react";
+import { EventWeightBadge } from "./EventCardHelpers";
 import type { TimelineEvent } from "../types";
 
 interface MessageCardProps {
@@ -15,9 +16,7 @@ export function MessageCard({ event }: MessageCardProps) {
           <span className="shrink-0">💬</span>
           <h3 className="m-0 text-sm font-bold text-[#182230] dark:text-white truncate">消息</h3>
         </div>
-        <span className="shrink-0 inline-flex items-center rounded-full text-[10px] font-extrabold leading-none whitespace-nowrap px-1.5 py-1 bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400">
-          ○ 辅助
-        </span>
+        <EventWeightBadge weight={event.weight} />
       </div>
 
       <div className="grid gap-2">
