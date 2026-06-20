@@ -18,20 +18,33 @@
 
 ```
 user message → pre-flight checks → AgentLoop → ToolGateway / WriteActionGuard
-→ tool observation → assistant response → trace artifact
+→ tool observation → assistant response → trace artifact → AgentOps
+                              │
+                              ▼
+                     Skill Registry (8 write skills)
+                              │
+                              ▼
+                    RetailAdapter (tau3-bench / local db.json)
 ```
 
 **LLM tool-calling runtime**: `AgentLoop` 使用 provider 的 `chat_with_tools()` 选择工具、读取 observation 并生成回复。运行时保留 pre-flight 层处理待确认写操作和身份 shortcut。
 
 **7 层写护栏**: 身份认证 → 显式确认 → 所有权校验 → 先读后写 → 策略合规 → 资源锁 → 幂等性。每一次写操作在真正执行前，都必须依次通过全部七层检查。
 
-**Workbench**: 基于 FastAPI 的交互式可视化界面，仅支持 `llm` 模式运行，需配置 `DEEPSEEK_API_KEY`。未配置 provider 时运行时安全转人工。
+**Skill 资产化**: 8 个写操作的行为知识（intent pattern、tool 调用链、guard 约束、prompt 指引）已从散落四处的代码收敛到 `app/skills/registry.py` 中的 `SkillSpec` 版本化单元——支持 per-skill 评测维度和变更追踪。
+
+**AgentOps**: Workbench 中集成 AgentLoop trace 可视化，可查看 guard block 详情、时间线、写入审计记录（操作前后 DB 哈希、幂等键）。
+
+**数据飞轮 (Flywheel)**: Live eval 失败 case → bad case 沉淀 → 可扩展变体生成 → golden 回归的闭环链路。
+
+**Workbench**: 基于 FastAPI + React 的交互式可视化界面。支持 14 个精选案例的用户旅程导览、AgentOps trace 浏览器和阶段性 eval 报告可视化。
 
 ## 关键设计决策
 
 - **运行时边界清晰** — 默认 `AgentRuntime` 需要真实 LLM provider；没有 provider 时会安全返回转人工消息。无 `offline_demo` 或降级模式。
 - **工具调用受控** — LLM 只能通过 schema 暴露的工具行动；所有写工具都必须经过 `ToolGateway` 和 `WriteActionGuard`。
-- **写操作单一事实来源** — `app/agent/action_specs.py` 定义了全部 7 种写操作。护栏规则、工具注册表、LLM 提示词中的 `{tool_catalog}` 模板和写操作参数约束，全部由此派生。新增一种写操作只需改这一个文件。
+- **写操作单一事实来源** — `app/agent/action_specs.py` 定义了全部 8 种写操作。护栏规则、工具注册表、LLM 提示词中的 `{tool_catalog}` 模板和写操作参数约束，全部由此派生。Skill 资产化作为第二层组织视图，将行为知识按能力单元版本化，不修改执行模型。
+- **Think 工具实验** — `think(reasoning)` 实验工具可通过 `ENABLE_THINK_TOOL=true` 开启，用于 live eval A/B 对比 pass rate / token cost / loop iterations。默认关闭。
 
 ## 快速开始
 
@@ -86,9 +99,17 @@ uv run python -m pytest tests/ -q
 | trace | 每次运行输出 JSON artifact | 每次运行输出 JSON artifact |
 | baseline 对比 | `--compare` 双 JSON 对比 | `--compare` 双 JSON 对比 |
 
+### Live Baseline（2026-06-18，模型 deepseek-v4-flash）
+
+| 子集 | Cases | Pass Rate |
+|------|-------|-----------|
+| curated_mvp | 11 | **100%** |
+| generalized_mvp | 30 | **100%** |
+| synthetic_seeded_v1 | 7 | **57%**（4/7，无显著回归） |
+
 失败分类体系包含 14 种有序标签（llm_json_failure → auth_failure → wrong_intent → ...），确保精准定位问题。
 
-Live baseline 运行：
+### 运行命令
 
 ```bash
 uv run phase2-eval --subset curated_mvp --trials 1 --max-workers 1 --live
@@ -101,22 +122,41 @@ uv run phase2-eval --subset generalized_mvp --trials 1 --max-workers 1 --live
 uv run python -m app.eval.live_triage artifacts/phase2/reports/<eval-run-id>.json
 ```
 
-Eval report 记录 `baseline_metadata`（model、provider、prompt/tool/action-spec hash）、`total_token_usage`、`average_llm_loop_iterations`、tool call / guard block 指标、`auto_load_count`、`premature_refusal_corrected_count` 和失败 root cause。
+Eval report 记录 `baseline_metadata`（model、provider、prompt/tool/action-spec hash、**per-skill hash**）、`total_token_usage`、`average_llm_loop_iterations`、tool call / guard block 指标、`auto_load_count`、`premature_refusal_corrected_count`、`context_truncation_count` 和失败 root cause。
 
 Phase 10 后，LLM tool schema 的 description 包含 when-to-use / when-not-to-use / required-prior-read / guard-block guidance；参数 schema 也包含更强的 order/item/payment pattern 约束，方便用 `tool_schema_hash` 追踪 prompt/schema 优化影响。
+
+### Eval 子集一览
+
+| 子集 | 说明 | 数量 |
+|------|------|------|
+| `curated_mvp` | 手写核心案例，覆盖 8 种写操作 + lookup + 边界 | 11 |
+| `generalized_mvp` | 基于 tau3-bench 任务泛化，每场景多语言变体 | 30 |
+| `synthetic_seeded_v1` | 种子 + 变体类型的 LLM 生成场景 | 7 |
+| `live` | 需要真实 LLM provider | 全部（加上 `--live`） |
+
+所有子集可并行运行，推荐 `--max-workers 10` 平衡速度和限流。
+
+```bash
+uv run phase2-eval --subset all --live --max-workers 10 --json --no-progress
+```
 
 ## 项目结构
 
 ```text
 app/agent/       — AgentLoop、SessionState、提示词、确认流、写护栏
 app/tools/       — retail 适配器、工具注册表、写操作网关
-app/eval/        — curated + generalized eval 案例、运行器、失败分类
+app/eval/        — curated + generalized eval 案例、运行器、失败分类、飞轮数据、golden 回归
+app/skills/      — Skill 资产定义与注册表（per-skill 版本化行为单元）
+app/synthetic/   — 合成数据生成（seed-based 变体、语言变体、oracle）
 app/workbench/   — Workbench API（FastAPI 后端）、AgentOps 可视化
-app/ops/         — 序列化、追踪（TraceWriter）
+app/ops/         — 序列化、追踪（TraceWriter）、哈希工具
+app/cli/         — CLI 入口（chat、eval、flywheel、workbench）
 app/config.py    — AppConfig 配置加载
-workbench/       — Workbench React 前端
+workbench/       — Workbench React 前端（Vite + TypeScript）
 prompts/         — LLM agent 系统提示词（单文件，SHA-256 版本追踪）
-docs/            — 设计文档、实施计划、架构参考、审计报告
+cases/           — bad case 收集、golden 回归用例
+docs/            — 设计文档、实施计划、架构参考、审计报告、技术复盘
 ```
 
 ## Flywheel / Golden SOP
@@ -165,6 +205,29 @@ uv run flywheel check --no-progress --json
 - `check` 在 `cases/golden.yaml` 为空时会返回空结果，不会报错
 - golden 里某条 case 失败会显示为 `regression`；golden 中缺失执行结果会显示为 `missing`
 
+## 近期技术优化
+
+### Skill 资产化（PR #55）
+
+将 8 个高频写操作的行为知识从分散四处的代码（`action_specs.py`、prompt、`registry.py`、`llm_agent.py`）收敛到 `app/skills/registry.py` 中的 `SkillSpec` 版本化单元。每个 Skill 包含 intent pattern、entry tool、required read、guard constraint、prompt guidance 和 few-shot example。
+
+效果：
+- 新增写操作只需改 `action_specs.py` + `skills/registry.py`，无需改 prompt 和 runtime
+- 评测维度按 skill_id 拆分，可独立追踪每个 skill 的 pass rate 趋势
+- 每个 SkillSpec 记录变更 hash，prompt/schema 优化时可精准归因
+
+### DeepSeek KV Cache 优化（PR #50）
+
+将动态 `state_summary` 从 system prompt 剥离到 messages 末尾，保持 system prompt 作为稳定前缀，提升 KV Cache 命中率。在 `app/workbench/agentops.py` 中打通 KV Cache 命中统计（`cache_hit_tokens` / `cache_miss_tokens`），支持 A/B 对比量化收益。
+
+### 工具定义优化（PR #46）
+
+三项并行改进：参数 schema 补全（state 枚举、zip regex、country 约束）+ 工具描述单一事实源（docstring → dict → name 四层 fallback）+ 实验性 `think(reasoning)` 工具（默认关闭，通过 `ENABLE_THINK_TOOL=true` 开启 A/B 测试）。
+
+### 上下文管理优化（PR #44）
+
+三项优化：token-aware 上下文预算（固定 6 条 → 8000 token L4 预算，超限时生成摘要）+ Guard 输出语义化（`Locks:` → `Active safeguards:`）+ 订单 ID 去重（统一 `#W\d+` 单 key 存储）。
+
 ## 开发指南
 
 ```bash
@@ -187,3 +250,7 @@ uv run workbench
 完整路线图见 [`docs/long-term-optimization-path.md`](docs/long-term-optimization-path.md)。
 
 设计审计报告见 [`docs/design-audit.md`](docs/design-audit.md)。
+
+技术复盘：
+- [Skill 资产化技术复盘](docs/optimize/skill-assetization-retrospective.md)
+- [DeepSeek KV Cache 优化技术复盘](docs/optimize/deepseek-kv-cache-optimization-retrospective.md)
