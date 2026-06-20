@@ -272,7 +272,7 @@ export function App() {
               </div>
 
               {/* Middle: main content */}
-              <main className="flex-1 flex flex-col overflow-hidden gap-3 min-w-0 mx-3">
+              <main className="flex-1 flex flex-col overflow-hidden gap-3 min-w-0 mx-3 min-h-0">
                 {/* Step/Run/Reset controls */}
                 <div className="flex flex-wrap gap-2 shrink-0" aria-label="运行控制">
                   <button
@@ -326,21 +326,21 @@ export function App() {
                   snapshot={snapshot}
                 />
 
-                <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-                  <Conversation busy={busy} snapshot={snapshot} />
-                </div>
-
-                {/* Manual message input */}
-                <ManualMessageInput
-                  busy={busy}
-                  onSend={handleSendMessage}
-                />
-
                 <div className="shrink-0">
                   <Timeline
                     events={snapshot.timeline}
                     onSelectEvent={setSelectedEventId}
                     selectedEventId={activeEvent?.id || null}
+                  />
+                </div>
+
+                <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+                  <Conversation busy={busy} snapshot={snapshot} />
+
+                  {/* Manual message input */}
+                  <ManualMessageInput
+                    busy={busy}
+                    onSend={handleSendMessage}
                   />
                 </div>
               </main>

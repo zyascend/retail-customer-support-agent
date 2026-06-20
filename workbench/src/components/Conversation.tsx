@@ -3,7 +3,7 @@ import type { WorkbenchSnapshot } from "../types";
 
 export function Conversation({ busy, snapshot }: { busy: boolean; snapshot: WorkbenchSnapshot }) {
   return (
-    <section className="min-w-0 flex flex-col overflow-hidden border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 p-3" aria-label="对话记录">
+    <section className="min-w-0 flex-1 h-full flex flex-col overflow-hidden border border-slate-200 dark:border-slate-700 rounded-lg bg-white dark:bg-slate-800 p-3" aria-label="对话记录">
       <div className="flex items-start justify-between gap-3 mb-3 shrink-0">
         <div>
           <div className="mb-0.5 text-slate-500 dark:text-slate-400 text-xs font-extrabold tracking-normal">对话</div>
@@ -15,7 +15,7 @@ export function Conversation({ busy, snapshot }: { busy: boolean; snapshot: Work
       </div>
 
       {snapshot.messages.length ? (
-        <ol className="grid gap-2 m-0 p-0 list-none flex-1 overflow-auto min-h-0 content-start">
+        <ol className="flex flex-col gap-2 m-0 p-0 list-none flex-1 overflow-auto min-h-0">
           {snapshot.messages.map((message, index) => (
             <li
               className={
