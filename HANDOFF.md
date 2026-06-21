@@ -2,7 +2,7 @@
 
 ## 项目一句话
 
-LLM tool-calling 零售客服 agent — Python FastAPI + React Workbench + 7 层写安全 Guard + Skill 资产化 + Bad Case 数据飞轮 + Golden 回归 + DeepSeek KV Cache 优化 + AgentOps 可视化。
+LLM tool-calling 零售客服 agent。Python FastAPI + React Workbench，核心是 7 层写安全 Guard、Skill 资产化、Bad Case 数据飞轮 + Golden 回归，以及 DeepSeek KV Cache 优化和 AgentOps 可视化。
 
 ## 最近合并（PR #50–#55）
 
@@ -36,7 +36,7 @@ LLM tool-calling 零售客服 agent — Python FastAPI + React Workbench + 7 层
 
 命令：`uv run phase2-eval --subset <name> --live --max-workers 50`
 
-Golden 回归（当前为空集，无回归问题）：
+Golden 回归（当前为空集）：
 ```bash
 uv run flywheel check --no-progress --json
 ```
@@ -46,20 +46,20 @@ uv run flywheel check --no-progress --json
 **核心能力栈**:
 - 7 层写安全 Guard（auth → confirmation → ownership → read-before-write → policy → locks → idempotency）
 - 8 个写操作工具（cancel / return / exchange / modify items / payment / address / shipping / user address）
-- 14 种失败标签分类体系（`llm_json_failure` → `auth_failure` → `wrong_intent` → ...）
-- Token-aware 上下文预算（8000 token L4 预算，超限摘要）
+- 14 种失败标签分类体系
+- Token-aware 上下文预算（8000 token L4，超限摘要）
 - Think 实验工具（`ENABLE_THINK_TOOL=true`，默认 off）
 - Provider JSON 容错 + 限流重试（最多 2 次）
-- KV Cache 命中观测（AgentOps 面板 × 数据链路已打通）
+- KV Cache 命中观测（AgentOps 面板链路已打通）
 
 **数据飞轮链路已落地**:
-1. `--live` eval 失败样本 → `flywheel collect` → `cases/bad_cases/<date>.yaml`
-2. 种子 case → `flywheel generate` → 扩展 gate 变体
+1. `--live` eval 失败 → `flywheel collect` → `cases/bad_cases/<date>.yaml`
+2. 种子 case → `flywheel generate` → 扩展变体
 3. 关键 case → `flywheel golden promote --confirm` → `cases/golden.yaml`
 4. `flywheel check` → 回归检测
 
 **Skill 资产化已就绪**:
-- `app/skills/registry.py`: 8 个 SkillSpec，每 spec 含 intent_pattern / entry_tools / guard_constraints / prompt_guidance / few_shot_examples
+- `app/skills/registry.py`: 8 个 SkillSpec，含 intent_pattern / entry_tools / guard_constraints / prompt_guidance / few_shot_examples
 - `SKILL_BY_ACTION` 字典将 eval case 映射到 skill_id
 - `skill_hashes()` 在 baseline 中记录 per-skill 变更 hash
 
@@ -70,7 +70,7 @@ uv run flywheel check --no-progress --json
 1. **§2.2 Think 实验 A/B** — `ENABLE_THINK_TOOL=true` 跑 generalized_mvp / synthetic_seeded_v1，对比 pass rate / wrong_tool / avg_loop_iters / token_cost
 2. **§1.1 提示词精简压缩** — 18 条规则 → 8-10 条，CRITICAL 段 35 行 → 5 行
 3. **§1.3 显式停止条件** — 添加 LLM loop 提前停止逻辑
-4. **Golden 回归积累** — 从 2026-06-19 的 bad case 中 promote 关键 case
+4. **Golden 回归积累** — 从 bad case 中 promote 关键 case
 
 ### 中期
 
@@ -81,7 +81,7 @@ uv run flywheel check --no-progress --json
 
 ### 长期
 
-9. Phase 12 Capability Expansion 后续规划
+9. Phase 12 Capability Expansion 后续
 10. 跨 provider 兼容方案（OpenAI / Anthropic）
 
 ## 关键文件速查

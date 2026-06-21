@@ -12,19 +12,19 @@
 - 修改用户默认地址
 - 超范围请求转人工
 
-随着功能逐步扩展，项目中关于“某类写操作应该怎么做”的行为知识，开始分散在多个层级：
+随着功能逐步扩展，项目中关于“某类写操作应该怎么做”的行为知识分散到了多个层级：
 
 1. `app/agent/action_specs.py` — 写操作元数据（intent、required_args、risk）
 2. `prompts/llm_agent_system_v001.md` — 写操作规则、few-shot 示例
 3. `app/tools/registry.py` — tool description 后缀中的行为约束
 4. `app/agent/llm_agent.py` — premature refusal map、observation enrichment、response correction 等运行时补丁逻辑
 
-这种分散式知识组织在功能少的时候还能工作，但会逐渐暴露两个问题：
+这种分散式知识组织在功能少的时候还能工作，但有两个问题：
 
 - **维护成本上升**：修改某类能力时，需要同时修改 prompt、schema 描述、eval case、甚至局部兜底逻辑
 - **评测归因困难**：当某轮优化导致“退货”能力回退时，只能看到整体 pass rate 下降，无法快速定位是哪个能力单元出了问题
 
-因此，这一轮优化的目标不是“再加一个功能”，而是把这些高频写操作的行为知识收敛成一层**可版本化、可复用、可评测**的 Skill 资产。
+因此，这一轮优化的目标是把这些高频写操作的行为知识收敛成一层可版本化、可复用、可评测的 Skill 资产。
 
 ---
 
@@ -111,9 +111,7 @@
 - 不在这一轮引入 plan-execute 或多 Agent 架构
 - 不尝试一次性消灭所有 `llm_agent.py` 中的行为补丁逻辑
 
-换句话说，这一轮优化的原则是：
-
-> **低侵入改造，优先做知识组织升级，而不是执行链路重构。**
+换句话说，这一轮优化的原则是低侵入改造，优先做知识组织升级，而不是执行链路重构。
 
 ---
 
@@ -458,11 +456,7 @@ uv run phase2-eval --subset generalized_mvp --live --max-workers 10
 
 ### 7.4 面试收益：从“会调 prompt”升级到“会管理 prompt 资产”
 
-这次优化最大的可讲点，不是“我写了一个新文件”，而是：
-
-> 我把 prompt 里的经验，升级成了工程里的资产。
-
-这在面试里非常加分，因为它说明你已经不只是会做 Agent feature，而是在考虑：
+这次优化最大的可讲点是：把 prompt 里的经验，升级成了工程里的资产。这表示你不只是在做 Agent feature，而是在考虑：
 
 - 方法资产怎么版本化
 - 行为知识怎么收敛
@@ -516,12 +510,12 @@ uv run phase2-eval --subset generalized_mvp --live --max-workers 10
 
 ## 9. 结论
 
-这轮 Skill 资产化优化，本质上不是“功能扩展”，而是一次**知识组织升级**。
+这轮 Skill 资产化优化本质上是知识组织升级，不是功能扩展。
 
-它没有改写 Agent Loop，也没有重构 Guard 执行链路，而是做了三件更重要的事：
+它没有改写 Agent Loop 或 Guard 执行链路，但做了三件事：
 
 1. 把 8 个高频写操作沉淀成显式 Skill 资产
-2. 让 prompt 中的经验可以通过 Skill 动态注入，而不是长期散落维护
+2. 让 prompt 中的经验可以通过 Skill 动态注入，不再散落各处
 3. 让 eval 和 baseline 开始支持按 Skill 维度看回归
 
 从结果看：
@@ -529,6 +523,6 @@ uv run phase2-eval --subset generalized_mvp --live --max-workers 10
 - MVP 基线没有回退
 - `curated_mvp` 仍然 `11/11`
 - `generalized_mvp` 达到 `29/30`
-- 失败点收敛到一个非常具体的 `exchange unavailable` planning 场景
+- 失败点收敛到一个 `exchange unavailable` planning 场景
 
-因此可以认为，这一轮优化是成功的。它把项目从“能跑的 Agent”往前推进了一步，变成了“开始具备可管理能力资产的 Agent 工程系统”。
+因此可以认为这一轮优化是成功的。项目从"能跑的 Agent"往前推进了一步，变成了开始具备可管理能力资产的 Agent 工程系统。
