@@ -143,20 +143,164 @@ uv run phase2-eval --subset all --live --max-workers 10 --json --no-progress
 
 ## 项目结构
 
-```text
-app/agent/       — AgentLoop、SessionState、提示词、确认流、写护栏
-app/tools/       — retail 适配器、工具注册表、写操作网关
-app/eval/        — curated + generalized eval 案例、运行器、失败分类、飞轮数据、golden 回归
-app/skills/      — Skill 资产定义与注册表（per-skill 版本化行为单元）
-app/synthetic/   — 合成数据生成（seed-based 变体、语言变体、oracle）
-app/workbench/   — Workbench API（FastAPI 后端）、AgentOps 可视化
-app/ops/         — 序列化、追踪（TraceWriter）、哈希工具
-app/cli/         — CLI 入口（chat、eval、flywheel、workbench）
-app/config.py    — AppConfig 配置加载
-workbench/       — Workbench React 前端（Vite + TypeScript）
-prompts/         — LLM agent 系统提示词（单文件，SHA-256 版本追踪）
-cases/           — bad case 收集、golden 回归用例
-docs/            — 设计文档、实施计划、架构参考、审计报告、技术复盘
+```
+retail-customer-support-agent/
+├── README.md                         # 项目文档
+├── AGENTS.md                         # AI agent 会话上下文指南
+├── HANDOFF.md                        # 跨会话 handoff 上下文
+├── TECHNICAL_ARCHITECTURE.md         # 技术架构深度文档
+├── pyproject.toml                    # Python 项目配置（hatchling 构建）
+├── reasonix.toml                     # Reasonix 工作流配置
+├── .env.example                      # LLM provider 环境变量模板
+├── prompts/                          # LLM 系统提示词
+│   └── llm_agent_system_v001.md      # 单文件系统 prompt（SHA-256 版本追踪）
+├── app/                              # 核心应用代码
+│   ├── __init__.py
+│   ├── config.py                     # AppConfig 配置加载（环境变量 + .env）
+│   ├── pydantic_compat.py            # Pydantic v2 兼容层
+│   ├── agent/                        # Agent 运行时核心
+│   │   ├── __init__.py
+│   │   ├── runtime.py                # AgentRuntime 入口（preflight + AgentLoop 编排）
+│   │   ├── llm_agent.py              # AgentLoop while-loop（LLM ↔ tool execute，max 14 轮）
+│   │   ├── guard.py                  # 7 层写安全护栏（auth→ownership→read-before-write→policy→locks→idempotency）
+│   │   ├── confirmation.py           # 用户确认/拒绝/变更的关键词解析
+│   │   ├── context_builder.py        # 语义化上下文描述（Active safeguards、loaded context 去重）
+│   │   ├── action_specs.py           # 写操作单一事实源（全部 8 种写操作的元数据定义）
+│   │   ├── models.py                 # 数据模型（Message、SessionState、AgentStep、ToolCallRequest/Response）
+│   │   ├── parsers.py                # 正则解析（姓名+邮编、订单 ID 等）
+│   │   ├── prompts.py                # PromptSpec 加载、SHA-256 版本追踪
+│   │   ├── providers.py              # LLM provider 抽象（OpenAI / DeepSeek 适配）
+│   │   └── tool_observations.py      # 工具调用结果观察数据处理
+│   ├── tools/                        # 工具系统
+│   │   ├── __init__.py
+│   │   ├── registry.py               # 工具发现 + LLM schema 生成（when-to-use/when-not-to-use）
+│   │   ├── gateway.py                # 唯一工具执行入口（写操作必经 Guard）
+│   │   └── retail_adapter.py         # Retail 数据适配器（tau3-bench 数据库 / 本地 db.json）
+│   ├── skills/                       # Skill 资产化
+│   │   ├── __init__.py
+│   │   ├── spec.py                   # SkillSpec 数据模型（intent pattern、entry tool、guard constraint）
+│   │   └── registry.py               # 8 个 SkillSpec 版本化注册表（per-skill 评测维度）
+│   ├── eval/                         # 评测系统
+│   │   ├── __init__.py
+│   │   ├── cases.py                  # EvalCase 定义与 curated/generalized/synthetic 用例管理
+│   │   ├── runner.py                 # Eval 运行器（curated/generalized/synthetic 模式）
+│   │   ├── baseline.py               # Baseline 对比（compare 双 JSON diff）
+│   │   ├── metrics.py                # 评测指标（pass rate、token usage、tool call 统计）
+│   │   ├── live_triage.py            # Live eval triage 报告（失败 root cause 分析）
+│   │   ├── triage_bundle.py          # 失败分类体系（14 种有序标签）
+│   │   ├── tau_loader.py             # tau3-bench 任务 → EvalCase 转换器
+│   │   ├── tau_user_simulator.py     # tau3-bench 用户模拟器
+│   │   ├── flywheel.py               # 数据飞轮（collect → generate → promote → check）
+│   │   ├── bad_case_store.py         # Bad case 持久化存储与 rehydrate
+│   │   └── golden_set.py             # Golden 回归用例管理
+│   ├── synthetic/                    # 合成数据生成
+│   │   ├── __init__.py
+│   │   ├── generator.py              # Seed-based LLM 合成场景生成器
+│   │   ├── families.py               # 场景族定义与变体生成（Phase 8a generalization）
+│   │   ├── adapter.py                # 合成数据适配器
+│   │   ├── language_variation.py     # 多语言变体生成
+│   │   └── oracle.py                 # Oracle 验证（合成数据正确性判定）
+│   ├── workbench/                    # Workbench 后端（FastAPI）
+│   │   ├── __init__.py
+│   │   ├── api.py                    # FastAPI 应用（REST 端点 + AgentOps 路由）
+│   │   ├── cli.py                    # Workbench CLI 入口（uv run workbench）
+│   │   ├── session.py                # 会话管理（session_id、state 缓存）
+│   │   ├── cases.py                  # Demo 案例定义与加载
+│   │   ├── agentops.py               # AgentOps 服务（trace 可视化 + KV cache 统计）
+│   │   ├── agentops_models.py        # AgentOps 数据模型
+│   │   ├── errors.py                 # 错误处理与 HTTP 异常
+│   │   └── snapshot.py               # DB 快照管理
+│   ├── ops/                          # 运维与审计
+│   │   ├── __init__.py
+│   │   ├── tracing.py                # TraceWriter（全链路审计输出）
+│   │   └── serialization.py          # 序列化工具（model_dump、哈希计算）
+│   ├── cli/                          # CLI 入口
+│   │   ├── __init__.py
+│   │   ├── chat.py                   # phase1-chat（脚本模式对话）
+│   │   ├── eval.py                   # phase2-eval（eval runner CLI）
+│   │   └── flywheel.py               # flywheel（数据飞轮 CLI）
+│   └── analysis/                     # 任务分析
+│       ├── __init__.py
+│       └── tau_task_analyzer.py      # tau3 零售任务空间分析器（supported/partial/unsupported 分类）
+├── workbench/                        # Workbench 前端（React + TypeScript + Vite）
+│   ├── package.json                  # 前端依赖
+│   ├── vite.config.ts                # Vite 构建配置
+│   ├── tsconfig.json                 # TypeScript 配置
+│   └── src/
+│       ├── main.tsx                  # React 入口
+│       ├── App.tsx                   # 根组件（路由 + 布局）
+│       ├── index.css                 # 全局样式
+│       ├── types.ts                  # TypeScript 类型定义
+│       ├── labels.ts                 # 中文标签映射
+│       ├── api.ts                    # Workbench REST API 调用层
+│       ├── agentopsApi.ts            # AgentOps API 调用层
+│       ├── agentopsTypes.ts          # AgentOps TypeScript 类型
+│       ├── caseTreeUtils.ts          # 案例树工具函数
+│       └── components/               # React 组件
+│           ├── CaseTree.tsx           # 案例树导航
+│           ├── Conversation.tsx       # 对话窗口
+│           ├── MessageCard.tsx        # 消息气泡组件
+│           ├── ToolCallCard.tsx       # 工具调用卡片
+│           ├── StepCard.tsx           # AgentStep 卡片
+│           ├── Timeline.tsx           # 时间线视图
+│           ├── EventDetailPanel.tsx   # 事件详情面板
+│           ├── EventCardHelpers.tsx   # 事件卡片辅助函数
+│           ├── StatusBadge.tsx        # 状态徽章
+│           ├── CollapseButton.tsx     # 折叠/展开按钮
+│           ├── WriteAuditCard.tsx     # 写入审计记录卡片
+│           ├── BusinessState.tsx      # 业务状态显示
+│           ├── AgentOpsBrowser.tsx    # AgentOps 浏览器
+│           ├── AgentOpsInspector.tsx  # AgentOps 审查器
+│           └── AgentOpsWorkspace.tsx  # AgentOps 工作区
+├── tests/                            # 测试
+│   ├── test_agent_core.py            # Agent 核心测试
+│   ├── test_session_state.py         # SessionState 测试
+│   ├── test_context_builder.py       # 上下文构建测试
+│   ├── test_tool_observations.py     # 工具观察测试
+│   ├── test_tool_schema.py           # 工具 schema 测试
+│   ├── test_eval_runner.py           # Eval runner 测试
+│   ├── test_eval_cli.py              # Eval CLI 测试
+│   ├── test_tau_loader.py            # tau3 加载器测试
+│   ├── test_tau_user_simulator.py    # tau3 用户模拟器测试
+│   ├── test_tau_task_analyzer.py     # 任务分析器测试
+│   ├── test_live_eval_triage.py      # Live triage 测试
+│   ├── test_flywheel.py              # Flywheel 数据飞轮测试
+│   ├── test_bad_case_store.py        # Bad case 存储测试
+│   ├── test_golden_set.py            # Golden 集合测试
+│   ├── test_generalization.py        # 泛化测试
+│   ├── test_cli_flywheel.py          # Flywheel CLI 测试
+│   ├── test_skill_registry.py        # Skill 注册表测试
+│   ├── test_synthetic.py             # 合成数据测试
+│   ├── test_providers.py             # LLM provider 测试
+│   ├── test_workbench_api.py         # Workbench API 测试
+│   ├── test_workbench_cases.py       # Workbench 案例测试
+│   ├── test_workbench_session.py     # Workbench 会话测试
+│   ├── test_workbench_snapshot.py    # Workbench 快照测试
+│   ├── test_workbench_agentops.py    # Workbench AgentOps 测试
+│   ├── test_workbench_cli.py         # Workbench CLI 测试
+│   └── test_workbench_errors.py      # Workbench 错误处理测试
+├── examples/                         # 示例数据
+│   └── chat/
+│       ├── cancel_order.json         # 取消订单对话脚本
+│       └── return_order.json         # 退货对话脚本
+├── cases/                            # Bad case 收集与 Golden 回归用例
+│   ├── bad_cases/                    # 失败案例沉淀（按日期 YAML 文件）
+│   └── golden.yaml                   # Golden 回归用例集
+├── docs/                             # 文档
+│   ├── DESIGN_SPEC.md               # 设计规约
+│   ├── portfolio-architecture.md     # 架构深度参考
+│   ├── design-audit.md               # 设计审计报告
+│   ├── design-llm-agent-tool-calling.md  # LLM Agent tool-calling 设计
+│   ├── discussion-llm-agent-architecture.md  # 架构讨论
+│   ├── discussion_with_cc.md         # 与 CC 的讨论记录
+│   ├── data-flow.md                  # 数据流文档
+│   ├── long-term-optimization-path.md  # 长期优化路线图
+│   ├── phase5-capability-matrix.md   # Phase 5 能力矩阵
+│   ├── tau-task-space-analysis.md    # tau3 任务空间分析
+│   └── optimize/
+│       ├── skill-assetization-retrospective.md       # Skill 资产化技术复盘
+│       └── deepseek-kv-cache-optimization-retrospective.md  # KV Cache 优化技术复盘
+└── .worktrees/                       # Git worktrees（实验分支，如 kv-cache-ab）
 ```
 
 ## Flywheel / Golden SOP
