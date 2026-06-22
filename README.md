@@ -388,6 +388,7 @@ uv run phase1-chat --script examples/chat/cancel_order.json
 # 启动 Workbench
 uv run workbench
 ```
+架构图参考见 [`diagrams/agentloop-mermaid.md`](diagrams/agentloop-mermaid.md)。
 
 深度架构参考见 [`docs/portfolio-architecture.md`](docs/portfolio-architecture.md)。
 
