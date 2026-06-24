@@ -147,6 +147,8 @@ class TurnContext(BaseModel):
     premature_refusal_corrected_count: int = 0
     context_truncation_count: int = 0
     context_truncation_summary: Optional[str] = None
+    prompt_injection_signal_count: int = 0
+    prompt_injection_signals: List[Dict[str, Any]] = Field(default_factory=list)
 
     # ── Phase 6: replay harness ──
     llm_responses: list[dict] = Field(default_factory=list)
