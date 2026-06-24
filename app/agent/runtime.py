@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -21,6 +22,11 @@ from app.ops.tracing import TraceWriter, final_state_summary
 from app.tools.gateway import ToolGateway
 from app.tools.registry import ToolRegistry
 from app.tools.retail_adapter import RetailAdapter, RetailRuntime
+
+_HUMAN_TRANSFER_RE = re.compile(
+    r"\b(?:human|person|agent|representative|support)\b",
+    re.IGNORECASE,
+)
 
 GUARD_USER_MESSAGES: dict[str, str] = {
     "replacement_item_product_mismatch": "I can only replace an item with another available option from the same product.",
@@ -60,6 +66,15 @@ def _map_guard_error_to_user_message(error: str) -> str:
         str(error),
         "I could not complete that update. Please try again or contact support.",
     )
+
+
+def _pending_action_prompt_injection_pattern_ids(
+    arguments: Dict[str, Any],
+) -> list[str]:
+    value = arguments.get("_prompt_injection_pattern_ids")
+    if not isinstance(value, list):
+        return []
+    return sorted({str(item) for item in value if str(item)})
 
 
 @dataclass
@@ -195,6 +210,16 @@ class AgentRuntime:
         if not session.authenticated_user_id:
             self._preflight_identity(session, content)
 
+        # 2b. Human transfer shortcut. If the user explicitly asks for a human,
+        # transfer before the LLM can choose a same-turn write request instead.
+        transfer_msg = self._preflight_human_transfer(session, content)
+        if transfer_msg is not None:
+            session.messages.append(Message(role="assistant", content=transfer_msg))
+            session.step_durations["handle_user_message"] = round(
+                (time.perf_counter() - t0) * 1000, 1
+            )
+            return transfer_msg
+
         # 3. LLM agent loop
         provider = self.provider
         if provider is None:
@@ -236,6 +261,27 @@ class AgentRuntime:
 
     # ── Pre-flight helpers ──
 
+    def _preflight_human_transfer(
+        self,
+        session: SessionState,
+        content: str,
+    ) -> Optional[str]:
+        if not _HUMAN_TRANSFER_RE.search(content):
+            return None
+        record = self.gateway.execute(
+            state=session,
+            tool_name="transfer_to_human_agents",
+            arguments={"summary": content[:500]},
+        )
+        session.add_step(
+            "preflight_human_transfer",
+            status=record.status,
+            tool_name="transfer_to_human_agents",
+        )
+        if record.status == "success":
+            return "YOU ARE BEING TRANSFERRED TO A HUMAN AGENT. PLEASE HOLD ON."
+        return "I'm unable to transfer you right now. Please try again or contact support."
+
     def _preflight_confirmation(
         self, session: SessionState, content: str
     ) -> Optional[str]:
@@ -248,10 +294,38 @@ class AgentRuntime:
 
         if resolution == "confirmed":
             action = session.pending_action
+            injection_pattern_ids = _pending_action_prompt_injection_pattern_ids(
+                action.arguments
+            )
+            if injection_pattern_ids:
+                safe_arguments = {
+                    key: value
+                    for key, value in action.arguments.items()
+                    if key != "_prompt_injection_pattern_ids"
+                }
+                AgentLoop._record_prompt_injection_write_block(
+                    session=session,
+                    tool_name=action.action_name,
+                    arguments=safe_arguments,
+                    pattern_ids=injection_pattern_ids,
+                )
+                session.pending_action = None
+                msg = (
+                    "I can't continue with that account or order change because "
+                    "the request included instruction-bypassing language. Please "
+                    "restate the request without those instructions, or I can help "
+                    "check the order or transfer you to a human agent."
+                )
+                session.messages.append(Message(role="assistant", content=msg))
+                return msg
             record = self.gateway.execute(
                 state=session,
                 tool_name=action.action_name,
-                arguments=action.arguments,
+                arguments={
+                    key: value
+                    for key, value in action.arguments.items()
+                    if key != "_prompt_injection_pattern_ids"
+                },
                 confirmed=True,
             )
             session.pending_action = None
