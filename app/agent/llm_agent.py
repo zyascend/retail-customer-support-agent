@@ -40,6 +40,57 @@ class AgentLoop:
     # ── Token budget for conversation history (excludes system prompt) ──
     _MESSAGE_TOKEN_BUDGET: int = 8000
 
+    _PROMPT_INJECTION_PATTERNS: list[tuple[str, str, re.Pattern]] = [
+        (
+            "instruction_override",
+            "high",
+            re.compile(
+                r"\b(?:ignore|disregard|forget)\b.{0,40}\b(?:previous|prior|above|system|developer)\b.{0,40}\b(?:instruction|prompt|rule)s?\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "system_prompt_exfiltration",
+            "high",
+            re.compile(
+                r"\b(?:reveal|show|print|dump|tell me)\b.{0,40}\b(?:system|developer)\s+prompt\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "role_rebinding",
+            "medium",
+            re.compile(
+                r"\byou\s+are\s+now\b|\bpretend\s+to\s+be\b|\bact\s+as\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "tool_bypass_or_forcing",
+            "high",
+            re.compile(
+                r"\b(?:call|invoke|use)\s+(?:the\s+)?tool\b|\bdo\s+not\s+use\s+(?:tools?|guards?)\b|\bbypass\s+(?:the\s+)?guard\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "secret_request",
+            "high",
+            re.compile(
+                r"\b(?:send|reveal|show|print|give)\b.{0,30}\b(?:api\s*key|password|secret|token|credential)s?\b",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "developer_message_spoofing",
+            "medium",
+            re.compile(
+                r"\bdeveloper\s+message\s+says\b|\bsystem\s+message\s+says\b|\byour\s+instructions\s+say\b",
+                re.IGNORECASE,
+            ),
+        ),
+    ]
+
     # ── Premature refusal safety net ──
 
     # Maps write intents to regex patterns for extracting from user messages.
@@ -1467,17 +1518,30 @@ class AgentLoop:
             {"role": "system", "content": system_prompt},
         ]
 
-        context_parts: list[str] = []
-        if truncation_summary:
-            context_parts.append(truncation_summary)
         if state_summary:
-            context_parts.append("Current Session State\n\n" + state_summary)
-        if context_parts:
             messages.append(
                 {
                     "role": "assistant",
-                    "content": "\n\n".join(context_parts),
+                    "content": "Current Session State\n\n" + state_summary,
                 }
+            )
+
+        untrusted_context = self._build_untrusted_context(
+            session, truncation_summary=truncation_summary
+        )
+        if untrusted_context:
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": "UNTRUSTED_CONTEXT\n\n" + untrusted_context,
+                }
+            )
+
+        if turn is not None:
+            self._record_prompt_injection_signals(
+                turn,
+                user_content=user_content,
+                untrusted_context=untrusted_context,
             )
 
         for msg in kept_msgs:
@@ -1499,6 +1563,94 @@ class AgentLoop:
                 allowed_tools=sorted(self._registry.tools),
             )
         return None
+
+    @staticmethod
+    def _truncate_signal_text(text: str, limit: int = 120) -> str:
+        compact = " ".join(text.split())
+        if len(compact) <= limit:
+            return compact
+        return compact[: limit - 3] + "..."
+
+    def _build_untrusted_context(
+        self,
+        session: SessionState,
+        *,
+        truncation_summary: str,
+    ) -> str:
+        parts: list[str] = []
+        if truncation_summary:
+            parts.append(truncation_summary)
+
+        recent_records = list(reversed(session.tool_results))[:3]
+        for record in recent_records:
+            observation = record.observation if isinstance(record.observation, dict) else {}
+            message_for_llm = observation.get("message_for_llm")
+            if isinstance(message_for_llm, str) and message_for_llm.strip():
+                parts.append(
+                    f"Tool hint from {record.tool_name}: "
+                    f"{self._truncate_signal_text(message_for_llm)}"
+                )
+
+            if record.status == "error" and record.error:
+                parts.append(
+                    f"Tool error from {record.tool_name}: "
+                    f"{self._truncate_signal_text(record.error)}"
+                )
+
+        return "\n\n".join(parts)
+
+    def _record_prompt_injection_signals(
+        self,
+        turn: TurnContext,
+        *,
+        user_content: str,
+        untrusted_context: str,
+    ) -> None:
+        signals: list[dict[str, Any]] = []
+        signals.extend(self._detect_prompt_injection_signals(user_content, source="user"))
+        if untrusted_context:
+            signals.extend(
+                self._detect_prompt_injection_signals(
+                    untrusted_context,
+                    source="untrusted_context",
+                )
+            )
+
+        if not signals:
+            return
+
+        turn.prompt_injection_signals.extend(signals)
+        turn.prompt_injection_signal_count = len(turn.prompt_injection_signals)
+        for signal in signals:
+            turn.add_step(
+                "prompt_injection_signal_detected",
+                source=signal["source"],
+                pattern_id=signal["pattern_id"],
+                severity=signal["severity"],
+                matched_text=signal["matched_text"],
+            )
+
+    def _detect_prompt_injection_signals(
+        self,
+        text: str,
+        *,
+        source: str,
+    ) -> list[dict[str, Any]]:
+        if not text:
+            return []
+
+        signals: list[dict[str, Any]] = []
+        for pattern_id, severity, pattern in self._PROMPT_INJECTION_PATTERNS:
+            for match in pattern.finditer(text):
+                signals.append(
+                    {
+                        "source": source,
+                        "pattern_id": pattern_id,
+                        "severity": severity,
+                        "matched_text": self._truncate_signal_text(match.group(0)),
+                    }
+                )
+        return signals
 
     # ── Premature refusal safety net ──
 

@@ -162,6 +162,15 @@ class AgentRuntime:
                     for turn_ctx in self._turn_contexts
                     for resp in turn_ctx.llm_responses
                 ],
+                "prompt_injection_signal_count": sum(
+                    turn_ctx.prompt_injection_signal_count
+                    for turn_ctx in self._turn_contexts
+                ),
+                "prompt_injection_signals": [
+                    signal
+                    for turn_ctx in self._turn_contexts
+                    for signal in turn_ctx.prompt_injection_signals
+                ],
             },
         )
         return AgentRunResult(
