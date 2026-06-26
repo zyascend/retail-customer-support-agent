@@ -51,6 +51,7 @@ class ToolExecutionError(BaseModel):
         "tool_execution_error",
         "guard_blocked",
         "prompt_injection_write_blocked",
+        "premature_transfer_blocked",
     ]
     message_for_llm: str
     retryable: bool

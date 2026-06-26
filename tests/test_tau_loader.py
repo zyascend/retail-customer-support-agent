@@ -537,3 +537,192 @@ def _config(root: Path) -> AppConfig:
         agent_llm_timeout_seconds=1.0,
         agent_llm_max_retries=0,
     )
+
+
+class TestGetTauAllCases:
+    """Tests for get_tau_all_cases() — loads all tau tasks including partial."""
+
+    def test_loads_all_tasks_including_partial(self, tmp_path: Path):
+        """get_tau_all_cases returns supported AND partial tasks."""
+        from app.eval.tau_loader import get_tau_all_cases
+
+        retail_dir = tmp_path / "domains" / "retail"
+        retail_dir.mkdir(parents=True)
+
+        tasks = [
+            {
+                "id": 0,
+                "user_scenario": {
+                    "instructions": {
+                        "reason_for_call": "You want to check order #W123.",
+                        "known_info": "Your name is Alice and you live in zip 12345.",
+                        "unknown_info": "",
+                    }
+                },
+                "evaluation_criteria": {
+                    "actions": [
+                        {
+                            "action_id": "1",
+                            "name": "find_user_id_by_name_zip",
+                            "arguments": {"first_name": "Alice", "last_name": "Smith", "zip": "12345"},
+                        },
+                        {
+                            "action_id": "2",
+                            "name": "get_order_details",
+                            "arguments": {"order_id": "#W123"},
+                        },
+                    ],
+                    "nl_assertions": [],
+                },
+            },
+            {
+                "id": 1,
+                "user_scenario": {
+                    "instructions": {
+                        "reason_for_call": "You want to check order #W456 and the agent should say $50.00.",
+                        "known_info": "Your name is Bob and you live in zip 67890.",
+                        "unknown_info": "",
+                    }
+                },
+                "evaluation_criteria": {
+                    "actions": [
+                        {
+                            "action_id": "1",
+                            "name": "find_user_id_by_name_zip",
+                            "arguments": {"first_name": "Bob", "last_name": "Jones", "zip": "67890"},
+                        },
+                        {
+                            "action_id": "2",
+                            "name": "get_order_details",
+                            "arguments": {"order_id": "#W456"},
+                        },
+                    ],
+                    "nl_assertions": ["Agent should tell the user the refund is $50.00."],
+                },
+            },
+        ]
+
+        (retail_dir / "tasks.json").write_text(json.dumps(tasks))
+        (retail_dir / "split_tasks.json").write_text(
+            json.dumps({"train": ["0", "1"], "test": [], "base": []})
+        )
+
+        config = _config(tmp_path)
+        cases = get_tau_all_cases(config)
+
+        # Should include both the supported and the partial (NL assertion) task
+        assert len(cases) == 2
+        case_ids = {c.case_id for c in cases}
+        assert "tau_0" in case_ids
+        assert "tau_1" in case_ids
+
+        # Partial task should have expected_assistant_contains extracted
+        partial_case = next(c for c in cases if c.case_id == "tau_1")
+        assert partial_case.expected_assistant_contains == "$50.00"
+        assert partial_case.max_turns == 10
+
+    def test_handles_zero_action_task(self, tmp_path: Path):
+        """get_tau_all_cases creates a minimal case for zero-action tasks."""
+        from app.eval.tau_loader import get_tau_all_cases
+
+        retail_dir = tmp_path / "domains" / "retail"
+        retail_dir.mkdir(parents=True)
+
+        tasks = [
+            {
+                "id": 24,
+                "user_scenario": {
+                    "instructions": {
+                        "reason_for_call": "Some unsupported request.",
+                        "known_info": "Your name is Test and you live in zip 00000.",
+                        "unknown_info": "",
+                    }
+                },
+                "evaluation_criteria": {
+                    "actions": [],
+                    "nl_assertions": [],
+                },
+            },
+        ]
+
+        (retail_dir / "tasks.json").write_text(json.dumps(tasks))
+        (retail_dir / "split_tasks.json").write_text(
+            json.dumps({"train": ["24"], "test": [], "base": []})
+        )
+
+        config = _config(tmp_path)
+        cases = get_tau_all_cases(config)
+
+        assert len(cases) == 1
+        case = cases[0]
+        assert case.case_id == "tau_24"
+        assert case.expected_no_write is True
+        assert case.max_turns == 1
+        assert case.subset == "tau_retail_all"
+
+    def test_all_cases_have_tau_retail_all_subset(self, tmp_path: Path):
+        """Every case from get_tau_all_cases uses subset='tau_retail_all'."""
+        from app.eval.tau_loader import get_tau_all_cases
+
+        retail_dir = tmp_path / "domains" / "retail"
+        retail_dir.mkdir(parents=True)
+
+        tasks = [
+            {
+                "id": 0,
+                "user_scenario": {
+                    "instructions": {
+                        "reason_for_call": "Check order #W1.",
+                        "known_info": "Your name is A and you live in zip 11111.",
+                        "unknown_info": "",
+                    }
+                },
+                "evaluation_criteria": {
+                    "actions": [
+                        {
+                            "action_id": "1",
+                            "name": "find_user_id_by_name_zip",
+                            "arguments": {"first_name": "A", "last_name": "B", "zip": "11111"},
+                        },
+                        {
+                            "action_id": "2",
+                            "name": "get_order_details",
+                            "arguments": {"order_id": "#W1"},
+                        },
+                    ],
+                    "nl_assertions": [],
+                },
+            },
+        ]
+
+        (retail_dir / "tasks.json").write_text(json.dumps(tasks))
+        (retail_dir / "split_tasks.json").write_text(
+            json.dumps({"train": ["0"], "test": [], "base": []})
+        )
+
+        config = _config(tmp_path)
+        cases = get_tau_all_cases(config)
+
+        for case in cases:
+            assert case.subset == "tau_retail_all", (
+                f"Expected tau_retail_all, got {case.subset} for {case.case_id}"
+            )
+
+
+def test_get_cases_supports_tau_retail_all_subset(monkeypatch):
+    """get_cases('tau_retail_all') dispatches to get_tau_all_cases."""
+    from app.eval import cases as cases_mod
+    from app.eval import tau_loader as loader_mod
+    from app.config import AppConfig
+
+    called_configs: list[AppConfig] = []
+
+    def fake_get_all(config_):
+        called_configs.append(config_)
+        return []
+
+    monkeypatch.setattr(loader_mod, "get_tau_all_cases", fake_get_all)
+
+    result = cases_mod.get_cases("tau_retail_all")
+    assert isinstance(result, list)
+    assert len(called_configs) == 1

@@ -396,6 +396,12 @@ class CuratedEvalRunner:
             for record in state.tool_results
             if record.status == "blocked" and record.error
         ]
+        blocked_tool_names = [
+            str(record.tool_name)
+            for record in state.tool_results
+            if record.status == "blocked"
+            and record.error != "explicit_confirmation_required"
+        ]
         tool_errors = sum(
             1 for record in state.tool_results if record.status == "error"
         )
@@ -422,6 +428,7 @@ class CuratedEvalRunner:
             ],
             tool_names=[record.tool_name for record in state.tool_results],
             guard_block_reasons=guard_block_reasons,
+            blocked_tool_names=blocked_tool_names,
             tool_errors=tool_errors,
             guard_blocks=guard_blocks,
             pending_action=state.pending_action is not None,
@@ -595,6 +602,7 @@ def classify_failure(
     assistant_messages: List[str],
     tool_names: List[str],
     guard_block_reasons: List[str],
+    blocked_tool_names: Optional[List[str]] = None,
     tool_errors: int,
     guard_blocks: int,
     pending_action: bool,
@@ -659,7 +667,16 @@ def classify_failure(
         if case.expected_guard_block_reason not in guard_block_reasons:
             return "expected_guard_block_missing"
     elif guard_blocks and not defer_intermediate_tool_failures:
-        return "guard_blocked"
+        # Tau whitelist: if blocked tools aren't in expected_tool_names,
+        # the guard did its job preventing an unwanted action.
+        if is_tau and blocked_tool_names and case.expected_tool_names:
+            expected_set = set(case.expected_tool_names)
+            if not (set(blocked_tool_names) & expected_set):
+                pass  # guard block is expected behavior
+            else:
+                return "guard_blocked"
+        else:
+            return "guard_blocked"
     # Tau subsets skip confirmation status check
     if not is_tau:
         if case.expected_confirmation_status:

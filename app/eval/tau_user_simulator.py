@@ -63,24 +63,74 @@ _user_db_path: str | None = None
 def _extract_name(instructions: dict) -> Optional[str]:
     """Extract user's full name from tau3 instructions."""
     known = instructions.get("known_info", "") or ""
+
+    # Pattern 1: "You are [X] in/from/with/living..." with optional
+    # "an interesting guy called" prefix
     m = re.search(
-        r"You (?:are|name is) ([\w\s]+?)(?: in| from| with|, and|, residing| \(| living| residing|\.|$)",
+        r"You(?:'re| are| name is)\s+"
+        r"(?:an?\s+\w+\s+\w+\s+(?:called|named)\s+)?"  # optional prefix
+        r"([\w\s]+?)"
+        r"(?:\s+in\s|\s+from\s|\s+with\s|\s+living\s|"
+        r",\s*(?:and|residing|but|you|living|\s)|"
+        r"\s+\(|\.|$)",
         known,
+        re.IGNORECASE,
     )
     if m:
-        return m.group(1).strip().rstrip(".")
-    m = re.search(r"Your name is ([\w\s]+?)(?:,| and|\.|$)", known)
+        name = m.group(1).strip()
+        if len(name) > 2 and name.lower() not in ("an", "the", "a"):
+            return name
+
+    # Pattern 2: "Your name is [X]..."
+    m = re.search(
+        r"Your name is\s+([\w\s]+?)(?:,| and|\.|$)",
+        known,
+        re.IGNORECASE,
+    )
     if m:
-        return m.group(1).strip().rstrip(".")
+        name = m.group(1).strip()
+        if len(name) > 2 and name.lower() not in ("an", "the", "a"):
+            return name
+
+    return None
+
+
+def _resolve_name_to_user_id(name: str) -> str | None:
+    """Extract a DB user ID from various name formats.
+
+    Handles:
+    - "Lucas (lucas_santos_6600)" → "lucas_santos_6600"
+    - "user noah_ito_3850" → "noah_ito_3850"
+    - "aarav_santos_2259" → "aarav_santos_2259"
+    """
+    # Strip "user " prefix
+    if name.lower().startswith("user "):
+        name = name[5:]
+    # Extract parenthesized user ID
+    m = re.search(r"\((\w+)\)", name)
+    if m:
+        return m.group(1).lower()
+    # Extract underscore-containing user ID
+    m = re.search(r"([a-z]+_[a-z]+_\d+)", name, re.IGNORECASE)
+    if m:
+        return m.group(1).lower()
+    # Fallback: replace spaces with underscores
+    if " " in name:
+        return name.replace(" ", "_").lower()
     return None
 
 
 def _extract_email(instructions: dict) -> Optional[str]:
-    """Extract email from tau3 instructions (handles parenthesized format)."""
+    """Extract email from tau3 instructions.
+
+    Returns the last email found — for multi-email tasks where the first
+    email is deliberately incorrect, the last one is usually the right one.
+    """
     known = instructions.get("known_info", "") or ""
-    m = _EMAIL_PATTERN.search(known)
-    if m:
-        return m.group(0)
+    emails = _EMAIL_PATTERN.findall(known)
+    if emails:
+        # Return the last email (often the correct one)
+        return emails[-1]
     unknown = instructions.get("unknown_info", "") or ""
     if "email" in unknown.lower() and "do not remember" in unknown.lower():
         return None
@@ -186,9 +236,16 @@ class TauUserSimulator:
         self.email = _extract_email(instructions)
         self.zip_code = _extract_zip(instructions)
 
-        # Resolve synthetic usernames (with underscores) to real DB names
-        if db_path and self.name and "_" in self.name:
-            user_record = _resolve_user_from_db(self.name, db_path)
+        # Resolve synthetic usernames (with underscores) to real DB names.
+        # Also handles names like "Lucas (lucas_santos_6600)" and
+        # "user noah_ito_3850" via _resolve_name_to_user_id.
+        if db_path and self.name:
+            resolved_id = (
+                _resolve_name_to_user_id(self.name)
+                or (self.name.replace(" ", "_").lower() if " " in self.name else None)
+            )
+            lookup_id = resolved_id or self.name
+            user_record = _resolve_user_from_db(lookup_id, db_path)
             if user_record:
                 real_name = user_record.get("name", {})
                 first = real_name.get("first_name", "")

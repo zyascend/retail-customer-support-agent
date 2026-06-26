@@ -289,6 +289,65 @@ def get_tau_supported_cases(config: AppConfig) -> list[EvalCase]:
     return cases
 
 
+def get_tau_all_cases(config: AppConfig) -> list[EvalCase]:
+    """Return ALL tau3 tasks as EvalCase list (target: 114 tasks).
+
+    Loads supported, partial, and unsupported tasks. For tasks with zero
+    actions (unsupported_unknown), converts with expected_no_write=True and
+    max_turns=1 so they are documented but don't gate. For partial tasks
+    with NL assertions, extracts response fragments when possible.
+    """
+    from app.analysis.tau_task_analyzer import (
+        _resolve_tau3_retail_dir,
+        classify_task,
+        load_splits,
+        load_tasks,
+    )
+
+    retail_dir = _resolve_tau3_retail_dir(config)
+    tasks = load_tasks(retail_dir)
+    splits = load_splits(retail_dir)
+
+    cases: list[EvalCase] = []
+
+    for task in tasks:
+        task_id = str(task["id"])
+        classification = classify_task(task, splits)
+
+        # Extract NL fragment for partial_nl_assertion tasks
+        expected_contains: str | None = None
+        if classification.has_nl_assertion:
+            expected_contains = _nl_response_fragment(task)
+
+        # Convert to EvalCase — only None for zero-action tasks
+        case = convert_task_to_eval_case(
+            task,
+            "tau_retail_all",
+            expected_assistant_contains=expected_contains,
+            max_turns=10 if classification.has_nl_assertion else 5,
+        )
+
+        if case is None:
+            # Zero-action tasks: still add a minimal case for documentation
+            user_message = _build_user_message(task)
+            case = EvalCase(
+                case_id=f"tau_{task_id}",
+                category="unknown",
+                messages=[{"role": "user", "content": user_message}],
+                expected_user_id="",
+                expected_intent="unknown",
+                expected_no_write=True,
+                max_turns=1,
+                subset="tau_retail_all",
+                capability="unknown",
+                scenario_family="tau3",
+            )
+
+        cases.append(case)
+
+    return cases
+
+
 def get_phase12_candidate_cases(
     config: AppConfig,
     *,
