@@ -1,16 +1,9 @@
 from __future__ import annotations
 
-import re
 from typing import Any, Optional
 
-# ── Module-level regex constants ──
-
-EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
-NAME_ZIP_RE = re.compile(
-    r"(?:my name is|i am|i'm)\s+([A-Za-z]+)\s+([A-Za-z]+).*?\bzip(?:[ -]?code)? is\s+(\d{5}(?:-\d{4})?)",
-    re.IGNORECASE,
-)
-# ── Pure parser / utility functions ──
+# ── 纯 parser / utility functions ──
+# EMAIL_RE / NAME_ZIP_RE 已迁至 app.agent.extraction（Layer 0 格式提取）。
 
 
 def clean_llm_scalar(value: Any) -> Optional[str]:

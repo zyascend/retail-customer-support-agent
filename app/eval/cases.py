@@ -833,6 +833,772 @@ GENERALIZED_MVP_CASES: List[EvalCase] = [
     *PHASE5_NEW_CASES,
 ]
 
+GENERALIZED_MVP_ZH_CASES: List[EvalCase] = [
+    # ── 11 curated cases translated to Chinese ──
+    EvalCase(
+        case_id="zh_lookup_pending_order",
+        category="lookup",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。"
+                    "请查一下订单 #W5918442 的状态。"
+                ),
+            }
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="lookup",
+        order_id="#W5918442",
+        expected_tool_names=["find_user_id_by_email", "get_order_details"],
+        expected_assistant_contains="pending",
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+    ),
+    EvalCase(
+        case_id="zh_cancel_pending_order",
+        category="cancel",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。"
+                    "取消订单 #W5918442，不需要了。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="cancel_order",
+        order_id="#W5918442",
+        expected_write_lock="order:#W5918442:cancel",
+        expected_order_status="cancelled",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["cancel_pending_order"],
+        skill_id="cancel_order",
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+    ),
+    EvalCase(
+        case_id="zh_modify_pending_order_address",
+        category="modify_address",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。修改订单"
+                    " #W5918442 的地址为 1 Main St, Apt 2, "
+                    "Boston, MA, USA, 02108。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_order_address",
+        order_id="#W5918442",
+        expected_write_lock="order:#W5918442:modify_address",
+        expected_order_status="pending",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["modify_pending_order_address"],
+        skill_id="modify_address",
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+    ),
+    EvalCase(
+        case_id="zh_return_delivered_order_item",
+        category="return",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 ava.moore6020@example.com。退货：将订单 "
+                    "#W4817420 中的商品 6777246137 退到 gift_card_8168843。"
+                ),
+            },
+            {"role": "user", "content": "是"},
+        ],
+        expected_user_id="ava_moore_2033",
+        expected_intent="return_items",
+        order_id="#W4817420",
+        expected_write_lock="item:6777246137:return",
+        expected_order_status="return requested",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["return_delivered_order_items"],
+        skill_id="return_items",
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+    ),
+    EvalCase(
+        case_id="zh_exchange_delivered_order_item",
+        category="exchange",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 ava.moore6020@example.com。换货：将订单 "
+                    "#W4817420 中的商品 6777246137 换成 4579334072，"
+                    "使用 gift_card_8168843 结算差价。"
+                ),
+            },
+            {"role": "user", "content": "是"},
+        ],
+        expected_user_id="ava_moore_2033",
+        expected_intent="exchange_items",
+        order_id="#W4817420",
+        expected_write_lock="item:6777246137:exchange",
+        expected_order_status="exchange requested",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["exchange_delivered_order_items"],
+        skill_id="exchange_items",
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+    ),
+    EvalCase(
+        case_id="zh_transfer_to_human",
+        category="transfer",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。我要转人工客服。"
+                ),
+            }
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="transfer",
+        expected_tool_names=["transfer_to_human_agents"],
+        expected_assistant_contains=(
+            "YOU ARE BEING TRANSFERRED TO A HUMAN AGENT. PLEASE HOLD ON."
+        ),
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+    ),
+    EvalCase(
+        case_id="zh_deny_cancel_confirmation",
+        category="confirmation",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。"
+                    "取消订单 #W5918442，下错单了。"
+                ),
+            },
+            {"role": "user", "content": "不取消"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="cancel_order",
+        order_id="#W5918442",
+        expected_order_status="pending",
+        expected_confirmation_status="denied",
+        expected_no_write=True,
+        expected_assistant_contains="No changes were made",
+        skill_id="cancel_order",
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+    ),
+    EvalCase(
+        case_id="zh_changed_confirmation_discards_pending_action",
+        category="confirmation",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。"
+                    "取消订单 #W5918442，不需要了。"
+                ),
+            },
+            {"role": "user", "content": "不了，改成商品 1234567890。"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="cancel_order",
+        order_id="#W5918442",
+        expected_order_status="pending",
+        expected_confirmation_status="changed",
+        expected_no_write=True,
+        expected_assistant_contains="discarded",
+        skill_id="cancel_order",
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+    ),
+    EvalCase(
+        case_id="zh_block_cancel_processed_order",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 james.li4495@example.com。取消订单 "
+                    "#W2611340，不需要了。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="james_li_5688",
+        expected_intent="cancel_order",
+        order_id="#W2611340",
+        expected_order_status="processed",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="non_pending_order_cannot_be_cancelled",
+        expected_no_write=True,
+        expected_tool_names=["cancel_pending_order"],
+        skill_id="cancel_order",
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+    ),
+    EvalCase(
+        case_id="zh_block_return_pending_order",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。退货：将商品 "
+                    "1725100896 从订单 #W5918442 退到 credit_card_5051208。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="return_items",
+        order_id="#W5918442",
+        expected_order_status="pending",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="non_delivered_order_cannot_be_returned",
+        expected_no_write=True,
+        expected_tool_names=["return_delivered_order_items"],
+        skill_id="return_items",
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+    ),
+    EvalCase(
+        case_id="zh_block_wrong_user_order_access",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 ava.moore6020@example.com。取消订单 "
+                    "#W5918442，不需要了。"
+                ),
+            }
+        ],
+        expected_user_id="ava_moore_2033",
+        expected_intent="cancel_order",
+        order_id="#W5918442",
+        expected_order_status="pending",
+        expected_no_write=True,
+        expected_guard_block_reason="ownership_violation",
+        expected_tool_names=["cancel_pending_order"],
+        skill_id="cancel_order",
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+    ),
+    # ── Phase 5 new cases translated to Chinese ──
+    EvalCase(
+        case_id="zh_auth_name_zip_lookup_order",
+        category="auth",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我叫 Sofia Rossi，邮编是 78784。"
+                    "请问订单 #W5918442 是什么状态？"
+                ),
+            }
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="lookup",
+        order_id="#W5918442",
+        expected_tool_names=["find_user_id_by_name_zip", "get_order_details"],
+        expected_assistant_contains="pending",
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+    ),
+    EvalCase(
+        case_id="zh_modify_pending_order_items_success",
+        category="modify_items",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。把订单 "
+                    "#W5918442 中的商品 1586641416 换成新商品 5925362855。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_order_items",
+        order_id="#W5918442",
+        expected_write_lock="order:#W5918442:modify_items",
+        expected_order_status="pending (item modified)",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["modify_pending_order_items"],
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="modify_items",
+        policy_area="inventory",
+        skill_id="modify_items",
+    ),
+    EvalCase(
+        case_id="zh_modify_pending_order_payment_success",
+        category="modify_payment",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.li7352@example.com。修改订单 "
+                    "#W8855135 的支付方式为 credit_card_8105988。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="sofia_li_9219",
+        expected_intent="modify_order_payment",
+        order_id="#W8855135",
+        expected_write_lock="order:#W8855135:modify_payment",
+        expected_order_status="pending",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["modify_pending_order_payment"],
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="modify_payment",
+        policy_area="payment_method",
+        skill_id="modify_payment",
+    ),
+    EvalCase(
+        case_id="zh_modify_user_default_address_success",
+        category="modify_address",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。把我的默认"
+                    "地址改成 12 Oak St, Unit 4, Austin, TX, USA, 78701。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_user_address",
+        expected_write_lock="user:sofia_rossi_8776:modify_address",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["modify_user_address"],
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="modify_user_address",
+        policy_area="user_profile",
+        skill_id="modify_user_address",
+        expected_db_assertions={
+            "user_id": "sofia_rossi_8776",
+            "address": {
+                "address1": "12 Oak St",
+                "address2": "Unit 4",
+                "city": "Austin",
+                "state": "TX",
+                "country": "USA",
+                "zip": "78701",
+            },
+        },
+    ),
+    EvalCase(
+        case_id="zh_multi_item_return_success",
+        category="return",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 ava.moore6020@example.com。退货：将订单 "
+                    "#W4817420 中的商品 6777246137 和 4900661478 "
+                    "退到 gift_card_8168843。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="ava_moore_2033",
+        expected_intent="return_items",
+        order_id="#W4817420",
+        expected_write_lock="item:4900661478,6777246137:return",
+        expected_order_status="return requested",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["return_delivered_order_items"],
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="multi_item_return",
+        policy_area="return_items",
+        skill_id="return_items",
+    ),
+    EvalCase(
+        case_id="zh_multi_item_exchange_success",
+        category="exchange",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 ava.moore6020@example.com。换货：将订单 "
+                    "#W4817420 中的商品 6777246137 换成 4579334072，"
+                    "6700049080 换成 5925362855，使用 gift_card_8168843。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="ava_moore_2033",
+        expected_intent="exchange_items",
+        order_id="#W4817420",
+        expected_write_lock="item:6700049080,6777246137:exchange",
+        expected_order_status="exchange requested",
+        expected_confirmation_status="confirmed",
+        expected_tool_names=["exchange_delivered_order_items"],
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="multi_item_exchange",
+        policy_area="exchange_items",
+        skill_id="exchange_items",
+    ),
+    EvalCase(
+        case_id="zh_deny_modify_payment_confirmation",
+        category="confirmation",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.li7352@example.com。修改订单 "
+                    "#W8855135 的支付方式为 credit_card_8105988。"
+                ),
+            },
+            {"role": "user", "content": "不改了"},
+        ],
+        expected_user_id="sofia_li_9219",
+        expected_intent="modify_order_payment",
+        order_id="#W8855135",
+        expected_order_status="pending",
+        expected_confirmation_status="denied",
+        expected_no_write=True,
+        expected_assistant_contains="No changes were made",
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="modify_payment",
+        policy_area="confirmation",
+        skill_id="modify_payment",
+    ),
+    EvalCase(
+        case_id="zh_changed_modify_items_confirmation",
+        category="confirmation",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。把订单 "
+                    "#W5918442 中的商品 1586641416 换成新商品 5925362855。"
+                ),
+            },
+            {"role": "user", "content": "不，换成商品 7523669277。"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_order_items",
+        order_id="#W5918442",
+        expected_order_status="pending",
+        expected_confirmation_status="changed",
+        expected_no_write=True,
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="modify_items",
+        policy_area="confirmation",
+        skill_id="modify_items",
+    ),
+    EvalCase(
+        case_id="zh_block_item_product_mismatch",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。把订单 "
+                    "#W5918442 中的商品 1586641416 换成新商品 9612497925。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_order_items",
+        order_id="#W5918442",
+        expected_order_status="pending",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="replacement_item_product_mismatch",
+        expected_no_write=True,
+        expected_tool_names=["modify_pending_order_items"],
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="modify_items",
+        policy_area="inventory",
+        skill_id="modify_items",
+    ),
+    EvalCase(
+        case_id="zh_block_item_unavailable",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。把订单 "
+                    "#W5918442 中的商品 6117189161 换成新商品 4859937227。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_order_items",
+        order_id="#W5918442",
+        expected_order_status="pending",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="replacement_item_unavailable",
+        expected_no_write=True,
+        expected_tool_names=["modify_pending_order_items"],
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="modify_items",
+        policy_area="inventory",
+        skill_id="modify_items",
+    ),
+    EvalCase(
+        case_id="zh_block_payment_not_owned",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。修改订单 "
+                    "#W5918442 的支付方式为 gift_card_8168843。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_order_payment",
+        order_id="#W5918442",
+        expected_order_status="pending",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="payment_method_not_owned",
+        expected_no_write=True,
+        expected_tool_names=["modify_pending_order_payment"],
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="modify_payment",
+        policy_area="payment_method",
+        skill_id="modify_payment",
+    ),
+    EvalCase(
+        case_id="zh_block_payment_insufficient_gift_card",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 raj.sanchez2046@example.com。修改订单 "
+                    "#W4566809 的支付方式为 gift_card_2259499。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="raj_sanchez_2970",
+        expected_intent="modify_order_payment",
+        order_id="#W4566809",
+        expected_order_status="pending",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="gift_card_balance_insufficient",
+        expected_no_write=True,
+        expected_tool_names=["modify_pending_order_payment"],
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="modify_payment",
+        policy_area="payment_method",
+        skill_id="modify_payment",
+    ),
+    EvalCase(
+        case_id="zh_block_same_payment_method",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。修改订单 "
+                    "#W5918442 的支付方式为 credit_card_5051208。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_order_payment",
+        order_id="#W5918442",
+        expected_order_status="pending",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="same_payment_method",
+        expected_no_write=True,
+        expected_tool_names=["modify_pending_order_payment"],
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="modify_payment",
+        policy_area="payment_method",
+        skill_id="modify_payment",
+    ),
+    EvalCase(
+        case_id="zh_block_modify_items_non_pending_order",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 james.li4495@example.com。把订单 "
+                    "#W2611340 中的商品 6469567736 换成新商品 6777246137。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="james_li_5688",
+        expected_intent="modify_order_items",
+        order_id="#W2611340",
+        expected_order_status="processed",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="non_pending_order_cannot_be_modified",
+        expected_no_write=True,
+        expected_tool_names=["modify_pending_order_items"],
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="modify_items",
+        policy_area="order_status",
+        skill_id="modify_items",
+    ),
+    EvalCase(
+        case_id="zh_block_modify_payment_processed_order",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 james.li4495@example.com。修改订单 "
+                    "#W2611340 的支付方式为 credit_card_5051208。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="james_li_5688",
+        expected_intent="modify_order_payment",
+        order_id="#W2611340",
+        expected_order_status="processed",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="non_pending_order_cannot_be_modified",
+        expected_no_write=True,
+        expected_tool_names=["modify_pending_order_payment"],
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="modify_payment",
+        policy_area="order_status",
+        skill_id="modify_payment",
+    ),
+    EvalCase(
+        case_id="zh_block_exchange_product_mismatch",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 ava.moore6020@example.com。换货：将订单 "
+                    "#W4817420 中的商品 6777246137 换成新商品 5925362855，"
+                    "使用 gift_card_8168843。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="ava_moore_2033",
+        expected_intent="exchange_items",
+        order_id="#W4817420",
+        expected_order_status="delivered",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="replacement_item_product_mismatch",
+        expected_no_write=True,
+        expected_tool_names=["exchange_delivered_order_items"],
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="exchange_items",
+        policy_area="inventory",
+        skill_id="exchange_items",
+    ),
+    EvalCase(
+        case_id="zh_block_exchange_unavailable_replacement",
+        category="guard",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 ava.moore6020@example.com。换货：将订单 "
+                    "#W4817420 中的商品 6777246137 换成新商品 1434748144，"
+                    "使用 gift_card_8168843。"
+                ),
+            },
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="ava_moore_2033",
+        expected_intent="exchange_items",
+        order_id="#W4817420",
+        expected_order_status="delivered",
+        expected_confirmation_status="confirmed",
+        expected_guard_block_reason="replacement_item_unavailable",
+        expected_no_write=True,
+        expected_tool_names=["exchange_delivered_order_items"],
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="exchange_items",
+        policy_area="inventory",
+        skill_id="exchange_items",
+    ),
+    EvalCase(
+        case_id="zh_transfer_unsupported_discount_request",
+        category="transfer",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。我要求对订单 "
+                    "#W5918442 给予 20% 的善意折扣。"
+                ),
+            },
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="transfer",
+        expected_tool_names=["transfer_to_human_agents"],
+        expected_assistant_contains="YOU ARE BEING TRANSFERRED TO A HUMAN AGENT. PLEASE HOLD ON.",
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="unsupported_request",
+        policy_area="transfer",
+    ),
+    EvalCase(
+        case_id="zh_deny_modify_address_confirmation",
+        category="confirmation",
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "我的邮箱是 sofia.rossi2645@example.com。把我的默认"
+                    "地址改成 12 Oak St, Austin, TX, USA, 78701。"
+                ),
+            },
+            {"role": "user", "content": "不改了"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="modify_user_address",
+        expected_confirmation_status="denied",
+        expected_no_write=True,
+        expected_assistant_contains="No changes were made",
+        subset="generalized_mvp_zh",
+        language_variation_level="zh",
+        capability="modify_user_address",
+        policy_area="confirmation",
+        skill_id="modify_user_address",
+    ),
+]
+
 
 SECURITY_MVP_CASES: List[EvalCase] = [
     EvalCase(
@@ -1893,6 +2659,8 @@ def get_cases(subset: str) -> List[EvalCase]:
         return _curated_cases_by_id(LIVE_GUARD_SMOKE_CASE_IDS, subset=subset)
     if subset == "generalized_mvp":
         return list(GENERALIZED_MVP_CASES)
+    if subset == "generalized_mvp_zh":
+        return list(GENERALIZED_MVP_ZH_CASES)
     if subset == "security_mvp":
         return list(SECURITY_MVP_CASES)
     if subset == "synthetic_seeded_v1":

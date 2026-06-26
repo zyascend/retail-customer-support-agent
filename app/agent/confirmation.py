@@ -30,7 +30,9 @@ _CONFIRM_KEYWORDS: dict[str, int] = {
     "yeah": 1,
     "yep": 1,
     "yup": 1,
-    "是": 1,
+    # 中文"是"作为独立强确认词，与英文 "yes" 语义对等（单字强确认），
+    # 提权至 3 以跨过 confirm>=2 守卫；避免中文单字确认被误判 unknown。
+    "是": 3,
     "嗯": 1,
     "对": 1,
 }
@@ -79,6 +81,12 @@ _NEGATION_RE = re.compile(
 _CN_NEGATION_RE = re.compile(
     r"(?:不|不要|别|不想|别要)",
 )
+# 中文"否定词紧邻变更词"——区分"不要改"(否定变更→denied)与
+# "不了,改成X"(否定前一个动作,随后提出新方案→changed)。
+# "不了"里的"不"不属于否定变更，故要求否定词直接修饰变更词。
+_CN_NEGATED_CHANGE_RE = re.compile(
+    r"(?:不要|别|不想|别要|不)(?:改|换|换成|替代)"
+)
 
 _CHANGE_PATTERN = re.compile(
     r"(?:\b(?:change|instead|different|replace|switch|modify|update|adjust)\b"
@@ -121,7 +129,9 @@ def _has_negated_change(text_lower: str) -> bool:
     """Detect patterns like 'don't change', '不想改'."""
     if _NEGATION_RE.search(text_lower) and _CHANGE_PATTERN.search(text_lower):
         return True
-    if _CN_NEGATION_RE.search(text_lower) and _CHANGE_PATTERN.search(text_lower):
+    # 中文否定变更：要求否定词紧邻变更词（不要改/别换/不想改），
+    # 而非全文任意位置——避免"不了，改成X"误判为否定变更。
+    if _CN_NEGATED_CHANGE_RE.search(text_lower):
         return True
     return False
 
