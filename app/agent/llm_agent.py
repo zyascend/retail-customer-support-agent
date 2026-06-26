@@ -152,6 +152,19 @@ class AgentLoop:
         ),
     ]
 
+    # Simple keyword patterns for write intent detection (no order_id required).
+    # Used by _block_premature_transfer to detect write intent in user messages
+    # that may not contain explicit order IDs.
+    _WRITE_KEYWORD_PATTERNS: list[tuple[str, re.Pattern]] = [
+        ("cancel_pending_order", re.compile(r"\bcancel\b", re.IGNORECASE)),
+        ("return_delivered_order_items", re.compile(r"\breturn\b", re.IGNORECASE)),
+        ("exchange_delivered_order_items", re.compile(r"\bexchange\b", re.IGNORECASE)),
+        ("modify_pending_order_address", re.compile(r"\baddress\b", re.IGNORECASE)),
+        ("modify_pending_order_items", re.compile(r"\b(?:modify|change|replace|upgrade|switch)\b", re.IGNORECASE)),
+        ("modify_pending_order_payment", re.compile(r"\bpayment\b", re.IGNORECASE)),
+        ("modify_user_address", re.compile(r"\b(?:my\s+)?address\b", re.IGNORECASE)),
+    ]
+
     # Patterns that indicate the LLM refused without calling a write tool.
     # Covers ownership-based and status-based refusals (section 3.2).
     _REFUSAL_PATTERNS: list[re.Pattern] = [
@@ -520,7 +533,85 @@ class AgentLoop:
         )
         if redundant_payment_msg is not None:
             return None, redundant_payment_msg
-        return self._step_tool_execute_inner(session, tool_call, turn, 0)
+        return self._step_tool_execute_inner(session, tool_call, turn, 0, user_content)
+
+    def _block_premature_transfer(
+        self,
+        session: SessionState,
+        tool_call: ToolCallRequest,
+        user_content: str,
+        turn: TurnContext,
+    ) -> tuple[ToolCallRecord, dict[str, Any]] | None:
+        """Block transfer_to_human_agents when LLM should try write tool first.
+
+        Detects the pattern: LLM loaded user/order data successfully, then
+        called transfer_to_human_agents instead of attempting the write tool.
+        Returns a synthetic error that guides the LLM to try the write tool
+        first, letting the guard layer decide.
+        """
+        if tool_call.tool_name != "transfer_to_human_agents":
+            return None
+        if not session.authenticated_user_id:
+            return None
+
+        # Check: has any write tool been attempted recently?
+        write_tool_names = self._ORDER_WRITE_TOOLS | {"modify_user_address"}
+        recent_calls = [
+            tc.tool_name
+            for tc in list(session.tool_results)[-5:]
+        ]
+        if any(t in write_tool_names for t in recent_calls):
+            return None  # write was already attempted, let transfer proceed
+
+        # Check: does user's request match a write intent?
+        matched_tool: str | None = None
+        for tool_name, pattern in self._WRITE_KEYWORD_PATTERNS:
+            if pattern.search(user_content):
+                matched_tool = tool_name
+                break
+        if matched_tool is None:
+            return None  # no write intent detected, let transfer proceed
+
+        # Check: is there loaded context suggesting the write could work?
+        has_orders = bool(session.loaded_context.orders)
+        has_users = bool(session.loaded_context.users)
+        if not has_orders and not has_users:
+            return None  # no context loaded, transfer is reasonable
+
+        # All checks passed: this is a premature transfer.
+        turn.add_step(
+            "premature_transfer_blocked",
+            tool_name=matched_tool,
+        )
+
+        record = ToolCallRecord(
+            tool_name="transfer_to_human_agents",
+            arguments=dict(tool_call.arguments),
+            tool_kind="generic",
+            status="blocked",
+            observation={},
+            error="premature_transfer_blocked",
+            block_context={"matched_write_tool": matched_tool},
+        )
+        session.tool_results.append(record)
+
+        error_msg = ToolExecutionError(
+            error_type="premature_transfer_blocked",
+            message_for_llm=(
+                f"Do not transfer yet. You have loaded the user's data and "
+                f"the request matches a '{matched_tool}' action. Call "
+                f"{matched_tool} (or the appropriate read tools first, then "
+                f"the write tool) so the guard can evaluate it. Only transfer "
+                f"if the guard blocks the write or the user explicitly asks."
+            ),
+            retryable=True,
+            block_context={"matched_write_tool": matched_tool},
+        )
+        return record, {
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "content": error_msg.model_dump_json(),
+        }
 
     def _block_high_risk_prompt_injection_write(
         self,
@@ -607,6 +698,7 @@ class AgentLoop:
         tool_call: ToolCallRequest,
         turn: TurnContext,
         auto_load_retries: int,
+        user_content: str = "",
     ) -> tuple[ToolCallRecord | None, dict[str, Any] | None]:
         """Execute a single tool call with optional auto-load retry."""
         # Pre-gateway validation
@@ -619,6 +711,15 @@ class AgentLoop:
             }
 
         t0 = time.perf_counter()
+
+        # Block premature transfer: intercept before gateway execution
+        if tool_call.tool_name == "transfer_to_human_agents":
+            pt_block = self._block_premature_transfer(
+                session, tool_call, user_content, turn
+            )
+            if pt_block is not None:
+                return pt_block
+
         record = self._gateway.execute(
             state=session,
             tool_name=tool_call.tool_name,
@@ -638,7 +739,7 @@ class AgentLoop:
             loaded = self._auto_load_missing_context(session, tool_call, turn)
             if loaded:
                 return self._step_tool_execute_inner(
-                    session, tool_call, turn, auto_load_retries + 1
+                    session, tool_call, turn, auto_load_retries + 1, user_content
                 )
 
         # Build tool observation message
