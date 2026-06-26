@@ -21,6 +21,8 @@ DEFAULT_AGENT_LLM_TIMEOUT_SECONDS = 30.0
 DEFAULT_AGENT_LLM_MAX_RETRIES = 2
 # Experimental tools stay OFF until a live-eval A/B proves they help.
 DEFAULT_ENABLE_THINK_TOOL = False
+DEFAULT_LLM_PROVIDER_TYPE = "deepseek"
+DEFAULT_OLLAMA_MODEL = "qwen3.5:2b"
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,8 @@ class AppConfig:
     agent_llm_timeout_seconds: float
     agent_llm_max_retries: int
     enable_think_tool: bool = False
+    llm_provider_type: str = DEFAULT_LLM_PROVIDER_TYPE
+    ollama_model: str = DEFAULT_OLLAMA_MODEL
 
     @property
     def retail_domain_dir(self) -> Path:
@@ -96,6 +100,8 @@ def resolve_config(
         enable_think_tool=_bool_env(
             "ENABLE_THINK_TOOL", DEFAULT_ENABLE_THINK_TOOL
         ),
+        llm_provider_type=os.getenv("LLM_PROVIDER_TYPE", DEFAULT_LLM_PROVIDER_TYPE),
+        ollama_model=os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL),
     )
     return config
 

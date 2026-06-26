@@ -354,7 +354,41 @@ def build_default_provider(
     timeout: float = 30.0,
     max_retries: int = 2,
     require_llm: bool = False,
+    provider_type: str = "deepseek",
+    ollama_model: str = "",
 ) -> Optional[LLMProvider]:
+    return _build_provider(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        timeout=timeout,
+        max_retries=max_retries,
+        require_llm=require_llm,
+        provider_type=provider_type,
+        ollama_model=ollama_model,
+    )
+
+
+def _build_provider(
+    *,
+    api_key: str,
+    base_url: str,
+    model: str,
+    timeout: float = 30.0,
+    max_retries: int = 2,
+    require_llm: bool = False,
+    provider_type: str = "deepseek",
+    ollama_model: str = "",
+) -> Optional[LLMProvider]:
+    if provider_type == "ollama":
+        actual_model = ollama_model or model
+        return DeepSeekProvider(
+            api_key="ollama",
+            base_url="http://localhost:11434/v1",
+            model=actual_model,
+            timeout=timeout,
+            max_retries=max_retries,
+        )
     if not api_key:
         if require_llm:
             raise ValueError("DEEPSEEK_API_KEY is required when LLM is required")
