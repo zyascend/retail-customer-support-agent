@@ -10,7 +10,7 @@ import yaml
 
 from app.eval.bad_case_store import BadCaseStore, build_bad_case_record
 from app.eval.cases import EvalCase, get_cases
-from app.eval.golden_set import GoldenSet
+from app.eval.golden_set import GoldenSet, _deserialize_case, _serialize_case
 from app.eval.live_triage import summarize_failure
 from app.eval.runner import CuratedEvalRunner
 from app.synthetic.generator import SyntheticDBGenerator
@@ -201,6 +201,13 @@ def check(
 ) -> CheckResult:
     golden_cases = get_cases("golden")
     if not golden_cases:
+        import sys
+
+        print(
+            "[flywheel] WARNING: golden set 为空，飞轮回归守护未生效。"
+            "跑 eval 有失败时会自动收集候选，用 `flywheel promote-pending` 提升后即生效。",
+            file=sys.stderr,
+        )
         return CheckResult(statuses=[], has_regressions=False, exit_code=0)
 
     if run_golden is not None:
@@ -300,8 +307,6 @@ def _build_gate_variants(case: EvalCase) -> list[EvalCase]:
 
 
 def _write_cases_yaml(path: Path, cases: list[EvalCase]) -> None:
-    from app.eval.golden_set import _serialize_case
-
     path.write_text(
         yaml.safe_dump(
             {"cases": [_serialize_case(case) for case in cases]},
@@ -312,7 +317,172 @@ def _write_cases_yaml(path: Path, cases: list[EvalCase]) -> None:
     )
 
 
+def _load_cases_yaml(path: Path) -> list[EvalCase]:
+    """从 golden/pending 格式的 YAML 加载 case 列表。文件不存在或空返回 []。"""
+    if not path.exists():
+        return []
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        return []
+    cases = data.get("cases", [])
+    if not isinstance(cases, list):
+        return []
+    return [_deserialize_case(case) for case in cases if isinstance(case, Mapping)]
+
+
 def _result_value(result: Any, key: str) -> Any:
     if isinstance(result, Mapping):
         return result.get(key)
     return getattr(result, key, None)
+
+
+# ── 自动化飞轮：失败即候选 + 批量 promote ──
+# 设计见 docs/plans（飞轮自动化）。跳过 synthetic generate——手写 case
+# 走不通 synthetic（9 个固定 variant_type + 合成世界 ID 不匹配），失败
+# case 直接作为 golden 候选，由人 promote。
+
+DEFAULT_PENDING_PATH = Path("cases/pending_promote.yaml")
+
+
+@dataclass(frozen=True)
+class AutoCollectResult:
+    """auto_collect_after_eval 的返回。无失败时 collected_count=0。"""
+    collected_count: int
+    pending_path: Path
+    case_ids: list[str]
+    subset: str
+
+
+def auto_collect_after_eval(
+    summary: Any,
+    *,
+    golden_path: Path = Path("cases/golden.yaml"),
+    bad_cases_path: Path = Path("cases/bad_cases"),
+    pending_path: Path = DEFAULT_PENDING_PATH,
+) -> AutoCollectResult:
+    """eval 跑完后自动收集失败 case 为 golden 候选。
+
+    复用现有 collect() 把失败 case 写入 bad_case_store（按日期留痕），
+    再把 collected 的 case 追加到 pending_promote.yaml（候选清单）。
+    无失败 → 不写 pending，返回空结果（不刷屏）。
+    """
+    subset = str(getattr(summary, "subset", "") or "")
+    report_path_str = str(getattr(summary, "report_artifact_path", "") or "")
+    if not report_path_str:
+        return AutoCollectResult(
+            collected_count=0, pending_path=pending_path, case_ids=[], subset=subset
+        )
+    report_path = Path(report_path_str).expanduser()
+    if not report_path.exists():
+        return AutoCollectResult(
+            collected_count=0, pending_path=pending_path, case_ids=[], subset=subset
+        )
+
+    flywheel = build_flywheel(golden_path=golden_path, bad_cases_path=bad_cases_path)
+    collect_result = collect(
+        flywheel=flywheel,
+        report_path=report_path,
+        subset=subset,
+    )
+    if collect_result.collected_count == 0:
+        return AutoCollectResult(
+            collected_count=0, pending_path=pending_path, case_ids=[], subset=subset
+        )
+
+    # 把 collected 的 case 写入 pending 候选清单（去重：已在 golden 或 pending 的不重复加）
+    cases_by_id = {case.case_id: case for case in get_cases(subset)}
+    collected_cases = [
+        cases_by_id[cid]
+        for cid in collect_result.case_ids
+        if cid in cases_by_id
+    ]
+    existing_pending = _load_cases_yaml(pending_path)
+    existing_ids = {case.case_id for case in existing_pending}
+    golden_ids = {case.case_id for case in flywheel.golden_set.cases}
+    new_cases = [
+        case
+        for case in collected_cases
+        if case.case_id not in existing_ids and case.case_id not in golden_ids
+    ]
+    if not new_cases:
+        return AutoCollectResult(
+            collected_count=collect_result.collected_count,
+            pending_path=pending_path,
+            case_ids=[],
+            subset=subset,
+        )
+    _write_cases_yaml(pending_path, existing_pending + new_cases)
+    return AutoCollectResult(
+        collected_count=collect_result.collected_count,
+        pending_path=pending_path,
+        case_ids=[case.case_id for case in new_cases],
+        subset=subset,
+    )
+
+
+@dataclass(frozen=True)
+class PromotePendingResult:
+    promoted_ids: list[str]
+    skipped_ids: list[str]
+    remaining_count: int
+
+
+def promote_pending(
+    *,
+    golden_path: Path = Path("cases/golden.yaml"),
+    pending_path: Path = DEFAULT_PENDING_PATH,
+    case_ids: list[str] | None = None,
+    confirmed_all: bool = False,
+    confirm_callback: Callable[[str], bool] | None = None,
+) -> PromotePendingResult:
+    """批量 promote pending 候选到 golden。
+
+    - ``case_ids`` 非空：只 promote 指定的 case_id。
+    - ``confirmed_all=True``：全部 promote（无需逐个确认）。
+    - ``confirm_callback``：交互式逐个确认，回调返回 True 则 promote。
+      三者都未提供且非 confirmed_all → 抛 ValueError（需明确确认方式）。
+    """
+    pending_cases = _load_cases_yaml(pending_path)
+    if not pending_cases:
+        return PromotePendingResult(
+            promoted_ids=[], skipped_ids=[], remaining_count=0
+        )
+
+    golden_set = GoldenSet.load(golden_path)
+    golden_ids = {case.case_id for case in golden_set.cases}
+
+    target_ids = set(case_ids) if case_ids else {case.case_id for case in pending_cases}
+    promoted: list[str] = []
+    skipped: list[str] = []
+
+    for case in pending_cases:
+        if case.case_id not in target_ids:
+            continue
+        if case.case_id in golden_ids:
+            skipped.append(case.case_id)
+            continue
+        should_promote = confirmed_all
+        if not confirmed_all and confirm_callback is not None:
+            should_promote = confirm_callback(case.case_id)
+        if should_promote:
+            golden_set.cases.append(case)
+            golden_ids.add(case.case_id)
+            promoted.append(case.case_id)
+        else:
+            skipped.append(case.case_id)
+
+    if promoted:
+        golden_set.save()
+
+    # 从 pending 移除已 promote 的，保留未决策/跳过的
+    remaining = [case for case in pending_cases if case.case_id not in promoted]
+    if remaining:
+        _write_cases_yaml(pending_path, remaining)
+    elif pending_path.exists():
+        pending_path.write_text("cases: []\n", encoding="utf-8")
+
+    return PromotePendingResult(
+        promoted_ids=promoted,
+        skipped_ids=skipped,
+        remaining_count=len(remaining),
+    )

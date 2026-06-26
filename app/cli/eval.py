@@ -77,6 +77,10 @@ def eval_main(argv: Optional[list[str]] = None) -> int:
         print(json.dumps(summary.as_dict(), indent=2, sort_keys=True))
     else:
         _print_summary(summary)
+        # 自动飞轮：有失败时收集为 golden 候选，终端打印清单（方式 A）。
+        # 100% 时不触发（不刷屏）；--json 模式不触发（保持输出纯净）。
+        if summary.passed_count < summary.case_count:
+            _try_auto_flywheel(summary)
     return 0 if summary.passed_count == summary.case_count else 1
 
 
@@ -240,6 +244,36 @@ def _print_summary(summary: object) -> None:
         print(f"[{status}] {result.case_id}: {result.failure_label or 'ok'}")
     print(f"artifact: {summary.result_artifact_path}")
     print(f"report: {summary.report_artifact_path}")
+
+
+def _try_auto_flywheel(summary: object) -> None:
+    """eval 跑完自动收集失败 case 为 golden 候选，终端打印清单。
+
+    静默降级：飞轮任何异常都不影响 eval 主流程，只 stderr 提示。
+    """
+    try:
+        from app.eval.flywheel import auto_collect_after_eval
+
+        result = auto_collect_after_eval(summary)
+        if result.collected_count == 0 or not result.case_ids:
+            return
+        print(file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
+        print(
+            f"🌟 Flywheel 候选清单（{len(result.case_ids)} 条待 promote）",
+            file=sys.stderr,
+        )
+        for cid in result.case_ids:
+            print(f"  - {cid}  [{result.subset}]", file=sys.stderr)
+        print("-" * 60, file=sys.stderr)
+        print(
+            f"候选已写入 {result.pending_path}\n"
+            "审阅并提升: uv run flywheel promote-pending",
+            file=sys.stderr,
+        )
+        print("=" * 60, file=sys.stderr)
+    except Exception as exc:
+        print(f"[flywheel] auto-collect skipped: {exc}", file=sys.stderr)
 
 
 def _print_progress(event: str, result: object) -> None:
