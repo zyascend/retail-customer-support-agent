@@ -124,6 +124,8 @@ class AgentRuntime:
                 timeout=config.agent_llm_timeout_seconds,
                 max_retries=config.agent_llm_max_retries,
                 require_llm=require_llm,
+                provider_type=config.llm_provider_type,
+                ollama_model=config.ollama_model,
             )
 
         policy_path = config.retail_policy_path
