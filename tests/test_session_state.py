@@ -147,3 +147,20 @@ def test_agent_turn_result_with_pending() -> None:
         pending_action_set=True,
     )
     assert result.pending_action_set is True
+
+
+def test_session_state_stores_current_action_candidate() -> None:
+    from app.agent.models import ActionCandidate
+
+    candidate = ActionCandidate(
+        tool_name="cancel_pending_order",
+        confidence="high",
+        reason="User asked to cancel an order.",
+        order_id="#W1000001",
+        required_read_tools=["get_order_details"],
+    )
+    session = SessionState(session_id="s1", current_action_candidate=candidate)
+
+    assert session.current_action_candidate.tool_name == "cancel_pending_order"
+    assert session.current_action_candidate.order_id == "#W1000001"
+    assert session.current_action_candidate.required_read_tools == ["get_order_details"]

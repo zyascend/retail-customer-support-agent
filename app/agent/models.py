@@ -78,6 +78,16 @@ class PolicyDecision(BaseModel):
     internal_reasoning_summary: str = ""
 
 
+class ActionCandidate(BaseModel):
+    tool_name: str
+    confidence: Literal["low", "medium", "high"] = "medium"
+    reason: str
+    order_id: Optional[str] = None
+    item_ids: List[str] = Field(default_factory=list)
+    product_ids: List[str] = Field(default_factory=list)
+    required_read_tools: List[str] = Field(default_factory=list)
+
+
 class LoadedContext(BaseModel):
     users: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     orders: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
@@ -121,6 +131,7 @@ class SessionState(BaseModel):
     write_locks: List[str] = Field(default_factory=list)
     audit_logs: List[Dict[str, Any]] = Field(default_factory=list)
     pending_action: Optional[PendingAction] = None
+    current_action_candidate: Optional[ActionCandidate] = None
     termination_reason: Optional[str] = None
 
     confirmation_status: str = "not_required"
@@ -151,6 +162,7 @@ class TurnContext(BaseModel):
     context_truncation_summary: Optional[str] = None
     prompt_injection_signal_count: int = 0
     prompt_injection_signals: List[Dict[str, Any]] = Field(default_factory=list)
+    action_candidate_invoked: bool = False
 
     # ── Phase 6: replay harness ──
     llm_responses: list[dict] = Field(default_factory=list)

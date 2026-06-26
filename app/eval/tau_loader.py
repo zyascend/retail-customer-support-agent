@@ -42,6 +42,11 @@ WRITE_TOOLS: set[str] = {
 # Smoke test task IDs: prioritize task_issues (4,5,7) + diverse capabilities
 SMOKE_TASK_IDS: set[str] = {"3", "4", "5", "7", "16", "17", "22", "40"}
 
+WRONG_TOOL_FOCUS_TASK_IDS: tuple[str, ...] = (
+    "46", "36", "47", "72", "71", "45", "88", "84", "92", "91",
+    "93", "94", "95", "97", "98", "107", "109", "110", "113",
+)
+
 
 def load_tau_tasks_from_dir(retail_dir: Path) -> list[dict]:
     """Load all tau3 tasks from the retail domain directory."""
@@ -345,6 +350,24 @@ def get_tau_all_cases(config: AppConfig) -> list[EvalCase]:
 
         cases.append(case)
 
+    return cases
+
+
+def get_tau_wrong_tool_focus_cases(config: AppConfig) -> list[EvalCase]:
+    """Return the fixed tau wrong_tool focus set from the 2026-06-26 triage."""
+    from app.analysis.tau_task_analyzer import _resolve_tau3_retail_dir, load_tasks
+
+    retail_dir = _resolve_tau3_retail_dir(config)
+    tasks_by_id = {str(task["id"]): task for task in load_tasks(retail_dir)}
+
+    cases: list[EvalCase] = []
+    for task_id in WRONG_TOOL_FOCUS_TASK_IDS:
+        task = tasks_by_id.get(task_id)
+        if task is None:
+            continue
+        case = convert_task_to_eval_case(task, "tau_retail_wrong_tool_focus", max_turns=5)
+        if case is not None:
+            cases.append(case)
     return cases
 
 
