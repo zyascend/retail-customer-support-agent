@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from app.agent.confirmation import ConfirmationResolver
 from app.agent.context_builder import ContextBuilder
 from app.agent.guard import WriteActionGuard
+from app.agent.action_candidates import detect_action_candidate
 from app.agent.llm_agent import AgentLoop
 from app.agent.models import (
     AgentTurnResult,
@@ -379,6 +380,37 @@ class WriteGuardTests(unittest.TestCase):
         self.assertEqual(
             return_result.block_reason, "non_delivered_order_cannot_be_returned"
         )
+
+    def test_allows_address_change_after_pending_item_modification(self):
+        tools = self.runtime.tools
+        updated = tools.modify_pending_order_items(
+            order_id=PENDING_ORDER,
+            item_ids=["1586641416"],
+            new_item_ids=["5925362855"],
+        )
+        self.assertEqual(updated["status"], "pending (item modified)")
+
+        state = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
+        state.loaded_context.orders[PENDING_ORDER] = {"order_id": PENDING_ORDER}
+
+        result = self.guard.check(
+            state=state,
+            db=self.runtime.db,
+            action=ToolCall(
+                tool_name="modify_pending_order_address",
+                arguments={
+                    "order_id": PENDING_ORDER,
+                    "address1": "123 Main Street",
+                    "city": "Denver",
+                    "state": "CO",
+                    "country": "USA",
+                    "zip": "80202",
+                },
+            ),
+            confirmed=True,
+        )
+
+        self.assertTrue(result.allowed)
 
     def test_lock_conflict_block_has_structured_context(self):
         state = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
@@ -991,6 +1023,132 @@ class GuardBlockCountingTests(unittest.TestCase):
         self.assertEqual(session.write_locks, [])
         provider.chat_with_tools.assert_not_called()
 
+    def test_agent_instruction_phrase_does_not_trigger_human_transfer_preflight(self):
+        from app.agent.runtime import AgentRuntime
+
+        config = resolve_config()
+        provider = MagicMock(spec=LLMProvider)
+        provider.chat_with_tools.return_value = self._text_response("I can help with that.")
+        runtime = AgentRuntime(config, provider=provider)
+        session = SessionState(session_id="test")
+
+        msg = runtime.handle_user_message(
+            session,
+            (
+                "My email is sofia.rossi2645@example.com. I want to return an item. "
+                "If the agent asks for the order ID, I will provide it."
+            ),
+        )
+
+        self.assertNotIn("YOU ARE BEING TRANSFERRED", msg)
+        provider.chat_with_tools.assert_called()
+        self.assertNotIn("transfer_to_human_agents", [record.tool_name for record in session.tool_results])
+
+    def test_build_messages_includes_action_candidate_context(self):
+        session = self._session(PENDING_USER, order_id=PENDING_ORDER)
+        provider = MagicMock(spec=LLMProvider)
+        provider.chat_with_tools.return_value = self._text_response("I can help with that.")
+        loop = self._make_loop(provider)
+
+        loop.run_turn(session, "Please cancel order #W5918442 because I no longer need it.")
+
+        self.assertIsNotNone(session.current_action_candidate)
+        self.assertEqual(session.current_action_candidate.tool_name, "cancel_pending_order")
+        messages = provider.chat_with_tools.call_args.kwargs["messages"]
+        candidate_messages = [
+            message for message in messages
+            if "Action Candidate" in message.get("content", "")
+        ]
+        self.assertTrue(candidate_messages)
+        self.assertIn("cancel_pending_order", candidate_messages[0]["content"])
+
+    def test_human_transfer_preflight_clears_stale_action_candidate(self):
+        from app.agent.models import ActionCandidate
+        from app.agent.runtime import AgentRuntime
+
+        config = resolve_config()
+        provider = MagicMock(spec=LLMProvider)
+        runtime = AgentRuntime(config, provider=provider)
+        session = SessionState(session_id="test")
+        session.current_action_candidate = ActionCandidate(
+            tool_name="cancel_pending_order",
+            confidence="high",
+            reason="stale candidate",
+            order_id=PENDING_ORDER,
+        )
+
+        runtime.handle_user_message(session, "My email is sofia.rossi2645@example.com. I need a human agent.")
+
+        self.assertIsNone(session.current_action_candidate)
+        provider.chat_with_tools.assert_not_called()
+
+    def test_action_candidate_blocks_transfer_before_write_attempt(self):
+        session = self._session(PENDING_USER, order_id=PENDING_ORDER)
+        provider = MagicMock(spec=LLMProvider)
+        provider.chat_with_tools.side_effect = [
+            self._single_tool_response("transfer_to_human_agents", summary="Need help."),
+            self._single_tool_response(
+                "cancel_pending_order",
+                order_id=PENDING_ORDER,
+                reason="no longer needed",
+            ),
+            self._text_response("I started the cancellation request."),
+        ]
+
+        loop = self._make_loop(provider)
+        result = loop.run_turn(session, "Please cancel order #W5918442 because I no longer need it.")
+
+        self.assertTrue(result.pending_action_set)
+        self.assertEqual(session.tool_results[0].tool_name, "transfer_to_human_agents")
+        self.assertEqual(session.tool_results[0].status, "blocked")
+        self.assertEqual(session.tool_results[0].error, "premature_transfer_blocked")
+        self.assertEqual(
+            session.tool_results[0].block_context["matched_write_tool"],
+            "cancel_pending_order",
+        )
+        self.assertEqual(session.tool_results[0].block_context["candidate_order_id"], PENDING_ORDER)
+        self.assertEqual(session.pending_action.action_name, "cancel_pending_order")
+
+    def test_action_candidate_allows_transfer_after_write_attempt(self):
+        session = self._session(PENDING_USER, order_id=PENDING_ORDER)
+        session.tool_results.append(
+            ToolCallRecord(
+                tool_name="cancel_pending_order",
+                arguments={"order_id": PENDING_ORDER, "reason": "no longer needed"},
+                tool_kind="write",
+                status="blocked",
+                error="explicit_confirmation_required",
+            )
+        )
+        provider = MagicMock(spec=LLMProvider)
+        provider.chat_with_tools.side_effect = [
+            self._single_tool_response("transfer_to_human_agents", summary="Need help."),
+            self._text_response("I transferred you."),
+        ]
+
+        loop = self._make_loop(provider)
+        loop.run_turn(session, "Please cancel order #W5918442 because I no longer need it.")
+
+        self.assertEqual(session.tool_results[-1].tool_name, "transfer_to_human_agents")
+        self.assertEqual(session.tool_results[-1].status, "success")
+
+    def test_action_candidate_allows_explicit_human_plus_write_request(self):
+        session = self._session(PENDING_USER, order_id=PENDING_ORDER)
+        provider = MagicMock(spec=LLMProvider)
+        provider.chat_with_tools.side_effect = [
+            self._single_tool_response("transfer_to_human_agents", summary="Need help."),
+            self._text_response("I transferred you."),
+        ]
+
+        loop = self._make_loop(provider)
+        loop.run_turn(
+            session,
+            "I need a human agent, and while transferring me cancel order #W5918442.",
+        )
+
+        self.assertEqual(session.tool_results[-1].tool_name, "transfer_to_human_agents")
+        self.assertEqual(session.tool_results[-1].status, "success")
+
     def test_guard_block_does_not_increment_consecutive_failures(self):
         """Ownership-violation guard block → consecutive_tool_failures stays 0."""
         session = self._session(
@@ -1109,6 +1267,89 @@ class GuardBlockCountingTests(unittest.TestCase):
             0,
             "Multiple guard blocks should not accumulate consecutive failures",
         )
+
+
+class ActionCandidateDetectionTests(unittest.TestCase):
+    def test_detects_cancel_candidate_with_explicit_order_id(self):
+        session = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
+
+        candidate = detect_action_candidate(
+            session,
+            "Please cancel order #W5918442 because I ordered by mistake.",
+        )
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.tool_name, "cancel_pending_order")
+        self.assertEqual(candidate.order_id, "#W5918442")
+        self.assertEqual(candidate.confidence, "high")
+        self.assertIn("get_order_details", candidate.required_read_tools)
+
+    def test_detects_return_candidate_from_loaded_delivered_order(self):
+        session = SessionState(session_id="test", authenticated_user_id=DELIVERED_USER)
+        session.loaded_context.orders[DELIVERED_ORDER] = {
+            "order_id": DELIVERED_ORDER,
+            "status": "delivered",
+            "items": [{"item_id": DELIVERED_ITEM, "product_id": "prod_1", "price": 10.0}],
+        }
+
+        candidate = detect_action_candidate(session, "I want to return the cheaper item.")
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.tool_name, "return_delivered_order_items")
+        self.assertEqual(candidate.order_id, DELIVERED_ORDER)
+        self.assertEqual(candidate.item_ids, [DELIVERED_ITEM])
+
+    def test_ignores_explicit_human_request(self):
+        session = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
+
+        candidate = detect_action_candidate(session, "I need a human agent to help me.")
+
+        self.assertIsNone(candidate)
+
+    def test_does_not_treat_item_id_as_order_id(self):
+        session = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
+
+        candidate = detect_action_candidate(session, "I want to return item 6777246137.")
+
+        self.assertIsNone(candidate)
+
+    def test_ignores_return_policy_question(self):
+        session = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
+
+        candidate = detect_action_candidate(session, "What is your return policy?")
+
+        self.assertIsNone(candidate)
+
+    def test_detects_user_address_without_loaded_order(self):
+        session = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
+
+        candidate = detect_action_candidate(session, "I need to change my account address.")
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.tool_name, "modify_user_address")
+        self.assertIsNone(candidate.order_id)
+
+    def test_ignores_order_address_question(self):
+        session = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
+
+        candidate = detect_action_candidate(session, "What is the order address for #W5918442?")
+
+        self.assertIsNone(candidate)
+
+    def test_ignores_negated_address_change(self):
+        session = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
+
+        candidate = detect_action_candidate(session, "Do not change my account address.")
+
+        self.assertIsNone(candidate)
+
+    def test_treats_no_reply_change_as_write_request(self):
+        session = SessionState(session_id="test", authenticated_user_id=PENDING_USER)
+
+        candidate = detect_action_candidate(session, "No, change my account address instead.")
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.tool_name, "modify_user_address")
 
 
 class TokenAwareTruncationTests(unittest.TestCase):

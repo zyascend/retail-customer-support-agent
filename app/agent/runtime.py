@@ -24,7 +24,11 @@ from app.tools.registry import ToolRegistry
 from app.tools.retail_adapter import RetailAdapter, RetailRuntime
 
 _HUMAN_TRANSFER_RE = re.compile(
-    r"\b(?:human|person|agent|representative|support)\b",
+    r"\b(?:"
+    r"(?:i\s+(?:need|want|would\s+like)|please|can\s+you|could\s+you)\b.{0,40}\b(?:human(?:\s+agent)?|person|representative|support(?:\s+agent)?)"
+    r"|(?:transfer|connect|escalate)\b.{0,40}\b(?:human(?:\s+agent)?|person|representative|support(?:\s+agent)?)"
+    r"|\b(?:human(?:\s+agent)?|person|representative|support\s+agent)\b.{0,40}\b(?:please|now)"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -197,6 +201,7 @@ class AgentRuntime:
 
     def handle_user_message(self, session: SessionState, content: str) -> str:
         t0 = time.perf_counter()
+        session.current_action_candidate = None
         session.messages.append(Message(role="user", content=content))
         session.add_step("receive_message", content=content)
 

@@ -709,6 +709,36 @@ class TestGetTauAllCases:
             )
 
 
+def test_get_tau_wrong_tool_focus_cases_filters_known_ids(monkeypatch):
+    from app.eval import tau_loader as loader_mod
+
+    tasks = [
+        {
+            "id": 45,
+            "user_scenario": {"instructions": {"reason_for_call": "You want to cancel your order."}},
+            "evaluation_criteria": {"actions": [{"name": "cancel_pending_order", "arguments": {"order_id": "#W1000001"}}]},
+        },
+        {
+            "id": 71,
+            "user_scenario": {"instructions": {"reason_for_call": "You want to return an item."}},
+            "evaluation_criteria": {"actions": [{"name": "return_delivered_order_items", "arguments": {"order_id": "#W1000002", "item_ids": ["item_1"]}}]},
+        },
+        {
+            "id": 999,
+            "user_scenario": {"instructions": {"reason_for_call": "You want to cancel your order."}},
+            "evaluation_criteria": {"actions": [{"name": "cancel_pending_order", "arguments": {"order_id": "#W1000003"}}]},
+        },
+    ]
+
+    monkeypatch.setattr("app.analysis.tau_task_analyzer.load_tasks", lambda retail_dir: tasks)
+    monkeypatch.setattr("app.analysis.tau_task_analyzer._resolve_tau3_retail_dir", lambda config: "retail_dir")
+
+    cases = loader_mod.get_tau_wrong_tool_focus_cases(object())
+
+    assert [case.case_id for case in cases] == ["tau_71", "tau_45"]
+    assert {case.subset for case in cases} == {"tau_retail_wrong_tool_focus"}
+
+
 def test_get_cases_supports_tau_retail_all_subset(monkeypatch):
     """get_cases('tau_retail_all') dispatches to get_tau_all_cases."""
     from app.eval import cases as cases_mod
@@ -726,3 +756,25 @@ def test_get_cases_supports_tau_retail_all_subset(monkeypatch):
     result = cases_mod.get_cases("tau_retail_all")
     assert isinstance(result, list)
     assert len(called_configs) == 1
+
+
+def test_get_cases_supports_tau_wrong_tool_focus_subset(monkeypatch):
+    from app.eval import cases as cases_mod
+    from app.eval import tau_loader as loader_mod
+    from app.eval.cases import EvalCase
+
+    expected_cases = [
+        EvalCase(
+            case_id="tau_45",
+            category="cancel_order",
+            messages=[{"role": "user", "content": "cancel"}],
+            expected_user_id="",
+            expected_intent="cancel_order",
+            expected_tool_names=["cancel_pending_order"],
+            subset="tau_retail_wrong_tool_focus",
+        )
+    ]
+
+    monkeypatch.setattr(loader_mod, "get_tau_wrong_tool_focus_cases", lambda config: expected_cases)
+
+    assert cases_mod.get_cases("tau_retail_wrong_tool_focus") == expected_cases

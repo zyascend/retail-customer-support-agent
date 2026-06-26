@@ -25,6 +25,11 @@ def _canonical_order_id(order_id: object) -> str | None:
     m = _ORDER_ID_RE.fullmatch(raw)
     return f"#W{m.group(1)}" if m else None
 
+def _is_pending_order_state(order: Dict[str, Any]) -> bool:
+    status = str(order.get("status") or "")
+    return status == "pending" or status.startswith("pending (")
+
+
 WRITE_ACTIONS = WRITE_ACTION_NAMES
 DEFERRED_WRITE_ACTIONS: set[str] = set()
 
@@ -234,7 +239,7 @@ class WriteActionGuard:
             if args.get("reason") not in {"no longer needed", "ordered by mistake"}:
                 return "invalid_cancel_reason"
         if action.tool_name == "modify_pending_order_address":
-            if not order or order.get("status") != "pending":
+            if not order or not _is_pending_order_state(order):
                 return "non_pending_order_cannot_be_modified"
         if action.tool_name == "return_delivered_order_items":
             if not order or order.get("status") != "delivered":
@@ -248,7 +253,7 @@ class WriteActionGuard:
             if replacement_reason:
                 return replacement_reason
         if action.tool_name == "modify_pending_order_items":
-            if not order or order.get("status") != "pending":
+            if not order or not _is_pending_order_state(order):
                 return "non_pending_order_cannot_be_modified"
             replacement_reason = self._validate_item_replacements(db, order, args)
             if replacement_reason:
@@ -256,7 +261,7 @@ class WriteActionGuard:
         if action.tool_name == "modify_pending_order_shipping_method":
             return self._validate_shipping_method_change(db, order, args)
         if action.tool_name == "modify_pending_order_payment":
-            if not order or order.get("status") != "pending":
+            if not order or not _is_pending_order_state(order):
                 return "non_pending_order_cannot_be_modified"
             payment_reason = self._validate_payment_change(db, order, args)
             if payment_reason:
@@ -406,7 +411,7 @@ class WriteActionGuard:
     def _validate_shipping_method_change(
         self, db: Any, order: Dict[str, Any], args: Dict[str, Any]
     ) -> Optional[str]:
-        if not order or order.get("status") != "pending":
+        if not order or not _is_pending_order_state(order):
             return "non_pending_order_cannot_be_modified"
         new_method = args.get("shipping_method", "")
         current_method = order.get("shipping_method", "")

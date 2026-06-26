@@ -7,6 +7,7 @@ import uuid
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Callable
 
+from app.agent.action_candidates import detect_action_candidate
 from app.agent.context_builder import ContextBuilder
 from app.agent.models import (
     AgentTurnResult,
@@ -43,6 +44,14 @@ class AgentLoop:
         "tool_bypass_or_forcing",
         "secret_request",
     }
+    _EXPLICIT_HUMAN_TRANSFER_RE: re.Pattern = re.compile(
+        r"\b(?:"
+        r"(?:i\s+(?:need|want|would\s+like)|please|can\s+you|could\s+you)\b.{0,40}\b(?:human(?:\s+agent)?|person|representative|support(?:\s+agent)?)"
+        r"|(?:transfer|connect|escalate)\b.{0,40}\b(?:human(?:\s+agent)?|person|representative|support(?:\s+agent)?)"
+        r"|\b(?:human(?:\s+agent)?|person|representative|support\s+agent)\b.{0,40}\b(?:please|now)"
+        r")\b",
+        re.IGNORECASE,
+    )
 
     # ── Token budget for conversation history (excludes system prompt) ──
     _MESSAGE_TOKEN_BUDGET: int = 8000
@@ -219,6 +228,15 @@ class AgentLoop:
         self, session: SessionState, user_content: str
     ) -> AgentTurnResult:
         turn = TurnContext()
+        session.current_action_candidate = detect_action_candidate(session, user_content)
+        if session.current_action_candidate is not None:
+            turn.action_candidate_invoked = True
+            turn.add_step(
+                "action_candidate_detected",
+                tool_name=session.current_action_candidate.tool_name,
+                confidence=session.current_action_candidate.confidence,
+                order_id=session.current_action_candidate.order_id,
+            )
         messages = self._build_messages(session, user_content, turn)
         tool_schemas = self._registry.tool_schemas_for_llm()
         _forced_write_injected = False
@@ -554,6 +572,9 @@ class AgentLoop:
         if not session.authenticated_user_id:
             return None
 
+        if self._EXPLICIT_HUMAN_TRANSFER_RE.search(user_content):
+            return None
+
         # Check: has any write tool been attempted recently?
         write_tool_names = self._ORDER_WRITE_TOOLS | {"modify_user_address"}
         recent_calls = [
@@ -563,20 +584,23 @@ class AgentLoop:
         if any(t in write_tool_names for t in recent_calls):
             return None  # write was already attempted, let transfer proceed
 
-        # Check: does user's request match a write intent?
-        matched_tool: str | None = None
-        for tool_name, pattern in self._WRITE_KEYWORD_PATTERNS:
-            if pattern.search(user_content):
-                matched_tool = tool_name
-                break
-        if matched_tool is None:
-            return None  # no write intent detected, let transfer proceed
+        # Check: does user's request match a precise write candidate?
+        candidate = session.current_action_candidate
+        if candidate is None:
+            return None  # no precise write candidate detected, let transfer proceed
+        matched_tool = candidate.tool_name
 
         # Check: is there loaded context suggesting the write could work?
         has_orders = bool(session.loaded_context.orders)
         has_users = bool(session.loaded_context.users)
         if not has_orders and not has_users:
             return None  # no context loaded, transfer is reasonable
+
+        block_context = {
+            "matched_write_tool": matched_tool,
+            "candidate_order_id": candidate.order_id if candidate else None,
+            "candidate_item_ids": candidate.item_ids if candidate else [],
+        }
 
         # All checks passed: this is a premature transfer.
         turn.add_step(
@@ -591,21 +615,20 @@ class AgentLoop:
             status="blocked",
             observation={},
             error="premature_transfer_blocked",
-            block_context={"matched_write_tool": matched_tool},
+            block_context=block_context,
         )
         session.tool_results.append(record)
 
         error_msg = ToolExecutionError(
             error_type="premature_transfer_blocked",
             message_for_llm=(
-                f"Do not transfer yet. You have loaded the user's data and "
-                f"the request matches a '{matched_tool}' action. Call "
-                f"{matched_tool} (or the appropriate read tools first, then "
-                f"the write tool) so the guard can evaluate it. Only transfer "
-                f"if the guard blocks the write or the user explicitly asks."
+                f"Do not transfer yet. The user's request matches '{matched_tool}'. "
+                "Use the required read tools first if context is missing, then call "
+                f"{matched_tool} so the guard can evaluate it. "
+                "Only transfer after the write tool is attempted and blocked, or if the user explicitly asks only for a human agent."
             ),
             retryable=True,
-            block_context={"matched_write_tool": matched_tool},
+            block_context=block_context,
         )
         return record, {
             "role": "tool",
@@ -1734,6 +1757,27 @@ class AgentLoop:
                     "content": "Current Session State\n\n" + state_summary,
                 }
             )
+
+        if session.current_action_candidate is not None:
+            candidate = session.current_action_candidate
+            candidate_lines = [
+                "Action Candidate:",
+                f"- tool_name: {candidate.tool_name}",
+                f"- confidence: {candidate.confidence}",
+                f"- reason: {candidate.reason}",
+            ]
+            if candidate.order_id:
+                candidate_lines.append(f"- order_id: {candidate.order_id}")
+            if candidate.item_ids:
+                candidate_lines.append(f"- item_ids: {candidate.item_ids}")
+            if candidate.required_read_tools:
+                candidate_lines.append(
+                    f"- required_read_tools: {candidate.required_read_tools}"
+                )
+            candidate_lines.append(
+                "If this matches the user's request, use the required read tools first if needed, then call the candidate write tool so the guard can decide."
+            )
+            messages.append({"role": "assistant", "content": "\n".join(candidate_lines)})
 
         untrusted_context = self._build_untrusted_context(
             session, truncation_summary=truncation_summary
