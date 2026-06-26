@@ -1940,4 +1940,9 @@ def get_cases(subset: str) -> List[EvalCase]:
         from app.eval.tau_loader import get_phase12_nl_evidence_cases
 
         return get_phase12_nl_evidence_cases(resolve_config())
+    if subset == "tau_retail_all":
+        from app.config import resolve_config
+        from app.eval.tau_loader import get_tau_all_cases
+
+        return get_tau_all_cases(resolve_config())
     raise ValueError("unsupported subset: " + subset)
