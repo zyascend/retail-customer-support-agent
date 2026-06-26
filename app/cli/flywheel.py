@@ -17,7 +17,14 @@ def flywheel_main(argv: Optional[list[str]] = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else sys.argv[1:])
 
     try:
-        from app.eval.flywheel import build_flywheel, check, collect, generate, promote
+        from app.eval.flywheel import (
+            build_flywheel,
+            check,
+            collect,
+            generate,
+            promote,
+            promote_pending,
+        )
 
         if args.command == "collect":
             return _run_collect(args, build_flywheel=build_flywheel, collect=collect)
@@ -31,6 +38,8 @@ def flywheel_main(argv: Optional[list[str]] = None) -> int:
             )
         if args.command == "check":
             return _run_check(args, check=check)
+        if args.command == "promote-pending":
+            return _run_promote_pending(args, promote_pending=promote_pending)
         parser.error("a subcommand is required")
     except Exception as exc:
         print(f"flywheel failed: {exc}", file=sys.stderr)
@@ -113,6 +122,30 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     check_parser.add_argument("--json", action="store_true")
     check_parser.add_argument("--no-progress", action="store_true")
+
+    pending_parser = subparsers.add_parser(
+        "promote-pending",
+        help="Batch-promote pending golden candidates (from auto-collect).",
+    )
+    pending_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Promote all pending candidates without prompting.",
+    )
+    pending_parser.add_argument(
+        "--case-ids",
+        help="Comma-separated case ids to promote (skip the rest).",
+    )
+    pending_parser.add_argument(
+        "--golden-path",
+        default="cases/golden.yaml",
+        help="Path to the golden set YAML file.",
+    )
+    pending_parser.add_argument(
+        "--pending-path",
+        default="cases/pending_promote.yaml",
+        help="Path to the pending candidates YAML file.",
+    )
     return parser
 
 
@@ -232,6 +265,53 @@ def _print_progress(event: str, result: object) -> None:
         file=sys.stderr,
         flush=True,
     )
+
+
+def _run_promote_pending(args: argparse.Namespace, *, promote_pending) -> int:
+    golden_path = Path(args.golden_path).expanduser()
+    pending_path = Path(args.pending_path).expanduser()
+    case_ids = (
+        [cid.strip() for cid in args.case_ids.split(",") if cid.strip()]
+        if args.case_ids
+        else None
+    )
+
+    if not pending_path.exists():
+        print("无候选（pending 文件不存在）。跑 eval 有失败时会自动生成候选。")
+        return 0
+
+    # 交互式逐个确认（无 --all 且无 --case-ids 时）
+    if not args.all and case_ids is None:
+        from app.eval.flywheel import _load_cases_yaml
+
+        pending_cases = _load_cases_yaml(pending_path)
+        if not pending_cases:
+            print("无候选（pending 为空）。")
+            return 0
+        print(f"待审 {len(pending_cases)} 条候选：")
+        confirmed_ids: list[str] = []
+        for case in pending_cases:
+            while True:
+                answer = input(f"  promote {case.case_id}? [y/N] ").strip().lower()
+                if answer in {"y", "n", ""}:
+                    break
+            if answer == "y":
+                confirmed_ids.append(case.case_id)
+        if not confirmed_ids:
+            print("未确认任何候选。")
+            return 0
+        case_ids = confirmed_ids
+
+    result = promote_pending(
+        golden_path=golden_path,
+        pending_path=pending_path,
+        case_ids=case_ids,
+        confirmed_all=args.all,
+    )
+    print(f"promoted: {result.promoted_ids}")
+    print(f"skipped: {result.skipped_ids}")
+    print(f"remaining_pending: {result.remaining_count}")
+    return 0
 
 
 if __name__ == "__main__":

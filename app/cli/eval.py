@@ -77,6 +77,18 @@ def eval_main(argv: Optional[list[str]] = None) -> int:
         print(json.dumps(summary.as_dict(), indent=2, sort_keys=True))
     else:
         _print_summary(summary)
+        # 自动飞轮：有失败时收集候选 + 打印清单；无论成败都跑 golden check（回归守护）。
+        # --json 模式不触发（保持输出纯净）。
+        _try_auto_flywheel(
+            summary,
+            config=config,
+            artifact_dir=Path(args.artifact_dir).expanduser(),
+            require_llm=args.require_llm,
+            live=args.live,
+            no_progress=args.no_progress,
+            max_workers=args.max_workers,
+            seed=args.seed,
+        )
     return 0 if summary.passed_count == summary.case_count else 1
 
 
@@ -240,6 +252,77 @@ def _print_summary(summary: object) -> None:
         print(f"[{status}] {result.case_id}: {result.failure_label or 'ok'}")
     print(f"artifact: {summary.result_artifact_path}")
     print(f"report: {summary.report_artifact_path}")
+
+
+def _try_auto_flywheel(
+    summary: object,
+    *,
+    config: object,
+    artifact_dir: Path,
+    require_llm: bool,
+    live: bool,
+    no_progress: bool,
+    max_workers: int,
+    seed: int,
+) -> None:
+    """eval 跑完后自动运转飞轮：收集失败候选 + 跑 golden 回归 check。
+
+    静默降级：飞轮任何异常都不影响 eval 主流程，只 stderr 提示。
+    """
+    try:
+        from app.eval.flywheel import auto_collect_after_eval, check
+
+        # 1. 有失败时收集候选 + 打印清单
+        if summary.passed_count < summary.case_count:
+            result = auto_collect_after_eval(summary)
+            if result.collected_count > 0 and result.case_ids:
+                print(file=sys.stderr)
+                print("=" * 60, file=sys.stderr)
+                print(
+                    f"🌟 Flywheel 候选清单（{len(result.case_ids)} 条待 promote）",
+                    file=sys.stderr,
+                )
+                for cid in result.case_ids:
+                    print(f"  - {cid}  [{result.subset}]", file=sys.stderr)
+                print("-" * 60, file=sys.stderr)
+                print(
+                    f"候选已写入 {result.pending_path}\n"
+                    "审阅并提升: uv run flywheel promote-pending",
+                    file=sys.stderr,
+                )
+                print("=" * 60, file=sys.stderr)
+
+        # 2. 跑 golden 回归 check（无论成败，守护历史 golden 不被改坏）
+        golden_runner = CuratedEvalRunner(
+            config=config,
+            artifact_dir=artifact_dir,
+            require_llm=require_llm,
+            live=live,
+            progress_callback=None if no_progress else None,  # check 静默跑，不刷进度
+        )
+        check_result = check(
+            run_golden=lambda: golden_runner.run(
+                subset="golden",
+                max_workers=max_workers,
+                seed=seed,
+            )
+        )
+        if check_result.statuses:
+            print(file=sys.stderr)
+            print("=" * 60, file=sys.stderr)
+            if check_result.has_regressions:
+                print("⚠️  Flywheel golden 回归检查：发现退步！", file=sys.stderr)
+            else:
+                print("✅ Flywheel golden 回归检查：全部通过", file=sys.stderr)
+            for status in check_result.statuses:
+                mark = "✅" if status.status == "pass" else "❌"
+                print(
+                    f"  {mark} {status.case_id}: {status.failure_label or 'pass'}",
+                    file=sys.stderr,
+                )
+            print("=" * 60, file=sys.stderr)
+    except Exception as exc:
+        print(f"[flywheel] auto-check skipped: {exc}", file=sys.stderr)
 
 
 def _print_progress(event: str, result: object) -> None:
