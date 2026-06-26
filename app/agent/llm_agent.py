@@ -20,6 +20,14 @@ from app.agent.models import (
     TurnContext,
 )
 from app.agent.providers import LLMProvider
+from app.agent.security import (
+    HIGH_RISK_PATTERN_IDS,
+    _truncate_signal_text,
+    detect_injection_signals,
+    has_refusal_text,
+    is_explicit_human_transfer,
+    REFUSAL_PATTERNS,
+)
 from app.agent.tool_observations import format_tool_observation
 from app.agent.guard import _canonical_order_id
 from app.tools.gateway import ToolGateway
@@ -37,75 +45,12 @@ class AgentLoop:
         "return_delivered_order_items",
         "exchange_delivered_order_items",
     }
-    _HIGH_RISK_PROMPT_INJECTION_PATTERN_IDS: set[str] = {
-        "instruction_override",
-        "system_prompt_exfiltration",
-        "role_rebinding",
-        "tool_bypass_or_forcing",
-        "secret_request",
-    }
-    _EXPLICIT_HUMAN_TRANSFER_RE: re.Pattern = re.compile(
-        r"\b(?:"
-        r"(?:i\s+(?:need|want|would\s+like)|please|can\s+you|could\s+you)\b.{0,40}\b(?:human(?:\s+agent)?|person|representative|support(?:\s+agent)?)"
-        r"|(?:transfer|connect|escalate)\b.{0,40}\b(?:human(?:\s+agent)?|person|representative|support(?:\s+agent)?)"
-        r"|\b(?:human(?:\s+agent)?|person|representative|support\s+agent)\b.{0,40}\b(?:please|now)"
-        r")\b",
-        re.IGNORECASE,
-    )
+    # 注入检测常量已迁至 app.agent.security。保留本属性作向后兼容别名，
+    # 转发到 security.HIGH_RISK_PATTERN_IDS（内部引用见 _block_high_risk_*）。
+    _HIGH_RISK_PROMPT_INJECTION_PATTERN_IDS: set[str] = HIGH_RISK_PATTERN_IDS
 
     # ── Token budget for conversation history (excludes system prompt) ──
     _MESSAGE_TOKEN_BUDGET: int = 8000
-
-    _PROMPT_INJECTION_PATTERNS: list[tuple[str, str, re.Pattern]] = [
-        (
-            "instruction_override",
-            "high",
-            re.compile(
-                r"\b(?:ignore|disregard|forget)\b.{0,40}\b(?:previous|prior|above|system|developer)\b.{0,40}\b(?:instruction|prompt|rule)s?\b",
-                re.IGNORECASE,
-            ),
-        ),
-        (
-            "system_prompt_exfiltration",
-            "high",
-            re.compile(
-                r"\b(?:reveal|show|print|dump|tell me)\b.{0,40}\b(?:system|developer)\s+prompt\b",
-                re.IGNORECASE,
-            ),
-        ),
-        (
-            "role_rebinding",
-            "medium",
-            re.compile(
-                r"\byou\s+are\s+now\b|\bpretend\s+to\s+be\b|\bact\s+as\b",
-                re.IGNORECASE,
-            ),
-        ),
-        (
-            "tool_bypass_or_forcing",
-            "high",
-            re.compile(
-                r"\b(?:call|invoke|use)\s+(?:the\s+)?tool\b|\bdo\s+not\s+use\s+(?:tools?|guards?)\b|\bbypass\b.{0,30}\b(?:guard|check|rule|verification|safeguard)s?\b|\bskip\s+all\s+checks\b|\b(?:do\s+not|don't)\b.{0,30}\b(?:look|check|inspect|verify|review)\b",
-                re.IGNORECASE,
-            ),
-        ),
-        (
-            "secret_request",
-            "high",
-            re.compile(
-                r"\b(?:send|reveal|show|print|give)\b.{0,30}\b(?:api\s*key|password|secret|token|credential)s?\b",
-                re.IGNORECASE,
-            ),
-        ),
-        (
-            "developer_message_spoofing",
-            "medium",
-            re.compile(
-                r"\bdeveloper\s+message\s+says\b|\bsystem\s+message\s+says\b|\byour\s+instructions\s+say\b",
-                re.IGNORECASE,
-            ),
-        ),
-    ]
 
     # ── Premature refusal safety net ──
 
@@ -161,48 +106,9 @@ class AgentLoop:
         ),
     ]
 
-    # Simple keyword patterns for write intent detection (no order_id required).
-    # Used by _block_premature_transfer to detect write intent in user messages
-    # that may not contain explicit order IDs.
-    _WRITE_KEYWORD_PATTERNS: list[tuple[str, re.Pattern]] = [
-        ("cancel_pending_order", re.compile(r"\bcancel\b", re.IGNORECASE)),
-        ("return_delivered_order_items", re.compile(r"\breturn\b", re.IGNORECASE)),
-        ("exchange_delivered_order_items", re.compile(r"\bexchange\b", re.IGNORECASE)),
-        ("modify_pending_order_address", re.compile(r"\baddress\b", re.IGNORECASE)),
-        ("modify_pending_order_items", re.compile(r"\b(?:modify|change|replace|upgrade|switch)\b", re.IGNORECASE)),
-        ("modify_pending_order_payment", re.compile(r"\bpayment\b", re.IGNORECASE)),
-        ("modify_user_address", re.compile(r"\b(?:my\s+)?address\b", re.IGNORECASE)),
-    ]
-
-    # Patterns that indicate the LLM refused without calling a write tool.
-    # Covers ownership-based and status-based refusals (section 3.2).
-    _REFUSAL_PATTERNS: list[re.Pattern] = [
-        # Ownership-based refusal patterns
-        re.compile(
-            r"\b(?:belongs?\s+to|another\s+account|different\s+(?:account|user)"
-            r"|not\s+your|own(?:ed)?\s+by\s+another"
-            r"|cannot\s+(?:cancel|modify|return|exchange|access|process))",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            r"\b(?:do\s+not\s+own|cannot\s+be\s+(?:cancell|modifi|return|exchang))",
-            re.IGNORECASE,
-        ),
-        # Status-based refusal patterns
-        re.compile(
-            r"\b(?:this\s+order\s+(?:is|has\s+been)\s+(?:already\s+)?"
-            r"(?:processed|shipped|delivered|completed|cancelled|canceled|fulfilled)"
-            r"|(?:the\s+)?order\s+(?:status\s+)?(?:is|shows|indicates)\s+"
-            r"(?:already\s+)?(?:processed|shipped|delivered|completed|cancelled|canceled|fulfilled))",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            r"\bcannot\s+(?:be\s+)?(?:cancel(?:led)?|modif(?:y|ied)|return(?:ed)?"
-            r"|exchange?(?:d)?|change?(?:d)?)"
-            r"\s+(?:an?\s+)?order\s+(?:that\s+(?:is|has|was)|which\s+(?:is|has|was)|already)",
-            re.IGNORECASE,
-        ),
-    ]
+    # 拒绝正则已迁至 app.agent.security.REFUSAL_PATTERNS。保留别名转发，
+    # 编排逻辑（_detect_premature_refusal 的 ownership/终态校验）仍在本类。
+    _REFUSAL_PATTERNS: list[re.Pattern] = REFUSAL_PATTERNS
 
     def __init__(
         self,
@@ -214,6 +120,8 @@ class AgentLoop:
         max_iterations: int = 14,
         max_consecutive_failures: int = 3,
         max_auto_load_retries: int = 1,
+        injection_llm_secondary: bool = False,
+        injection_llm_timeout: float = 3.0,
     ) -> None:
         self._provider = provider
         self._gateway = gateway
@@ -222,6 +130,9 @@ class AgentLoop:
         self._max_iterations = max_iterations
         self._max_consecutive_failures = max_consecutive_failures
         self._max_auto_load_retries = max_auto_load_retries
+        # 注入 LLM secondary 配置（spec §6 P1）。默认 False = 仅正则，保护英文基线。
+        self._injection_llm_secondary = injection_llm_secondary
+        self._injection_llm_timeout = injection_llm_timeout
         self._system_prompt_template = self._load_system_prompt_template()
 
     def run_turn(
@@ -572,7 +483,7 @@ class AgentLoop:
         if not session.authenticated_user_id:
             return None
 
-        if self._EXPLICIT_HUMAN_TRANSFER_RE.search(user_content):
+        if is_explicit_human_transfer(user_content):
             return None
 
         # Check: has any write tool been attempted recently?
@@ -1817,13 +1728,6 @@ class AgentLoop:
             )
         return None
 
-    @staticmethod
-    def _truncate_signal_text(text: str, limit: int = 120) -> str:
-        compact = " ".join(text.split())
-        if len(compact) <= limit:
-            return compact
-        return compact[: limit - 3] + "..."
-
     def _build_untrusted_context(
         self,
         session: SessionState,
@@ -1841,13 +1745,13 @@ class AgentLoop:
             if isinstance(message_for_llm, str) and message_for_llm.strip():
                 parts.append(
                     f"Tool hint from {record.tool_name}: "
-                    f"{self._truncate_signal_text(message_for_llm)}"
+                    f"{_truncate_signal_text(message_for_llm)}"
                 )
 
             if record.status == "error" and record.error:
                 parts.append(
                     f"Tool error from {record.tool_name}: "
-                    f"{self._truncate_signal_text(record.error)}"
+                    f"{_truncate_signal_text(record.error)}"
                 )
 
         return "\n\n".join(parts)
@@ -1889,21 +1793,19 @@ class AgentLoop:
         *,
         source: str,
     ) -> list[dict[str, Any]]:
-        if not text:
-            return []
+        """注入检测 — 转发至 app.agent.security.detect_injection_signals。
 
-        signals: list[dict[str, Any]] = []
-        for pattern_id, severity, pattern in self._PROMPT_INJECTION_PATTERNS:
-            for match in pattern.finditer(text):
-                signals.append(
-                    {
-                        "source": source,
-                        "pattern_id": pattern_id,
-                        "severity": severity,
-                        "matched_text": self._truncate_signal_text(match.group(0)),
-                    }
-                )
-        return signals
+        保留方法签名（text, *, source）以兼容白盒测试与内部调用。检测
+        常量已迁出，本方法仅作薄壳。LLM secondary 通过实例配置
+        ``self._injection_llm_secondary`` 触发（默认 False = 仅正则）。
+        """
+        return detect_injection_signals(
+            text,
+            source=source,
+            provider=self._provider,
+            llm_secondary_enabled=self._injection_llm_secondary,
+            llm_timeout=self._injection_llm_timeout,
+        )
 
     # ── Premature refusal safety net ──
 
@@ -1926,7 +1828,7 @@ class AgentLoop:
             return None
         if not assistant_content:
             return None
-        if not any(p.search(assistant_content) for p in self._REFUSAL_PATTERNS):
+        if not has_refusal_text(assistant_content):
             return None
 
         # Verify the refusal is plausible given the loaded order data.

@@ -3,21 +3,58 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.agent.guard import _canonical_order_id
+from app.agent.extraction import extract_order_id
 from app.agent.models import ActionCandidate, SessionState
 
-_EXPLICIT_ORDER_ID_RE = re.compile(r"#W\d{7,}", re.IGNORECASE)
-_ORDER_CONTEXT_ID_RE = re.compile(r"\border\s+(?P<order_id>#?(?:W)?\d{7,})", re.IGNORECASE)
 _HUMAN_RE = re.compile(r"\b(?:human|agent|representative|person)\b", re.IGNORECASE)
-_CANCEL_RE = re.compile(r"\bcancel\b.{0,40}\border\b|\border\b.{0,40}\bcancel\b", re.IGNORECASE)
-_RETURN_RE = re.compile(r"\breturn\b.{0,40}\b(?:item|items|order)\b", re.IGNORECASE)
-_EXCHANGE_RE = re.compile(r"\bexchange\b.{0,40}\b(?:item|items|order)\b", re.IGNORECASE)
-_ORDER_ADDRESS_RE = re.compile(r"\b(?:change|modify|update)\b.{0,40}\border\b.{0,40}\baddress\b", re.IGNORECASE)
-_USER_ADDRESS_RE = re.compile(r"\b(?:change|modify|update)\b.{0,40}\b(?:my|account|profile)\b.{0,40}\baddress\b", re.IGNORECASE)
-_NEGATED_WRITE_RE = re.compile(r"\b(?:do not|don't|dont|not)\b.{0,20}\b(?:change|modify|update|cancel|return|exchange|replace|switch|remove|add)\b", re.IGNORECASE)
-_PAYMENT_RE = re.compile(r"\b(?:change|modify|update)\b.{0,40}\bpayment\b", re.IGNORECASE)
-_SHIPPING_RE = re.compile(r"\b(?:change|modify|update)\b.{0,40}\b(?:shipping|delivery)\b", re.IGNORECASE)
-_ITEM_CHANGE_RE = re.compile(r"\b(?:replace|switch|change|modify|update|remove|add)\b.{0,40}\b(?:item|items|product|products)\b", re.IGNORECASE)
+# 英文 intent patterns（原有）+ 中文等价 pattern（P2 多语言）。
+# 中文意图泛化的主路径仍是主 LLM 的 tool-call；此处 HINT 正则仅在命中时
+# 给主 LLM 一个 nudge（见 spec §5），miss 时主 LLM 自行决策。
+_CANCEL_RE = re.compile(
+    r"\bcancel\b.{0,40}\border\b|\border\b.{0,40}\bcancel\b"
+    r"|取消.{0,40}订单|订单.{0,40}取消",
+    re.IGNORECASE,
+)
+_RETURN_RE = re.compile(
+    r"\breturn\b.{0,40}\b(?:item|items|order)\b"
+    r"|退货|退还",
+    re.IGNORECASE,
+)
+_EXCHANGE_RE = re.compile(
+    r"\bexchange\b.{0,40}\b(?:item|items|order)\b"
+    r"|换货",
+    re.IGNORECASE,
+)
+_ORDER_ADDRESS_RE = re.compile(
+    r"\b(?:change|modify|update)\b.{0,40}\border\b.{0,40}\baddress\b"
+    r"|(?:修改|改|更改).{0,40}订单.{0,40}地址",
+    re.IGNORECASE,
+)
+_USER_ADDRESS_RE = re.compile(
+    r"\b(?:change|modify|update)\b.{0,40}\b(?:my|account|profile)\b.{0,40}\baddress\b"
+    r"|(?:改|修改|更改).{0,20}(?:我的)?(?:默认)?地址",
+    re.IGNORECASE,
+)
+_NEGATED_WRITE_RE = re.compile(
+    r"\b(?:do not|don't|dont|not)\b.{0,20}\b(?:change|modify|update|cancel|return|exchange|replace|switch|remove|add)\b"
+    r"|(?:不|别|不要)(?:要|改|退|换|取消|修改)",
+    re.IGNORECASE,
+)
+_PAYMENT_RE = re.compile(
+    r"\b(?:change|modify|update)\b.{0,40}\bpayment\b"
+    r"|(?:修改|改|更改).{0,40}支付",
+    re.IGNORECASE,
+)
+_SHIPPING_RE = re.compile(
+    r"\b(?:change|modify|update)\b.{0,40}\b(?:shipping|delivery)\b"
+    r"|(?:修改|改|更改).{0,40}(?:配送|运送|快递)",
+    re.IGNORECASE,
+)
+_ITEM_CHANGE_RE = re.compile(
+    r"\b(?:replace|switch|change|modify|update|remove|add)\b.{0,40}\b(?:item|items|product|products)\b"
+    r"|(?:换|改|替换).{0,40}商品|商品.{0,40}(?:换成|改为|替换)",
+    re.IGNORECASE,
+)
 
 
 def detect_action_candidate(
@@ -33,7 +70,7 @@ def detect_action_candidate(
     if tool_name is None:
         return None
 
-    order_id = _extract_order_id(user_content)
+    order_id = extract_order_id(user_content)
     if order_id is None and _allows_loaded_order_fallback(tool_name, user_content):
         order_id = _best_loaded_order_id(session)
 
@@ -83,16 +120,6 @@ def _detect_tool_name(text: str) -> str | None:
         return "modify_user_address"
     if _ITEM_CHANGE_RE.search(text):
         return "modify_pending_order_items"
-    return None
-
-
-def _extract_order_id(text: str) -> str | None:
-    explicit = _EXPLICIT_ORDER_ID_RE.search(text)
-    if explicit:
-        return _canonical_order_id(explicit.group(0))
-    contextual = _ORDER_CONTEXT_ID_RE.search(text)
-    if contextual:
-        return _canonical_order_id(contextual.group("order_id"))
     return None
 
 

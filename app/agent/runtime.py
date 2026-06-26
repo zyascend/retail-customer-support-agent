@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -9,28 +8,22 @@ from typing import Any, Callable, Dict, Iterable, Optional
 
 from app.agent.confirmation import ConfirmationResolver
 from app.agent.context_builder import ContextBuilder
+from app.agent.extraction import extract_email, extract_name_zip
 from app.agent.llm_agent import AgentLoop
 from app.agent.models import Message, SessionState
-from app.agent.parsers import EMAIL_RE, NAME_ZIP_RE
 from app.agent.prompts import prompt_metadata
 from app.agent.providers import (
     LLMProvider,
     build_default_provider,
 )
+from app.agent.security import is_explicit_human_transfer
 from app.config import AppConfig
 from app.ops.tracing import TraceWriter, final_state_summary
 from app.tools.gateway import ToolGateway
 from app.tools.registry import ToolRegistry
 from app.tools.retail_adapter import RetailAdapter, RetailRuntime
 
-_HUMAN_TRANSFER_RE = re.compile(
-    r"\b(?:"
-    r"(?:i\s+(?:need|want|would\s+like)|please|can\s+you|could\s+you)\b.{0,40}\b(?:human(?:\s+agent)?|person|representative|support(?:\s+agent)?)"
-    r"|(?:transfer|connect|escalate)\b.{0,40}\b(?:human(?:\s+agent)?|person|representative|support(?:\s+agent)?)"
-    r"|\b(?:human(?:\s+agent)?|person|representative|support\s+agent)\b.{0,40}\b(?:please|now)"
-    r")\b",
-    re.IGNORECASE,
-)
+# _HUMAN_TRANSFER_RE 已迁至 app.agent.security（与 llm_agent 的重复正则合并为一份）。
 
 GUARD_USER_MESSAGES: dict[str, str] = {
     "replacement_item_product_mismatch": "I can only replace an item with another available option from the same product.",
@@ -246,6 +239,8 @@ class AgentRuntime:
             gateway=self.gateway,
             registry=self.registry,
             context_builder=self._context_builder,
+            injection_llm_secondary=self.config.injection_llm_secondary,
+            injection_llm_timeout=self.config.injection_llm_timeout,
         )
         result = loop.run_turn(session, content)
 
@@ -273,7 +268,7 @@ class AgentRuntime:
         session: SessionState,
         content: str,
     ) -> Optional[str]:
-        if not _HUMAN_TRANSFER_RE.search(content):
+        if not is_explicit_human_transfer(content):
             return None
         record = self.gateway.execute(
             state=session,
@@ -369,6 +364,8 @@ class AgentRuntime:
             gateway=self.gateway,
             registry=self.registry,
             context_builder=self._context_builder,
+            injection_llm_secondary=self.config.injection_llm_secondary,
+            injection_llm_timeout=self.config.injection_llm_timeout,
         )
         result = loop.run_turn(
             session,
@@ -455,9 +452,8 @@ class AgentRuntime:
 
     def _preflight_identity(self, session: SessionState, content: str) -> None:
         # Email shortcut
-        email_match = EMAIL_RE.search(content)
-        if email_match:
-            email = email_match.group(0)
+        email = extract_email(content)
+        if email:
             record = self.gateway.execute(
                 state=session,
                 tool_name="find_user_id_by_email",
@@ -479,9 +475,9 @@ class AgentRuntime:
             return
 
         # Name+zip shortcut
-        name_zip_match = NAME_ZIP_RE.search(content)
-        if name_zip_match:
-            first_name, last_name, zip_code = name_zip_match.groups()
+        name_zip = extract_name_zip(content)
+        if name_zip:
+            first_name, last_name, zip_code = name_zip
             record = self.gateway.execute(
                 state=session,
                 tool_name="find_user_id_by_name_zip",

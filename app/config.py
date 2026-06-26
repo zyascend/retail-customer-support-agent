@@ -23,6 +23,9 @@ DEFAULT_AGENT_LLM_MAX_RETRIES = 2
 DEFAULT_ENABLE_THINK_TOOL = False
 DEFAULT_LLM_PROVIDER_TYPE = "deepseek"
 DEFAULT_OLLAMA_MODEL = "qwen3.5:2b"
+# 注入 LLM secondary：默认关闭，保护英文 100% 基线（见 spec §6 P1 go/no-go）。
+DEFAULT_INJECTION_LLM_SECONDARY = False
+DEFAULT_INJECTION_LLM_TIMEOUT = 3.0
 
 
 @dataclass(frozen=True)
@@ -38,6 +41,8 @@ class AppConfig:
     enable_think_tool: bool = False
     llm_provider_type: str = DEFAULT_LLM_PROVIDER_TYPE
     ollama_model: str = DEFAULT_OLLAMA_MODEL
+    injection_llm_secondary: bool = DEFAULT_INJECTION_LLM_SECONDARY
+    injection_llm_timeout: float = DEFAULT_INJECTION_LLM_TIMEOUT
 
     @property
     def retail_domain_dir(self) -> Path:
@@ -102,6 +107,12 @@ def resolve_config(
         ),
         llm_provider_type=os.getenv("LLM_PROVIDER_TYPE", DEFAULT_LLM_PROVIDER_TYPE),
         ollama_model=os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL),
+        injection_llm_secondary=_bool_env(
+            "INJECTION_LLM_SECONDARY", DEFAULT_INJECTION_LLM_SECONDARY
+        ),
+        injection_llm_timeout=_float_env(
+            "INJECTION_LLM_TIMEOUT", DEFAULT_INJECTION_LLM_TIMEOUT
+        ),
     )
     return config
 

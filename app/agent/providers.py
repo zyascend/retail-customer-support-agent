@@ -201,10 +201,21 @@ def _extract_token_usage(
 
 class LLMProvider(Protocol):
     def json(
-        self, messages: List[Dict[str, str]], schema: Dict[str, Any]
+        self,
+        messages: List[Dict[str, str]],
+        schema: Dict[str, Any],
+        *,
+        timeout: Optional[float] = None,
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]: ...
 
-    def chat(self, messages: List[Dict[str, str]]) -> str: ...
+    def chat(
+        self,
+        messages: List[Dict[str, str]],
+        *,
+        timeout: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ) -> str: ...
 
     def chat_with_tools(
         self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]]
@@ -275,7 +286,12 @@ class DeepSeekProvider:
         raise RuntimeError("retry wrapper exited unexpectedly")
 
     def json(
-        self, messages: List[Dict[str, str]], schema: Dict[str, Any]
+        self,
+        messages: List[Dict[str, str]],
+        schema: Dict[str, Any],
+        *,
+        timeout: Optional[float] = None,
+        max_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         last_error: Optional[Exception] = None
         for attempt in range(self.max_retries + 1):
@@ -285,6 +301,8 @@ class DeepSeekProvider:
                         model=self.model,
                         messages=messages,
                         response_format={"type": "json_object"},
+                        timeout=timeout,
+                        max_tokens=max_tokens,
                     )
                 )
                 content = response.choices[0].message.content or "{}"
@@ -298,11 +316,19 @@ class DeepSeekProvider:
                     raise
         raise last_error  # type: ignore[misc]
 
-    def chat(self, messages: List[Dict[str, str]]) -> str:
+    def chat(
+        self,
+        messages: List[Dict[str, str]],
+        *,
+        timeout: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ) -> str:
         response = self._with_transient_retries(
             lambda: self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
+                timeout=timeout,
+                max_tokens=max_tokens,
             )
         )
         return response.choices[0].message.content or ""
