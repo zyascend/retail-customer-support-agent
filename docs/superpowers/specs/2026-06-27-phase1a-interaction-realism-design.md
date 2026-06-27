@@ -223,17 +223,26 @@ if resolution == "confirmed" and not has_competing_signal(content):
     # 干净确认 → 秒级短路执行（现有路径不变）
     gateway.execute(..., confirmed=True)
 
+elif resolution == "confirmed":  # confirmed + competing（NEW）
+    return None                  # NEW: 放行 LLM, pending 保持
+
 elif resolution == "denied":
-    # 干净否认 → 丢弃 pending（现有路径）
+    # 干净否认 → 丢弃 pending（现有路径不变）
     session.pending_action = None
     if has_competing_signal(content):
-        return None  # deny + 穿插提问 → 丢弃后放行 LLM 答问题
+        return None              # NEW: denied+提问 → 丢弃后放行 LLM 答问题
     return "No changes were made."
 
-else:
-    # unknown / changed / confirmed+mixed → 放行 LLM，pending 保持不动
-    return None
+elif resolution == "changed":
+    # changed 独立分支,逐字节不动（保护 generalized_mvp 2 个 changed case 不回归）
+    session.pending_action = None
+    return "I discarded the previous request. Please provide updated details."
+
+else:  # unknown
+    return None                  # 现有路径不变
 ```
+
+**关键：`changed` 路径逐字节不动。** generalized_mvp 有 2 个 `changed` case（`'No, use item 1234567890 instead.'`），期望 pending 被丢弃 + `confirmation_status='changed'`。原路由把 changed 折进 `else` 会丢不掉 pending → 回归。修正后 changed 单列分支，路由层面 25 条确认消息逐分支核验全部 identical，回归由构造消除。
 
 **确认层不绕过**：LLM fallback 路径里 LLM 调 write tool 时 `confirmed` 默认 False → Guard block `explicit_confirmation_required` → 设置新 pending（替换旧）。用户下一条干净 "yes" 走 fast-path 确认。`confirmed=True` 仍只在干净确认 fast-path 传入。
 
@@ -368,6 +377,7 @@ case 覆盖矩阵（~12-15 case）：
 
 ## 后续阶段（本轮不做）
 
+- **Skill 文档化（独立小改，B 路径）**：现有 8 个 `SkillSpec` 从 `app/skills/registry.py` Python 代码迁移到 `skills/*.md` 文档（frontmatter 结构化字段 + 正文 guidance/example）。`loader.py` 启动时读文档解析成 SkillSpec，注入逻辑不变 → 行为字节级等价。价值：维护门槛从"改 Python + 测试 + 发版"降到"改 Markdown"，契合 demo"可维护客服系统"故事；运营/业务人员可直接调整话术。**独立于三件套，单独 spec + 单独验证基线，避免改动叠加难定位回归。** 演进方向 A 路径（意图识别后动态按需加载单 skill）留待 skill 涨到 15+ 时再上。
 - **Phase 1b**：多意图编排 / 跑题情绪降级 / 脏输入鲁棒性 / **CLOSING 工单+评价闭环** / **step-up 敏感写验证**
 - **Phase 2**：真实聊天界面（chat-first UI + 流式 + 会话持久感 + 订单上下文侧栏 + 生命周期可视化如工单状态条）
 - **Phase 3**：真实场景库 + 行为 rubric 评测体系重建
