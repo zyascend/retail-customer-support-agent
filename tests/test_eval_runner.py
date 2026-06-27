@@ -2334,3 +2334,53 @@ class TimingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── Phase 1a: evaluate_behaviors 单元测试 ──
+from app.agent.models import SessionState
+from app.eval.cases import EvalCase
+from app.eval.runner import evaluate_behaviors
+
+
+class TestEvaluateBehaviors(unittest.TestCase):
+    def test_screen_pop_missing(self):
+        case = EvalCase(
+            case_id="x", category="c", messages=[],
+            expected_user_id="u", expected_intent="i",
+            expected_behaviors={"screen_pop_preloaded"},
+        )
+        state = SessionState(session_id="t")
+        self.assertIn("screen_pop_preloaded", evaluate_behaviors(case, state))
+
+    def test_screen_pop_present(self):
+        case = EvalCase(
+            case_id="x", category="c", messages=[],
+            expected_user_id="u", expected_intent="i",
+            expected_behaviors={"screen_pop_preloaded"},
+        )
+        state = SessionState(session_id="t")
+        state.add_step("screen_pop", user_id="u", order_count=1)
+        self.assertEqual(evaluate_behaviors(case, state), [])
+
+    def test_no_stale_pending_violation(self):
+        from app.agent.models import PendingAction
+
+        case = EvalCase(
+            case_id="x", category="c", messages=[],
+            expected_user_id="u", expected_intent="i",
+            expected_behaviors={"no_stale_pending"},
+        )
+        state = SessionState(session_id="t")
+        state.pending_action = PendingAction(
+            action_name="x", arguments={}, user_facing_summary="x"
+        )
+        self.assertIn("no_stale_pending", evaluate_behaviors(case, state))
+
+    def test_no_stale_pending_ok(self):
+        case = EvalCase(
+            case_id="x", category="c", messages=[],
+            expected_user_id="u", expected_intent="i",
+            expected_behaviors={"no_stale_pending"},
+        )
+        state = SessionState(session_id="t")
+        self.assertEqual(evaluate_behaviors(case, state), [])

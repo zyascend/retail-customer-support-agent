@@ -163,3 +163,34 @@ class ConfirmationResolver:
 
         # 6. Ambiguous — require clarification
         return "unknown"
+
+
+# ── Phase 1a: competing-signal detection for LLM fallback ──
+
+_QUESTION_RE = re.compile(
+    r"[?？]|多少|怎么|为什么|何时|what|how|why|when|where|"
+    r"can you|能不能|是不是|有没有|退多少|多少钱"
+)
+
+
+def _has_question(text_lower: str) -> bool:
+    return bool(_QUESTION_RE.search(text_lower))
+
+
+def has_competing_signal(text: str) -> bool:
+    """检测混合/竞争信号——需要 LLM 介入消歧的场景。
+
+    仅在 confirm/deny/change 信号同时出现、或信号伴随提问时返回 True。
+    干净的 yes/no 不触发，保护 fast-path 不回归。
+    """
+    text_lower = text.lower().strip()
+    confirm = _score(text_lower, _CONFIRM_KEYWORDS)
+    deny = _score(text_lower, _DENY_KEYWORDS)
+    change = _score(text_lower, _CHANGE_KEYWORDS)
+    if confirm >= 2 and change >= 2:
+        return True
+    if confirm >= 2 and deny >= 2:
+        return True
+    if _has_question(text_lower) and (confirm >= 2 or deny >= 2 or change >= 2):
+        return True
+    return False

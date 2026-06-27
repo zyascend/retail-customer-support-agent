@@ -27,6 +27,10 @@ def chat_main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--json", action="store_true", help="Print JSON run output.")
     parser.add_argument("--max-turns", type=int, default=20)
     parser.add_argument(
+        "--customer",
+        help="Authenticated user_id for screen pop (demo mode).",
+    )
+    parser.add_argument(
         "--require-llm",
         action="store_true",
         help="Fail if DEEPSEEK_API_KEY or OpenAI-compatible dependencies are missing.",
@@ -64,7 +68,7 @@ def chat_main(argv: Optional[list[str]] = None) -> int:
             print(f"trace: {result.trace_artifact_path}")
         return 0
 
-    return _interactive(runtime, args.max_turns, args.json)
+    return _interactive(runtime, args.max_turns, args.json, args.customer)
 
 
 def _read_script(path: Path) -> Dict[str, Any]:
@@ -84,9 +88,18 @@ def _read_script(path: Path) -> Dict[str, Any]:
     return payload
 
 
-def _interactive(runtime: AgentRuntime, max_turns: int, json_output: bool) -> int:
+def _interactive(
+    runtime: AgentRuntime,
+    max_turns: int,
+    json_output: bool,
+    customer_id: Optional[str] = None,
+) -> int:
     session_id = "interactive"
     state = SessionState(session_id=session_id)
+    if customer_id:
+        from app.agent.screen_pop import ScreenPop
+
+        ScreenPop(runtime.gateway).apply(state, customer_id)
     initial_db_hash = runtime.retail_runtime.db_hash()
     print("Phase 1 interactive session. Type 'exit' to finish.", file=sys.stderr)
     for _ in range(max_turns):

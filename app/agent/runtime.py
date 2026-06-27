@@ -134,11 +134,19 @@ class AgentRuntime:
         task_id: Optional[str] = None,
         max_turns: int = 20,
         user_simulator_callback: Optional[Callable[[str], Optional[str]]] = None,
+        screen_pop_user_id: Optional[str] = None,
     ) -> AgentRunResult:
         self._turn_contexts = []
         run_id = session_id or f"agent-{uuid.uuid4().hex[:12]}"
         session = SessionState(session_id=run_id, task_id=task_id)
         initial_db_hash = self.retail_runtime.db_hash()
+
+        # Screen pop：身份进线即设 + 主动查一次订单（realistic 子集）
+        if screen_pop_user_id:
+            from app.agent.screen_pop import ScreenPop
+
+            ScreenPop(self.gateway).apply(session, screen_pop_user_id)
+
         turn = 0
         message_list = list(messages)
         message_index = 0
@@ -287,14 +295,14 @@ class AgentRuntime:
     def _preflight_confirmation(
         self, session: SessionState, content: str
     ) -> Optional[str]:
+        from app.agent.confirmation import has_competing_signal
+
         resolution = self._resolver.resolve(content)
-        if resolution == "unknown":
-            return None
 
-        session.confirmation_status = resolution
-        session.add_step("preflight_confirmation", resolution=resolution)
-
-        if resolution == "confirmed":
+        # 干净确认 → 秒级短路执行（现有路径不变）
+        if resolution == "confirmed" and not has_competing_signal(content):
+            session.confirmation_status = "confirmed"
+            session.add_step("preflight_confirmation", resolution="confirmed")
             action = session.pending_action
             injection_pattern_ids = _pending_action_prompt_injection_pattern_ids(
                 action.arguments
@@ -340,17 +348,37 @@ class AgentRuntime:
                 msg = _map_guard_error_to_user_message(str(record.error))
             session.messages.append(Message(role="assistant", content=msg))
             return msg
-        elif resolution == "denied":
+
+        # confirmed + competing → 放行 LLM，pending 保持（NEW）
+        if resolution == "confirmed":
+            session.add_step(
+                "preflight_confirmation_fallback",
+                resolution="confirmed_competing",
+            )
+            return None
+
+        # denied → 丢弃 pending（现有路径不变）
+        if resolution == "denied":
+            session.confirmation_status = "denied"
             session.pending_action = None
+            session.add_step("preflight_confirmation", resolution="denied")
+            if has_competing_signal(content):
+                # denied + 提问/穿插 → 丢弃后放行 LLM 答问题（NEW）
+                return None
             msg = "No changes were made."
             session.messages.append(Message(role="assistant", content=msg))
             return msg
-        elif resolution == "changed":
+
+        # changed → 独立分支，逐字节不动（保护 generalized_mvp changed case 不回归）
+        if resolution == "changed":
+            session.confirmation_status = "changed"
             session.pending_action = None
+            session.add_step("preflight_confirmation", resolution="changed")
             msg = "I discarded the previous request. Please provide updated details."
             session.messages.append(Message(role="assistant", content=msg))
             return msg
 
+        # unknown → 放行 LLM（现有路径不变）
         return None
 
     def _continue_after_confirmed_action(self, session: SessionState) -> Optional[str]:

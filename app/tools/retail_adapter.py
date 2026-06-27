@@ -18,6 +18,7 @@ READ_TOOLS = {
     "get_product_details",
     "get_item_details",
     "list_all_product_types",
+    "list_user_orders",
 }
 WRITE_TOOLS = {
     "cancel_pending_order",
@@ -211,6 +212,31 @@ class LocalRetailTools:
             for product_id, product in self.db["products"].items()
         }
         return json.dumps(product_dict, sort_keys=True)
+
+    def list_user_orders(self, user_id: str) -> list[dict[str, Any]]:
+        """Return summary list of a user's orders (no heavy payment_history)."""
+        orders: list[dict[str, Any]] = []
+        for order_id, order in self.db.get("orders", {}).items():
+            if order.get("user_id") != user_id:
+                continue
+            items = [
+                {
+                    "item_id": str(it.get("item_id", "")),
+                    "name": it.get("name", ""),
+                    "price": it.get("price"),
+                }
+                for it in order.get("items", []) or []
+                if isinstance(it, dict)
+            ]
+            orders.append(
+                {
+                    "order_id": order_id,
+                    "status": order.get("status", ""),
+                    "order_date": order.get("order_date", ""),
+                    "items": items,
+                }
+            )
+        return orders
 
     def cancel_pending_order(self, order_id: str, reason: str) -> Dict[str, Any]:
         order = self._get_order(order_id)

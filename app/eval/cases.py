@@ -35,6 +35,9 @@ class EvalCase:
     forbidden_tools: set = field(default_factory=set)
     # ── Skill tagging: links this case to a SkillSpec for per-skill eval metrics ──
     skill_id: Optional[str] = None
+    # ── Phase 1a: screen pop + 行为 rubric ──
+    screen_pop_user_id: Optional[str] = None
+    expected_behaviors: set = field(default_factory=set)
 
 
 CURATED_MVP_CASES: List[EvalCase] = [
@@ -2645,9 +2648,71 @@ SYNTHETIC_SEEDED_V1_CASES: List[EvalCase] = [
 ]
 
 
+# ── Phase 1a: realistic conversation subset ──
+# screen pop 预载身份+订单后，用户用模糊指代提诉求（不报邮箱/订单号）。
+REALISTIC_CONVERSATION_CASES: List[EvalCase] = [
+    EvalCase(
+        case_id="rc_screen_pop_cancel",
+        category="realistic_cancel",
+        subset="realistic_conversation",
+        screen_pop_user_id="lucas_martin_4549",
+        messages=[
+            {"role": "user", "content": "帮我取消那个还没发货的订单"},
+            {"role": "user", "content": "对，不想要了"},
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="lucas_martin_4549",
+        expected_intent="cancel_order",
+        order_id="#W9318778",
+        expected_order_status="cancelled",
+        expected_confirmation_status="confirmed",
+        required_tools={"cancel_pending_order"},
+        expected_behaviors={"screen_pop_preloaded", "reference_resolved"},
+        max_turns=10,
+    ),
+    EvalCase(
+        case_id="rc_screen_pop_lookup_delivered",
+        category="realistic_lookup",
+        subset="realistic_conversation",
+        screen_pop_user_id="sofia_rossi_8776",
+        messages=[
+            {"role": "user", "content": "我那个已经到的单子状态怎么样了"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="lookup",
+        order_id="#W8535951",
+        expected_order_status="delivered",
+        expected_assistant_contains="#W8535951",
+        expected_behaviors={"screen_pop_preloaded", "reference_resolved"},
+        max_turns=6,
+    ),
+    EvalCase(
+        case_id="rc_interruption_confirm_with_question",
+        category="realistic_interruption",
+        subset="realistic_conversation",
+        screen_pop_user_id="sofia_rossi_8776",
+        messages=[
+            {"role": "user", "content": "取消 #W5918442 吧，不想要了"},
+            {"role": "user", "content": "确认，退款能退多少？"},
+            {"role": "user", "content": "确认"},
+        ],
+        expected_user_id="sofia_rossi_8776",
+        expected_intent="cancel_order",
+        order_id="#W5918442",
+        expected_order_status="cancelled",
+        expected_confirmation_status="confirmed",
+        required_tools={"cancel_pending_order"},
+        expected_behaviors={"interruption_handled", "no_stale_pending"},
+        max_turns=12,
+    ),
+]
+
+
 def get_cases(subset: str) -> List[EvalCase]:
     if subset == "curated_mvp":
         return list(CURATED_MVP_CASES)
+    if subset == "realistic_conversation":
+        return list(REALISTIC_CONVERSATION_CASES)
     if subset == "golden":
         from app.eval.golden_set import GoldenSet
 

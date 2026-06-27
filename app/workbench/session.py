@@ -190,6 +190,12 @@ class WorkbenchSession:
             session_id=self.session_id,
             task_id=(selected_case.case_id if selected_case is not None else None),
         )
+        # Demo 模式（无 scripted case + 显式 demo 客户）：screen pop 预载客户卡
+        demo_customer = getattr(self, "_demo_customer_id", None)
+        if selected_case is None and demo_customer:
+            from app.agent.screen_pop import ScreenPop
+
+            ScreenPop(runtime.gateway).apply(state, demo_customer)
         return runtime, state, runtime.retail_runtime.db_hash()
 
     def _send_user_content(self, content: str) -> bool:
