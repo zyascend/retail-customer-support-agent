@@ -34,6 +34,38 @@ class ToolGateway:
         idempotency_key = None
         resource_lock = None
 
+        # list_user_orders 越权校验：user_id 必须是认证用户（防越权枚举订单）
+        if tool_name == "list_user_orders":
+            req_user = str(arguments.get("user_id", ""))
+            if (
+                not state.authenticated_user_id
+                or req_user != state.authenticated_user_id
+            ):
+                observation = {
+                    "status": "blocked",
+                    "message_for_llm": (
+                        "I can only list orders for the authenticated user."
+                    ),
+                }
+                record = ToolCallRecord(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    tool_kind=spec.kind,
+                    status="blocked",
+                    observation=observation,
+                    error="ownership_violation",
+                    before_db_hash=before_hash,
+                    after_db_hash=before_hash,
+                )
+                state.tool_results.append(record)
+                state.add_step(
+                    "list_user_orders_guard",
+                    status="blocked",
+                    tool_name=tool_name,
+                    block_reason="ownership_violation",
+                )
+                return record
+
         if spec.kind == "write":
             guard_result = self.guard.check(
                 state=state,

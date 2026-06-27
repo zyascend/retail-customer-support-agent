@@ -69,6 +69,7 @@ class ToolRegistry:
         "calculate": "Evaluate a mathematical expression. For internal calculations only.",
         "transfer_to_human_agents": "Transfer the conversation to a human support agent. Use when the request cannot be handled by available tools.",
         "list_all_product_types": "List all available product categories in the catalog. Read-only. Returns list of product type names.",
+        "list_user_orders": "List all orders for the authenticated user. Returns order summaries with order_id, status, and item names. Use this to resolve vague references like 'my pending order' or 'the one that hasn't arrived'. Read-only.",
     }
 
     _ARG_DESCRIPTIONS: dict[str, str] = {

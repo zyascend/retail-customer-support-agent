@@ -55,3 +55,39 @@ def test_list_user_orders_summary_shape() -> None:
 def test_list_user_orders_empty() -> None:
     tools = _tools_with_one_order()
     assert tools.list_user_orders("nobody") == []
+
+
+def _gateway_and_state():
+    from app.tools.retail_adapter import RetailRuntime
+
+    tools = _tools_with_one_order()
+    runtime = RetailRuntime(db=tools.db, tools=tools, policy="", source="test")
+    registry = ToolRegistry(tools)
+    gateway = ToolGateway(registry=registry, runtime=runtime)
+    state = SessionState(session_id="t")
+    state.authenticated_user_id = "sofia_rossi_8776"
+    return gateway, state
+
+
+def test_list_user_orders_blocked_for_other_user() -> None:
+    gateway, state = _gateway_and_state()
+    record = gateway.execute(
+        state=state,
+        tool_name="list_user_orders",
+        arguments={"user_id": "other_user"},
+    )
+    assert record.status == "blocked"
+    assert record.error == "ownership_violation"
+
+
+def test_list_user_orders_allowed_for_authenticated_user() -> None:
+    gateway, state = _gateway_and_state()
+    record = gateway.execute(
+        state=state,
+        tool_name="list_user_orders",
+        arguments={"user_id": "sofia_rossi_8776"},
+    )
+    assert record.status == "success"
+    assert isinstance(record.observation, list)
+    assert len(record.observation) == 2
+
