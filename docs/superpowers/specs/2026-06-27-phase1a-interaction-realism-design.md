@@ -8,11 +8,15 @@
 
 终极目标是做**高质感 demo**（不是真上线）。三个真实化轴（交互真实化 / 生产可部署化 / 评测真实化）分阶段推进，排期方案 A：先大脑后身体。本轮 spec 覆盖 Phase 1a = **震撼三件套**，在现有 harness/workbench 上迭代，不碰 UI。
 
+### 客服生命周期框架（指导思想，渐进落地）
+
+来自真实客服从业经验：客户进坐席 → ① screen pop 客户+订单 → ② 明确诉求 → ③ 诉求→工作流（框架同、细节异）→ ④ 建工单 + 提交评价。本轮用此 4 步模型**指导设计**，但**渐进落地**——不重写编排器，additive 加入 OPENING（screen pop）与 WORKING（intent→SkillSpec 工作流）阶段；CLOSING（工单+评价）放 Phase 1b。架构路径选渐进而非大动编排器重写：保护 100% 基线，用大架构思想指导、用增量方式落地。
+
 ## 目标
 
 让 agent 在真实多轮对话里表现得像真人客服，用三件套打破"脚本化单次对话"的测评感：
 
-1. **对话式身份核验**——agent 主动索要验证信息，而非撞 Guard block 才反应
+1. **Screen pop 上下文预载**——客户进线即预载身份+订单，agent 第一轮就"认识"他（而非撞 Guard block 才反应、或让用户自报邮箱）
 2. **鲁棒指代消解**——解析"没到的那个""蓝衬衫"等模糊/照应指代
 3. **中途打断 & 意图穿插**——确认中可改细节、穿插提问、加新请求，不丢 pending 不误触发
 
@@ -27,41 +31,50 @@
 
 ## 架构总览
 
-三件套的改动分布在三个已有层，不新增子系统：
+三件套的改动分布在已有层 + 一个新 helper，不新增子系统。生命周期 4 步模型（screen pop → 意图 → 工作流 → 工单）渐进落地：本轮实现 ①screen pop（OPENING）+ ②指代 + ③打断（WORKING 内），CLOSING 放 Phase 1b。
 
 ```
+[会话建立]
+   ScreenPop.apply(customer_id)      ← 新 helper (OPENING 阶段)
+      → get_user_details + list_user_orders
+      → session.authenticated_user_id = customer_id
+      → loaded_context 预载客户卡 + 近期订单
+              │
+              ▼
 user msg → AgentRuntime.handle_user_message
               │
-    ┌─────────┼──────────────────┐
-    ▼         ▼                  ▼
- ①preflight  ③preflight       ② LLM AgentLoop
- (identity)  (confirmation)      │
-    │         │                  ▼
-    │    关键词fast-path      ToolGateway
-    │    clean? → 短路       ──→ WriteActionGuard (7层，不改)
-    │    mixed? → 放行LLM         │
-    │         │                  ▼
-    ▼         ▼             RetailAdapter
-  regex提取   LLM fallback   + 新工具 list_user_orders
-  (不改)    (pending保持)         │
-    │         │                  ▼
-    └────→ context_builder (丰富: auth状态 + 订单商品名 + pending详情)
+    ┌─────────┴──────────────────┐
+    ▼                            ▼
+ ③preflight                  ② LLM AgentLoop
+ (confirmation)                │
+    │                          ▼
+ 关键词fast-path            ToolGateway
+ clean? → 短路            ──→ WriteActionGuard (7层，不改)
+ mixed? → 放行LLM              │
+    │                          ▼
+    ▼                     RetailAdapter
+  LLM fallback            + list_user_orders (查询/补载)
+  (pending保持)                │
+    │                          ▼
+    └────→ context_builder (丰富: 客户卡恒可见 + 订单商品名 + pending详情)
                     │
                     ▼
-              system prompt (扩展: 身份核验引导 + 指代消解启发式 + 打断处理)
+              system prompt (扩展: 指代消解启发式 + 打断处理)
 ```
 
 ### 改动清单
 
 | 文件 | 改动 | 风险 |
 |------|------|------|
-| `app/agent/context_builder.py` | 显示 auth 状态；订单含商品名；pending 含参数详情 | 低 |
+| `app/agent/screen_pop.py`（新） | `ScreenPop` helper：按 customer_id 预载 user_details + 近期订单到 SessionState，设置 `authenticated_user_id` | 低 |
+| `app/agent/runtime.py` | `run_script` 支持 screen pop 预载（realistic 子集）；`_preflight_confirmation` 加 fallback 放行逻辑（§3） | 中（核心路径） |
+| `app/workbench/session.py` + `app/cli/chat.py` | 会话创建时调用 ScreenPop（demo 模式预载客户卡） | 低 |
+| `app/agent/context_builder.py` | 订单含商品名；pending 含参数详情（screen pop 后身份恒可见，无需 NOT AUTHENTICATED 分支） | 低 |
 | `app/agent/confirmation.py` | 新增 `has_competing_signal()` + `_has_question()` | 低 |
-| `app/agent/runtime.py` | `_preflight_confirmation` 加 fallback 放行逻辑 | 中（核心路径） |
-| `app/tools/retail_adapter.py` + `app/tools/registry.py` | 新增 `list_user_orders` read tool | 低 |
-| `prompts/llm_agent_system_v001.md` | 身份核验引导 + 指代消解启发式 + 打断处理段 | 低 |
-| `app/eval/cases.py` | 新增 `realistic_conversation` 子集 + `expected_behaviors` 字段 | 低 |
-| `app/eval/runner.py` | 行为 rubric 断言（`expected_behaviors` 校验） | 低 |
+| `app/tools/retail_adapter.py` + `app/tools/registry.py` | 新增 `list_user_orders` read tool（screen pop 复用 + 用户后续查询） | 低 |
+| `prompts/llm_agent_system_v001.md` | 指代消解启发式 + 打断处理段（身份核验引导移除——screen pop 已认证） | 低 |
+| `app/eval/cases.py` | 新增 `realistic_conversation` 子集 + `expected_behaviors` 字段 + `screen_pop_user_id` 字段 | 低 |
+| `app/eval/runner.py` | screen pop 预载（按 `screen_pop_user_id`）+ 行为 rubric 断言 | 低 |
 
 ### 保护的不变量
 
@@ -72,46 +85,67 @@ user msg → AgentRuntime.handle_user_message
 
 ---
 
-## §1 对话式身份核验
+## §1 Screen pop 上下文预载
 
-### 问题
+### 问题与心智模型校正
 
-`_preflight_identity`（`runtime.py:453`）纯正则抽取：用户消息里出现 email 或 name+zip 格式才提取。`context_builder.build` 只在 `authenticated_user_id` 存在时显示 User 行——未认证时 state summary 无身份信号，LLM 不知道该先验证身份。
+原设计想做的"对话式身份核验"（agent 问"请报邮箱"）是**电话客服里客户未登录、需自报家门**的场景。真实坐席模型恰恰相反：客户进坐席那一刻，客服屏幕已 pop 出客户信息+订单——身份是渠道带进来的（电商即"客户已登录网站，点客服按钮"，坐席立刻看到账户），不是聊出来的。
 
-用户说"帮我取消订单"（不报邮箱）→ LLM 直接尝试写 → Guard block `authentication_required` → 用户收到冷冰冰的 "Please verify your identity before making changes."。没有对话感。
+原设计把"罕见异常路径"（敏感写的 step-up 验证）当成了"默认入口"。正确模型：**默认 = screen pop（进线即预载身份+订单）**；step-up 验证是例外，本轮不做（放 Phase 1b）。
+
+当前 `_preflight_identity` 靠用户消息里正则抽 email/name+zip，未认证时 state summary 无身份信号。需改为：会话建立时即预载，agent 第一轮就"认识"客户。
 
 ### 设计
 
-**a) `context_builder.py` — 显式 auth 状态**
+**a) 新增 `app/agent/screen_pop.py` — ScreenPop helper**
 
-未认证时 state summary 首行：
+```python
+class ScreenPop:
+    """会话建立时预载客户卡 + 近期订单（模拟真实坐席进线 screen pop）。"""
+    def __init__(self, gateway: ToolGateway): ...
+    def apply(self, session: SessionState, customer_id: str) -> None:
+        # 1. get_user_details → loaded_context.users[customer_id]
+        # 2. list_user_orders → loaded_context.orders (近期订单)
+        # 3. session.authenticated_user_id = customer_id
+        # 4. session.auth_method = "screen_pop"
+        # 5. session.add_step("screen_pop", user_id=customer_id, order_count=...)
 ```
-User: NOT AUTHENTICATED — identity verification required for any order changes
+
+- 输入：`customer_id`（模拟渠道已认证的登录用户）
+- 预载后 `authenticated_user_id` 已设置 → Guard auth 层直接放行，无需对话核验
+- 复用 `list_user_orders`（§2 新工具）+ `get_user_details`
+
+**b) 注入点：会话创建**
+
+- `app/workbench/session.py` `_create_runtime_and_state_for`：demo 模式（无 case 或 realistic case 带 `screen_pop_user_id`）创建 state 后调用 `ScreenPop.apply`
+- `app/cli/chat.py` `_interactive`：新增 `--customer <user_id>` 参数，会话建立时 screen pop；未传则保持现有空状态（兼容）
+- `app/agent/runtime.py` `run_script`：realistic 子集按 case 的 `screen_pop_user_id` 预载
+
+**c) `context_builder.py` — 客户卡恒可见**
+
+screen pop 后 `authenticated_user_id` 恒存在，现有 `User: user_id=xxx (screen_pop)` 行自然显示。订单行含商品名（见 §2b）。无需 NOT AUTHENTICATED 分支——demo 默认已认证。
+
+**d) `_preflight_identity` — 保留正则 fast-path 作为兜底**
+
+screen pop 是主路径；正则抽取保留为兜底（用户在会话中后续报邮箱查别的账户等边缘场景）。Guard auth 层仍是最终裁决——screen pop 设置的 `authenticated_user_id` 与 Guard 检查的是同一字段，不变量不破。
+
+### 交互流（demo 效果）
+
 ```
-已认证时保持现状。LLM 每轮都能看到认证状态。
-
-**b) `prompts/llm_agent_system_v001.md` — 身份核验引导**
-
-Core Contract 新增第 12 条：
-> **Verify identity before writes** — if the session is not authenticated and the user requests an order lookup or change, ask for their email address or their name and zip code to verify identity first. Do not attempt a write tool until identity is verified; the guard will block it regardless. Once verified, proceed with the request.
-
-Heuristics 段补充：
-> **Identity first** — for write requests from unauthenticated users, your first response should ask for verification, not attempt the write.
-
-**c) `_preflight_identity` — 保留正则 fast-path，不改**
-
-用户在任何消息报了 email/name+zip，正则照旧秒级提取并设置 `authenticated_user_id`。LLM 引导用户报身份 → 用户报了 → fast-path 捕获 → 下一轮 LLM 见已认证 → 继续。
-
-### 交互流
-
+[会话建立] screen pop: sofia_rossi_8776, 2 orders pre-loaded
+User: 帮我取消那个没发货的订单
+  → agent 已见 #W5918442=pending, #W4817420=delivered
+  → LLM: 好的 Sofia，您有一个 pending 的 #W5918442（Water Bottle、T-Shirt），
+         要取消这个吗？原因是什么？
 ```
-User: 帮我取消那个还没发货的订单
-  → state: NOT AUTHENTICATED
-  → LLM: 没问题，请先告诉我您的注册邮箱，或姓名和邮编。
-User: sofia.rossi2645@example.com
-  → preflight regex 命中 → authenticated
-  → LLM: 谢谢 Sofia。我查到您有一个 pending 订单 #W5918442，要取消吗？
-```
+
+对比现状：用户不报 `#W` 订单号且不报邮箱，agent 完全无法定位、且会先撞 `authentication_required`。
+
+### 不做的事
+
+- 不做真实 auth 后端（screen pop 模拟渠道认证，demo 足够）
+- 不做 step-up 敏感写验证（放 Phase 1b）
+- 不改 Guard auth 层（screen pop 只填 `authenticated_user_id`，裁决逻辑不动）
 
 ---
 
@@ -119,7 +153,7 @@ User: sofia.rossi2645@example.com
 
 ### 缺口
 
-当前 read tools 无 `list_user_orders`——agent 无法发现用户订单列表。state summary 只显示 `#W5918442=pending (3 items)`，无商品名，无法做属性指代。
+当前 read tools 无 `list_user_orders`——agent 无法发现用户订单列表。state summary 只显示 `#W5918442=pending (3 items)`，无商品名，无法做属性指代。screen pop（§1）预载了近期订单，但用户后续问"我还有一个单呢"等仍需 `list_user_orders` 补载。
 
 | 指代类型 | 例子 | 当前 |
 |----------|------|------|
@@ -142,6 +176,7 @@ User: sofia.rossi2645@example.com
 - `LocalRetailTools`：过滤 `db["orders"]` by `user_id`，返回摘要（不含 payment_history 等重字段，控 token）
 - tau2 runtime：RetailDB 的 order 有 `user_id` 字段，用薄 wrapper 在 adapter 层实现（不改 tau2 源码）
 - 注册进 `READ_TOOLS`，Guard 不拦截
+- **双重用途**：① ScreenPop（§1）复用它预载近期订单；② 用户后续查询/补载时 LLM 主动调用
 - **前置约束**：`user_id` 必须等于 `session.authenticated_user_id`——gateway 层校验，防越权枚举
 
 **b) `context_builder.py` — 订单含商品名**
@@ -270,29 +305,30 @@ Core Contract 新增第 13 条：
 | `confirmation.has_competing_signal` | 混合 confirm+change / confirm+deny / 信号+提问 → True；干净 → False |
 | `confirmation._has_question` | 中英文问句命中 |
 | `list_user_orders` | 按 user_id 过滤；越权拒绝；空订单 []；含商品名摘要 |
-| `context_builder` | 未认证 NOT AUTHENTICATED；订单含商品名；pending 含参数 |
+| `ScreenPop.apply` | 预载 user_details + 订单到 loaded_context；设置 authenticated_user_id + auth_method=screen_pop |
+| `context_builder` | 订单含商品名；pending 含参数；screen pop 后客户卡恒可见 |
 
 ### 第 2 层：新 eval 子集 `realistic_conversation`（live）
 
-多轮 case 验收三件套。示例：
+多轮 case 验收三件套。screen pop 预载后用户**不再自报邮箱**。示例：
 
 ```python
 EvalCase(
-    case_id="rc_conversational_auth",
-    category="realistic_auth",
+    case_id="rc_screen_pop_cancel",
+    category="realistic_cancel",
+    screen_pop_user_id="sofia_rossi_8776",   # 会话建立时预载
     messages=[
-        {"role": "user", "content": "帮我取消那个没发货的订单"},
-        {"role": "user", "content": "sofia.rossi2645@example.com"},
-        {"role": "user", "content": "对，不想要了"},
-        {"role": "user", "content": "确认"},
+        {"role": "user", "content": "帮我取消那个没发货的订单"},   # 无身份、无订单号
+        {"role": "user", "content": "对，不想要了"},               # 模糊确认意图
+        {"role": "user", "content": "确认"},                       # 干净确认
     ],
     expected_user_id="sofia_rossi_8776",
     expected_intent="cancel_order",
     order_id="#W5918442",
     expected_order_status="cancelled",
     expected_confirmation_status="confirmed",
-    required_tools={"list_user_orders", "cancel_pending_order"},
-    expected_behaviors={"identity_before_write", "reference_resolved"},
+    required_tools={"cancel_pending_order"},
+    expected_behaviors={"screen_pop_preloaded", "reference_resolved"},
 )
 ```
 
@@ -300,18 +336,18 @@ case 覆盖矩阵（~12-15 case）：
 
 | 维度 | case |
 |------|------|
-| ①身份 | 对话式报邮箱 / 报姓名邮编 / 报错再纠正 |
-| ②指代 | 状态指代 / 属性指代 / 多订单消歧 / list_user_orders 路径 |
+| ①screen pop | screen pop 预载后直接提诉求（无需报邮箱）/ 预载后多订单场景 / screen pop 兜底正则（边缘场景） |
+| ②指代 | 状态指代("没到的") / 属性指代("蓝衬衫") / 多订单消歧 / list_user_orders 补载 |
 | ③打断 | 确认+改细节 / 确认+穿插提问 / 否认+提问 / 穿插新意图 / 模糊回应 |
 
 ### 第 3 层：行为 rubric 断言
 
-`EvalCase` 新增 `expected_behaviors: set[str]`，eval runner 验证：
+`EvalCase` 新增 `expected_behaviors: set[str]` + `screen_pop_user_id`，eval runner 验证：
 
 | rubric key | 判定逻辑 |
 |------------|----------|
-| `identity_before_write` | 第一个 write tool call 前 `authenticated_user_id` 已设置 |
-| `reference_resolved` | write tool 的 order_id 来自 list_user_orders 或 loaded context，非用户原话明给 |
+| `screen_pop_preloaded` | 会话首条消息前 `authenticated_user_id` 已设置 + `loaded_context` 含该 user 的 user_details + 订单（trace 出现 `screen_pop` step） |
+| `reference_resolved` | write tool 的 order_id 来自 screen pop 预载 / list_user_orders / loaded context，非用户原话明给 |
 | `interruption_handled` | pending 期间 fallback 后 trace 出现 fallback step，最终 confirmation 正确 |
 | `no_stale_pending` | 会话结束时无遗留 pending_action |
 
@@ -328,6 +364,7 @@ case 覆盖矩阵（~12-15 case）：
 
 ## 后续阶段（本轮不做）
 
-- **Phase 1b**：多意图编排 / 跑题情绪降级 / 脏输入鲁棒性
-- **Phase 2**：真实聊天界面（chat-first UI + 流式 + 会话持久感 + 订单上下文侧栏）
+- **Phase 1b**：多意图编排 / 跑题情绪降级 / 脏输入鲁棒性 / **CLOSING 工单+评价闭环** / **step-up 敏感写验证**
+- **Phase 2**：真实聊天界面（chat-first UI + 流式 + 会话持久感 + 订单上下文侧栏 + 生命周期可视化如工单状态条）
 - **Phase 3**：真实场景库 + 行为 rubric 评测体系重建
+- **演进方向（Phase 2+ 视价值落地）**：SessionOrchestrator 显式编排 4 阶段生命周期（OPENING/WORKING/CLOSING/CLOSED），AgentLoop 退为 WORKING 引擎——待真实 UI 需要生命周期可视化时兑现
