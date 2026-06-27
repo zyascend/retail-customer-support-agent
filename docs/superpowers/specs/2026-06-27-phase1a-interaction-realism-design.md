@@ -16,7 +16,7 @@
 
 让 agent 在真实多轮对话里表现得像真人客服，用三件套打破"脚本化单次对话"的测评感：
 
-1. **Screen pop 上下文预载**——客户进线即预载身份+订单，agent 第一轮就"认识"他（而非撞 Guard block 才反应、或让用户自报邮箱）
+1. **Screen pop：身份进线即有 + 订单进线预查**——客户进线即带入身份（渠道认证），agent 主动查一次订单（模拟客服进线先扫一眼），第一轮就"认识"客户与其订单（而非撞 Guard block 才反应、或让用户自报邮箱）
 2. **鲁棒指代消解**——解析"没到的那个""蓝衬衫"等模糊/照应指代
 3. **中途打断 & 意图穿插**——确认中可改细节、穿插提问、加新请求，不丢 pending 不误触发
 
@@ -34,11 +34,12 @@
 三件套的改动分布在已有层 + 一个新 helper，不新增子系统。生命周期 4 步模型（screen pop → 意图 → 工作流 → 工单）渐进落地：本轮实现 ①screen pop（OPENING）+ ②指代 + ③打断（WORKING 内），CLOSING 放 Phase 1b。
 
 ```
-[会话建立]
-   ScreenPop.apply(customer_id)      ← 新 helper (OPENING 阶段)
-      → get_user_details + list_user_orders
-      → session.authenticated_user_id = customer_id
-      → loaded_context 预载客户卡 + 近期订单
+[会话建立]  ← OPENING 阶段
+   ScreenPop.apply(customer_id)      ← 新 helper
+      步骤1: 设置 session.authenticated_user_id = customer_id   (身份进线即有)
+      步骤2: get_user_details → loaded_context.users             (客户卡)
+      步骤3: list_user_orders → loaded_context.orders            (进线预查一次订单,
+             ← 模仿客服进线后习惯性先扫一眼订单, 是显式查单动作, 不是自动 pop)
               │
               ▼
 user msg → AgentRuntime.handle_user_message
@@ -53,7 +54,7 @@ user msg → AgentRuntime.handle_user_message
  mixed? → 放行LLM              │
     │                          ▼
     ▼                     RetailAdapter
-  LLM fallback            + list_user_orders (查询/补载)
+  LLM fallback            + list_user_orders (可重复调用: 用户后续补查)
   (pending保持)                │
     │                          ▼
     └────→ context_builder (丰富: 客户卡恒可见 + 订单商品名 + pending详情)
@@ -66,7 +67,7 @@ user msg → AgentRuntime.handle_user_message
 
 | 文件 | 改动 | 风险 |
 |------|------|------|
-| `app/agent/screen_pop.py`（新） | `ScreenPop` helper：按 customer_id 预载 user_details + 近期订单到 SessionState，设置 `authenticated_user_id` | 低 |
+| `app/agent/screen_pop.py`（新） | `ScreenPop` helper：身份进线即设 + 主动调 `list_user_orders` 预查一次订单 + `get_user_details` 客户卡 | 低 |
 | `app/agent/runtime.py` | `run_script` 支持 screen pop 预载（realistic 子集）；`_preflight_confirmation` 加 fallback 放行逻辑（§3） | 中（核心路径） |
 | `app/workbench/session.py` + `app/cli/chat.py` | 会话创建时调用 ScreenPop（demo 模式预载客户卡） | 低 |
 | `app/agent/context_builder.py` | 订单含商品名；pending 含参数详情（screen pop 后身份恒可见，无需 NOT AUTHENTICATED 分支） | 低 |
@@ -85,15 +86,15 @@ user msg → AgentRuntime.handle_user_message
 
 ---
 
-## §1 Screen pop 上下文预载
+## §1 Screen pop：身份进线即有 + 订单进线预查
 
-### 问题与心智模型校正
+### 问题与心智模型校正（两轮）
 
-原设计想做的"对话式身份核验"（agent 问"请报邮箱"）是**电话客服里客户未登录、需自报家门**的场景。真实坐席模型恰恰相反：客户进坐席那一刻，客服屏幕已 pop 出客户信息+订单——身份是渠道带进来的（电商即"客户已登录网站，点客服按钮"，坐席立刻看到账户），不是聊出来的。
+**第一轮校正**：原设计"对话式身份核验"（agent 问"请报邮箱"）是电话客服里客户未登录、需自报家门的场景。真实坐席相反：客户进坐席那一刻，客服屏幕已 pop 出客户**身份**——身份是渠道带进来的（电商即"客户已登录网站，点客服按钮"，坐席立刻看到账户），不是聊出来的。
 
-原设计把"罕见异常路径"（敏感写的 step-up 验证）当成了"默认入口"。正确模型：**默认 = screen pop（进线即预载身份+订单）**；step-up 验证是例外，本轮不做（放 Phase 1b）。
+**第二轮校正（精确化）**：身份进线即有，但**订单等信息不是自动 pop 出来的**——客服需要**主动查一下**才拉出订单列表。对应到 agent：会话建立只设身份，订单是进线后**主动调 `list_user_orders` 查一次**的显式动作（模仿客服进线后习惯性先扫一眼订单）。`list_user_orders` 既是这个预查步骤，也是后续可重复调用的工具。
 
-当前 `_preflight_identity` 靠用户消息里正则抽 email/name+zip，未认证时 state summary 无身份信号。需改为：会话建立时即预载，agent 第一轮就"认识"客户。
+正确模型：**身份 = 进线即有（渠道带入）；订单 = 进线后主动查一次（显式 tool 调用）**。step-up 敏感写验证是例外，本轮不做（放 Phase 1b）。
 
 ### 设计
 
@@ -101,19 +102,20 @@ user msg → AgentRuntime.handle_user_message
 
 ```python
 class ScreenPop:
-    """会话建立时预载客户卡 + 近期订单（模拟真实坐席进线 screen pop）。"""
+    """会话建立时模拟真实坐席进线：身份即设 + 主动查一次订单。"""
     def __init__(self, gateway: ToolGateway): ...
     def apply(self, session: SessionState, customer_id: str) -> None:
-        # 1. get_user_details → loaded_context.users[customer_id]
-        # 2. list_user_orders → loaded_context.orders (近期订单)
-        # 3. session.authenticated_user_id = customer_id
-        # 4. session.auth_method = "screen_pop"
-        # 5. session.add_step("screen_pop", user_id=customer_id, order_count=...)
+        # 步骤1（身份进线即有）: 设置 authenticated_user_id + auth_method="screen_pop"
+        # 步骤2（客户卡）: get_user_details → loaded_context.users[customer_id]
+        # 步骤3（进线预查订单——显式 tool 调用，非自动 pop）:
+        #        list_user_orders → loaded_context.orders (近期订单)
+        # 步骤4: session.add_step("screen_pop", user_id=..., order_count=...)
 ```
 
 - 输入：`customer_id`（模拟渠道已认证的登录用户）
-- 预载后 `authenticated_user_id` 已设置 → Guard auth 层直接放行，无需对话核验
-- 复用 `list_user_orders`（§2 新工具）+ `get_user_details`
+- **身份是会话建立时直接设置的**（渠道带入，无需 tool）——Guard auth 层直接放行
+- **订单是主动调 `list_user_orders` 查出来的**——这是工作流里的显式查单动作，不是预载副作用
+- `list_user_orders` 既是 ScreenPop 步骤3 复用，也是后续 LLM 可重复调用的工具（用户问"我还有别的单"可再查）
 
 **b) 注入点：会话创建**
 
@@ -132,9 +134,11 @@ screen pop 是主路径；正则抽取保留为兜底（用户在会话中后续
 ### 交互流（demo 效果）
 
 ```
-[会话建立] screen pop: sofia_rossi_8776, 2 orders pre-loaded
+[会话建立]
+  → 身份即设: authenticated_user_id = sofia_rossi_8776 (渠道带入)
+  → 主动查单: list_user_orders → #W5918442=pending, #W4817420=delivered (预查一次)
 User: 帮我取消那个没发货的订单
-  → agent 已见 #W5918442=pending, #W4817420=delivered
+  → agent 已预查到订单，从上下文解析"没发货的" = #W5918442
   → LLM: 好的 Sofia，您有一个 pending 的 #W5918442（Water Bottle、T-Shirt），
          要取消这个吗？原因是什么？
 ```
