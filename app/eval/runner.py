@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from app.agent.prompts import prompt_metadata
+from app.agent.models import SessionState
 from app.agent.runtime import AgentRuntime
 from app.config import AppConfig
 from app.eval.baseline import build_baseline_metadata
@@ -367,6 +368,7 @@ class CuratedEvalRunner:
             task_id=case.case_id,
             max_turns=case.max_turns,
             user_simulator_callback=user_simulator_callback,
+            screen_pop_user_id=getattr(case, "screen_pop_user_id", None),
         )
         duration_seconds = round(time.perf_counter() - started_at, 3)
 
@@ -436,6 +438,9 @@ class CuratedEvalRunner:
             confirmation_status=state.confirmation_status,
             db_assertion_failures=db_assertion_failures,
         )
+        behavior_failures = evaluate_behaviors(case, state)
+        if behavior_failures and failure_label is None:
+            failure_label = f"behavior_unmet:{','.join(behavior_failures)}"
         result = EvalCaseResult(
             run_id=run_result.run_id,
             session_id=state.session_id,
@@ -590,6 +595,50 @@ class CuratedEvalRunner:
             json.dump(build_report_artifact(summary), file, indent=2, sort_keys=True)
             file.write("\n")
         return report_path
+
+
+def evaluate_behaviors(
+    case: EvalCase,
+    state: SessionState,
+) -> List[str]:
+    """返回未满足的 behavior key 列表（空 = 全满足）。纯函数，复用 trace 数据。"""
+    failed: List[str] = []
+    expected = case.expected_behaviors
+    steps = state.steps
+
+    if "screen_pop_preloaded" in expected:
+        has_screen_pop = any(s.node == "screen_pop" for s in steps)
+        if not has_screen_pop:
+            failed.append("screen_pop_preloaded")
+
+    if "reference_resolved" in expected:
+        # 用户原话没显式给 #W 订单号，但 write 成功（或 lookup 回复含状态）→ 指代被消解
+        user_gave_explicit_order = any(
+            ORDER_RE.search(m.get("content", "")) for m in case.messages
+        )
+        write_succeeded = any(
+            getattr(r, "tool_kind", "") == "write" and r.status == "success"
+            for r in state.tool_results
+        )
+        lookup_ok = bool(case.expected_assistant_contains) and any(
+            case.expected_assistant_contains.lower() in msg.content.lower()
+            for msg in state.messages
+            if msg.role == "assistant"
+        )
+        if user_gave_explicit_order or not (write_succeeded or lookup_ok):
+            failed.append("reference_resolved")
+
+    if "interruption_handled" in expected:
+        has_fallback = any(
+            s.node == "preflight_confirmation_fallback" for s in steps
+        )
+        if not has_fallback or state.confirmation_status != "confirmed":
+            failed.append("interruption_handled")
+
+    if "no_stale_pending" in expected and state.pending_action is not None:
+        failed.append("no_stale_pending")
+
+    return failed
 
 
 def classify_failure(
