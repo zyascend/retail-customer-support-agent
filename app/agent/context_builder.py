@@ -88,8 +88,18 @@ class ContextBuilder:
             for oid, order in session.loaded_context.orders.items():
                 status = order.get("status", "?")
                 items = order.get("items", [])
-                item_count = len(items) if isinstance(items, list) else 0
-                order_parts.append(f"{oid}={status} ({item_count} items)")
+                item_list = [it for it in items if isinstance(it, dict)]
+                names = [
+                    str(it.get("name", "")) for it in item_list if it.get("name")
+                ]
+                if len(names) > 3:
+                    names = names[:3] + ["..."]
+                names_str = (
+                    "[" + ", ".join(names) + "]"
+                    if names
+                    else f"({len(item_list)} items)"
+                )
+                order_parts.append(f"{oid}={status} {names_str}")
             parts.append("Orders: " + ", ".join(order_parts))
 
         payment_parts = []
@@ -113,9 +123,15 @@ class ContextBuilder:
             parts.append("Payment methods: " + ", ".join(payment_parts))
 
         if session.pending_action:
+            pa = session.pending_action
+            arg_str = ", ".join(
+                f"{k}={v}"
+                for k, v in pa.arguments.items()
+                if not k.startswith("_")
+            )
+            arg_part = f"({arg_str})" if arg_str else ""
             parts.append(
-                f"Pending: {session.pending_action.action_name} "
-                f"— waiting for user confirmation"
+                f"Pending: {pa.action_name}{arg_part} — waiting for user confirmation"
             )
         else:
             if session.write_locks:
