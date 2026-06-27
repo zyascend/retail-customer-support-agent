@@ -134,11 +134,19 @@ class AgentRuntime:
         task_id: Optional[str] = None,
         max_turns: int = 20,
         user_simulator_callback: Optional[Callable[[str], Optional[str]]] = None,
+        screen_pop_user_id: Optional[str] = None,
     ) -> AgentRunResult:
         self._turn_contexts = []
         run_id = session_id or f"agent-{uuid.uuid4().hex[:12]}"
         session = SessionState(session_id=run_id, task_id=task_id)
         initial_db_hash = self.retail_runtime.db_hash()
+
+        # Screen pop：身份进线即设 + 主动查一次订单（realistic 子集）
+        if screen_pop_user_id:
+            from app.agent.screen_pop import ScreenPop
+
+            ScreenPop(self.gateway).apply(session, screen_pop_user_id)
+
         turn = 0
         message_list = list(messages)
         message_index = 0

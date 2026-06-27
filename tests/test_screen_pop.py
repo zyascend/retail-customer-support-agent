@@ -77,3 +77,12 @@ def test_screen_pop_records_order_count() -> None:
     ScreenPop(gw).apply(state, "u1")
     step = next(s for s in state.steps if s.node == "screen_pop")
     assert step.detail.get("order_count") == 2
+
+
+def test_run_script_accepts_screen_pop_user_id() -> None:
+    """run_script 签名接受 screen_pop_user_id 参数。"""
+    import inspect
+    from app.agent.runtime import AgentRuntime
+
+    sig = inspect.signature(AgentRuntime.run_script)
+    assert "screen_pop_user_id" in sig.parameters
