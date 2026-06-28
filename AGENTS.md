@@ -2,6 +2,20 @@
 
 > Read by AI coding agents on session start. Also read `HANDOFF.md` for latest progress.
 
+## ⚡ 省 Token 优先策略
+
+本项目已通过 `codebase-memory-mcp` 建立完整的代码知识图谱（3,023 节点 / 10,402 边），**优先使用以下 MCP 工具探索代码，而非直接 Read/Grep/Bash**，可大幅节省 Token：
+
+| 场景 | 推荐工具 |
+|------|---------|
+| 找函数定义 / 类 / 接口 | `search_graph` + `get_code_snippet` |
+| 理解调用上下游 | `trace_path`（支持 calls / data_flow / cross_service） |
+| 理解架构分层 | `get_architecture` |
+| 批量 grep 搜索 | `search_code`（比 grep 更紧凑，支持语义上下文） |
+| 追踪变更影响 | `detect_changes` |
+
+**避免**：直接用 `Read` 读大文件全文、用 `Bash` 跑 grep/find/awk。先用 MCP 定位到具体函数/行，再按需局部读取。
+
 ## Project
 
 LLM tool-calling 零售客服 agent。用户通过自然语言查询/修改订单——查状态、取消、退货、换货、改地址、改支付方式、改配送方式、转人工。所有写操作经 7 层 Guard 校验后才执行。
