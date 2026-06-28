@@ -1,0 +1,11 @@
+{
+    "schema_version": 1,
+    "commit": "7eebf0d56c10839be50e89272b7ab020419b01cb",
+    "indexed_at": "2026-06-28T01:40:31Z",
+    "project": "Users-theyang-Documents-ai-retail-customer-support-agent",
+    "nodes": 3023,
+    "edges": 10402,
+    "original_size": 8454144,
+    "compressed_size": 1627800,
+    "compression_level": 9
+}
